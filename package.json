@@ -1,0 +1,73 @@
+{
+  "name": "solmate",
+  "version": "1.0.0",
+  "description": "Solmate - Your chaotic-good Solana AI companion with 3D VRM avatar, chat, TTS, and live blockchain data",
+  "private": true,
+  "type": "commonjs",
+  "author": "DirkDigglerTown",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DirkDigglerTown/Solmate.git"
+  },
+  "keywords": [
+    "solana",
+    "ai",
+    "chat",
+    "vrm",
+    "3d",
+    "avatar",
+    "tts",
+    "blockchain",
+    "crypto",
+    "web3"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "vercel dev --listen 3000",
+    "build": "echo 'No build step required for serverless'",
+    "deploy": "vercel --prod",
+    "deploy:preview": "vercel",
+    "verify": "node web/verify-deploy.js",
+    "test:api": "node scripts/test-api.js",
+    "lint": "eslint web/api/*.js",
+    "clean": "rm -rf .vercel node_modules",
+    "env:pull": "vercel env pull .env.local",
+    "env:add": "vercel env add"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "vercel": "^33.0.0",
+    "eslint": "^8.56.0",
+    "@vercel/node": "^3.0.0"
+  },
+  "vercel": {
+    "framework": null,
+    "outputDirectory": "web",
+    "buildCommand": "",
+    "devCommand": "vercel dev --listen 3000",
+    "installCommand": "npm install",
+    "regions": ["iad1"],
+    "functions": {
+      "web/api/*.js": {
+        "maxDuration": 30,
+        "memory": 1024
+      }
+    }
+  },
+  "browserslist": [
+    "last 2 Chrome versions",
+    "last 2 Firefox versions",
+    "last 2 Safari versions",
+    "last 2 Edge versions"
+  ],
+  "volta": {
+    "node": "20.11.0",
+    "npm": "10.2.4"
+  }
+}

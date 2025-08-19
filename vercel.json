@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "web/api/**/*.js", "use": "@vercel/node" },
+    { 
+      "src": "web/**/*",
+      "use": "@vercel/static",
+      "config": {
+        "maxLambdaSize": "50mb"  // Increased for large static files
+      }
+    }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/web/api/$1.js" },
+    { "source": "/manifest.webmanifest", "destination": "/web/manifest.webmanifest" },
+    { "source": "/(.*)", "destination": "/web/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
+      ]
+    },
+    {
+      "source": "/assets/avatar/solmate.vrm",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/octet-stream"
+        }
+      ]
+    }
+  ]
+}
