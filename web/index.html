@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Solmate — Solana AI Companion</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Your chaotic-good Solana bestie. Chats, speaks, shows live SOL price & TPS with a 3D anime VRM avatar." />
+  
+  <!-- Open Graph / Social Media -->
+  <meta property="og:title" content="Solmate — Solana AI Companion" />
+  <meta property="og:description" content="Your chaotic-good Solana bestie with 3D avatar, chat, and live blockchain data." />
+  <meta property="og:image" content="/assets/logo/solmatelogo.png" />
+  <meta property="og:type" content="website" />
+  
+  <!-- PWA + Icons -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/assets/logo/solmatelogo.png" />
+  <link rel="apple-touch-icon" href="/assets/logo/solmatelogo.png" />
+  <meta name="theme-color" content="#0a0e17" />
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="/style.css" />
+  
+  <!-- Content Security Policy for jsDelivr modules and APIs -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src 'self' https://cdn.jsdelivr.net;
+                 connect-src 'self' https://api.mainnet.helius-rpc.com https://mainnet.helius-rpc.com wss://mainnet.helius-rpc.com https://cdn.jsdelivr.net https://lite-api.jup.ag;
+                 img-src 'self' data: blob:;
+                 style-src 'self' 'unsafe-inline';
+                 font-src 'self' data:;
+                 media-src 'self' blob:;
+                 object-src 'none';
+                 frame-ancestors 'none'">
+</head>
+<body>
+  <div id="app">
+    <!-- Top HUD Bar -->
+    <div class="hud">
+      <div class="left">
+        <button id="themeToggle" class="icon-btn" aria-label="Toggle theme" title="Toggle light/dark theme">🌙</button>
+        <div id="wsStatus" class="pill" title="WebSocket connection status">
+          WS <span id="wsLight">OFF</span>
+        </div>
+      </div>
+      <div class="right">
+        <div id="solPrice" class="pill" title="Current SOL price">SOL —</div>
+        <button id="healthBtn" class="icon-btn" title="System health check">❤️</button>
+      </div>
+    </div>
+
+    <!-- Main Stage for 3D Avatar -->
+    <div class="stage-wrap">
+      <canvas id="vrmCanvas"></canvas>
+      <div id="overlayLogs" class="overlay hidden"></div>
+    </div>
+
+    <!-- Audio VU Meter -->
+    <div class="vu-wrap">
+      <div class="vu"></div>
+    </div>
+
+    <!-- Bottom Chat Dock -->
+    <div class="dock">
+      <form id="chatForm" autocomplete="off">
+        <input 
+          id="prompt" 
+          class="ask" 
+          name="prompt" 
+          placeholder="Ask anything about Solana, crypto, or just vibe..." 
+          aria-label="Chat input"
+          maxlength="500"
+        />
+        <select id="voice" class="sel" aria-label="TTS voice selection" title="Text-to-speech voice">
+          <option value="verse" selected>Verse</option>
+          <option value="alloy">Alloy</option>
+          <option value="aria">Aria</option>
+          <option value="echo">Echo</option>
+          <option value="fable">Fable</option>
+          <option value="onyx">Onyx</option>
+          <option value="nova">Nova</option>
+          <option value="shimmer">Shimmer</option>
+        </select>
+        <button id="sendBtn" class="send" type="submit" aria-label="Send message" title="Send message">▶</button>
+        <button id="clearBtn" class="icon-btn" type="button" aria-label="Clear audio queue" title="Stop all audio">🔇</button>
+      </form>
+    </div>
+
+    <!-- Typing Indicator (hidden by default) -->
+    <div class="typing hidden"></div>
+
+    <!-- Debug Tips (collapsible) -->
+    <details id="debugTips" style="position: fixed; bottom: 10px; right: 10px; font-size: 11px; color: var(--muted); z-index: 30;">
+      <summary style="cursor: pointer; user-select: none;">Debug</summary>
+      <div style="background: var(--pill); padding: 8px; border-radius: 8px; max-width: 300px; margin-top: 4px; border: 1px solid #23324b;">
+        <p style="margin: 4px 0;">• Press <kbd>Ctrl+D</kbd> to toggle logs overlay</p>
+        <p style="margin: 4px 0;">• Check browser console for detailed errors</p>
+        <p style="margin: 4px 0;">• VRM file should be ~21MB</p>
+        <p style="margin: 4px 0;">• Verify <code>/api/health</code> endpoint</p>
+        <p style="margin: 4px 0;">• OpenAI key must be set in Vercel env</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- Main Script (ES Module) -->
+  <script type="module" src="/script.js"></script>
+  
+  <!-- Fallback for browsers without module support -->
+  <script nomodule>
+    document.getElementById('app').innerHTML = '<div style="padding: 20px; text-align: center;"><h2>Browser Not Supported</h2><p>Please use a modern browser that supports ES Modules.</p></div>';
+  </script>
+</body>
+</html>

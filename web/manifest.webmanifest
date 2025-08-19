@@ -1,0 +1,21 @@
+{
+  "name": "Solmate — Solana AI Companion",
+  "short_name": "Solmate",
+  "description": "Your schizo‑energy Solana bestie. Chats, speaks, and tracks on‑chain vibes. Not financial advice.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0e17",
+  "theme_color": "#0a0e17",
+  "dir": "ltr",
+  "lang": "en",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "assets/logo/solmatelogo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
