@@ -1,29 +1,41 @@
 {
   "version": 2,
-  "rewrites": [],
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/web/api/$1.js"
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "destination": "/web/manifest.webmanifest"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/web/$1"
+    }
+  ],
   "headers": [
     {
-      "source": "/assets/:path*",
+      "source": "/assets/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=604800" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
       ]
     },
     {
       "source": "/assets/avatar/solmate.vrm",
       "headers": [
-        { "key": "Content-Type", "value": "application/octet-stream" },
-        { "key": "Cache-Control", "value": "public, max-age=604800" }
-      ]
-    },
-    {
-      "source": "/api/:path*",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store" }
+        {
+          "key": "Content-Type",
+          "value": "application/octet-stream"
+        }
       ]
     }
   ],
   "functions": {
-    "api/**/*.js": {
+    "web/api/**/*.js": {
       "memory": 1024,
       "maxDuration": 30
     }
