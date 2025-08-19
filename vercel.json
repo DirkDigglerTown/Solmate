@@ -1,19 +1,28 @@
 {
   "version": 2,
   "builds": [
-    { "src": "web/api/**/*.js", "use": "@vercel/node" },
-    { 
+    {
+      "src": "web/api/**/*.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "web/**/*",
-      "use": "@vercel/static",
-      "config": {
-        "maxLambdaSize": "50mb"  // Increased for large static files
-      }
+      "use": "@vercel/static"
     }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/web/api/$1.js" },
-    { "source": "/manifest.webmanifest", "destination": "/web/manifest.webmanifest" },
-    { "source": "/(.*)", "destination": "/web/$1" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/web/api/$1.js"
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "destination": "/web/manifest.webmanifest"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/web/$1"
+    }
   ],
   "headers": [
     {
@@ -34,5 +43,11 @@
         }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "web/api/**/*.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  }
 }
