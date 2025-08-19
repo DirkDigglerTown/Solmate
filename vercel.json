@@ -1,12 +1,9 @@
 {
   "version": 2,
-
-  // No rewrites needed when root is "web"
   "rewrites": [],
-
   "headers": [
     {
-      "source": "/assets/(.*)",
+      "source": "/assets/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=604800" }
       ]
@@ -19,13 +16,12 @@
       ]
     },
     {
-      "source": "/api/(.*)",
+      "source": "/api/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "no-store" }
       ]
     }
   ],
-
   "functions": {
     "api/**/*.js": {
       "memory": 1024,
