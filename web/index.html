@@ -11,10 +11,16 @@
 </head>
 <body>
   <header class="hud">
+    <div class="left">
+      <button id="themeToggle">🌙</button>
+      <div class="pill ws" id="wsLight">
       </div>
     </div>
     <div class="pill sol" id="solPrice">
-      SOL â€”
+      SOL —
+    </div>
+    <div class="pill tps" id="networkTPS">
+      ❤️
     </div>
   </header>
   <canvas id="vrmCanvas"></canvas>
@@ -31,8 +37,8 @@
         <option value="nova">Nova</option>
         <option value="shimmer">Shimmer</option>
       </select>
-      <button id="sendBtn" class="send icon-btn">â–¶</button>
-      <button id="clearBtn" class="send icon-btn">ðŸ”‡</button>
+      <button id="sendBtn" class="send icon-btn">▶</button>
+      <button id="clearBtn" class="send icon-btn">🔇</button>
     </form>
   </div>
   <div id="debugOverlay" class="overlay hidden">
