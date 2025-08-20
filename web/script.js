@@ -40,17 +40,34 @@ function log(msg, data = null) {
   }
 }
 
-// ===== THREE.JS SETUP =====
+// ===== THREE.JS SETUP (FIXED) =====
 async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // Import Three.js and VRM modules from jsDelivr
-    THREE = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
+    // FIXED: Load Three.js via script tags instead of ES6 imports
+    if (!window.THREE) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
+      THREE = window.THREE;
+    }
     
-    const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
+    // Load GLTFLoader
+    if (!window.GLTFLoader) {
+      await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
+      GLTFLoader = THREE.GLTFLoader;
+    }
     
-    const { VRMLoaderPlugin, VRM } = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
+    // Load VRM (try alternative approach)
+    if (!window.VRM) {
+      try {
+        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.js');
+        VRM = window.VRM;
+        VRMLoaderPlugin = window.VRMLoaderPlugin;
+      } catch (vrmError) {
+        log('VRM loader failed, continuing without VRM', vrmError);
+        // We'll handle this fallback later
+      }
+    }
     
     log('Three.js modules loaded');
     
@@ -65,6 +82,10 @@ async function initThree() {
     
     // Setup renderer
     const canvas = document.getElementById('vrmCanvas');
+    if (!canvas) {
+      throw new Error('Canvas element #vrmCanvas not found');
+    }
+    
     renderer = new THREE.WebGLRenderer({ 
       canvas, 
       antialias: true,
@@ -75,8 +96,8 @@ async function initThree() {
     
     // Handle different Three.js versions
     if (renderer.outputColorSpace !== undefined) {
-      renderer.outputColorSpace = 'srgb';
-    } else {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    } else if (renderer.outputEncoding !== undefined) {
       renderer.outputEncoding = THREE.sRGBEncoding;
     }
     
@@ -91,146 +112,294 @@ async function initThree() {
     // Clock and mixer for animations
     clock = new THREE.Clock();
     
-    // Load VRM with improved error handling
-    await loadVRM(VRM_PATH);
+    // Try to load VRM, fallback if it fails
+    try {
+      await loadVRM(VRM_PATH);
+    } catch (vrmError) {
+      log('VRM loading failed, using fallback', vrmError);
+      await createFallbackAvatar();
+    }
     
     // Start animation loop
     animate();
+    
+    log('Three.js initialized successfully');
+    
   } catch (err) {
     log('Three.js init failed', err);
-    alert('Failed to load 3D engine. Check console for details.');
+    // Create a simple fallback display
+    createSimpleFallback();
   }
 }
 
-// ===== VRM LOADING WITH IMPROVED FALLBACK (BLOCKER FIX) =====
+// ===== UTILITY: LOAD SCRIPT =====
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    // Check if script already exists
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
+    
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+// ===== CREATE SIMPLE FALLBACK =====
+function createSimpleFallback() {
+  const canvas = document.getElementById('vrmCanvas');
+  if (canvas) {
+    canvas.style.display = 'none';
+  }
+  
+  const fallback = document.createElement('div');
+  fallback.style.cssText = `
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    font-family: Arial, sans-serif;
+  `;
+  fallback.innerHTML = `
+    <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
+    <div style="margin-top: 20px;">
+      <h2>Solmate</h2>
+      <p>Audio-only mode active</p>
+    </div>
+  `;
+  document.body.appendChild(fallback);
+}
+
+// ===== CREATE FALLBACK AVATAR =====
+async function createFallbackAvatar() {
+  // Create a simple geometric avatar as fallback
+  const geometry = new THREE.SphereGeometry(0.3, 32, 32);
+  const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
+  const avatar = new THREE.Mesh(geometry, material);
+  avatar.position.set(0, 0.5, 0);
+  scene.add(avatar);
+  
+  // Add simple animation
+  function animateFallback() {
+    avatar.rotation.y += 0.01;
+    requestAnimationFrame(animateFallback);
+  }
+  animateFallback();
+  
+  log('Fallback avatar created');
+}
+
+// ===== VRM LOADING WITH IMPROVED FALLBACK =====
 async function loadVRM(url, retryCount = 0) {
   try {
     log(`Loading VRM (attempt ${retryCount + 1})...`);
     
+    if (!GLTFLoader || !VRMLoaderPlugin) {
+      throw new Error('VRM dependencies not loaded');
+    }
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ASSET_LOAD_TIMEOUT);
     
-    const loader = new GLTFLoader();
+    // Check if VRM file exists first
+    const checkResponse = await fetch(url, { method: 'HEAD' });
+    if (!checkResponse.ok) {
+      throw new Error(`VRM file not found: ${checkResponse.status}`);
+    }
+    
+    const loader = new THREE.GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
     
-    const gltf = await loader.loadAsync(url, (progress) => {
-      // Show loading progress to user
-      const percent = Math.round((progress.loaded / progress.total) * 100);
-      document.getElementById('loadingStatus') ? document.getElementById('loadingStatus').textContent = `Loading avatar: ${percent}%` : null;
-    }, undefined, undefined, controller.signal);
+    const gltf = await new Promise((resolve, reject) => {
+      loader.load(
+        url,
+        resolve,
+        (progress) => {
+          const percent = Math.round((progress.loaded / progress.total) * 100);
+          const statusEl = document.getElementById('loadingStatus');
+          if (statusEl) statusEl.textContent = `Loading avatar: ${percent}%`;
+        },
+        reject
+      );
+    });
     
     clearTimeout(timeoutId);
+    
+    if (!gltf.userData.vrm) {
+      throw new Error('No VRM data found in file');
+    }
     
     currentVRM = gltf.userData.vrm;
     currentVRM.scene.position.y = -1;
     scene.add(currentVRM.scene);
     
-    // Check file size as sanity
-    if (gltf.parser.json?.extensions?.VRM?.meta?.version !== '1.0') {
-      throw new Error('Invalid VRM format');
-    }
-    
     mixer = new THREE.AnimationMixer(currentVRM.scene);
     
-    // Idle animation
-    const idleClip = THREE.AnimationClip.createFromMorphTargetSequence(
-      'idle',
-      currentVRM.expressionManager.morphTargetDictionary,
-      30
-    );
-    mixer.clipAction(idleClip).play();
-    
     log('VRM loaded successfully');
+    
   } catch (err) {
     if (retryCount < VRM_MAX_RETRIES) {
-      log('VRM load retrying...', err);
+      log(`VRM load retry ${retryCount + 1}...`, err);
+      await new Promise(resolve => setTimeout(resolve, 1000));
       return loadVRM(url, retryCount + 1);
     }
-    log('VRM load failed', err);
-    // Fallback to static image
-    const fallbackImg = document.createElement('img');
-    fallbackImg.src = '/assets/logo/solmatelogo.png'; // Use logo as fallback
-    fallbackImg.style.position = 'absolute';
-    fallbackImg.style.top = '50%';
-    fallbackImg.style.left = '50%';
-    fallbackImg.style.transform = 'translate(-50%, -50%)';
-    fallbackImg.style.width = '200px';
-    document.body.appendChild(fallbackImg);
-    alert('Avatar failed to load. Using fallback image. Check network or deployment.');
+    
+    log('VRM load failed completely', err);
+    throw err; // Re-throw to trigger fallback
   }
 }
 
 // ===== ANIMATION LOOP =====
 function animate() {
   requestAnimationFrame(animate);
+  
+  if (!renderer || !scene || !camera) return;
+  
   const delta = clock.getDelta();
   if (mixer) mixer.update(delta);
   if (currentVRM) currentVRM.update(delta);
+  
   renderer.render(scene, camera);
 }
 
 // ===== RANDOM BLINK =====
 function blink() {
   if (!currentVRM) return;
-  currentVRM.expressionManager.setValue('blink', 1);
-  setTimeout(() => {
-    currentVRM.expressionManager.setValue('blink', 0);
-    setTimeout(blink, Math.random() * 4000 + 2000);
-  }, 300);
+  try {
+    currentVRM.expressionManager.setValue('blink', 1);
+    setTimeout(() => {
+      if (currentVRM) currentVRM.expressionManager.setValue('blink', 0);
+      setTimeout(blink, Math.random() * 4000 + 2000);
+    }, 300);
+  } catch (err) {
+    log('Blink animation failed', err);
+  }
 }
 
 // ===== SET EXPRESSION =====
 function setExpression(name, value) {
-  if (currentVRM) currentVRM.expressionManager.setValue(name, value);
+  if (currentVRM && currentVRM.expressionManager) {
+    try {
+      currentVRM.expressionManager.setValue(name, value);
+    } catch (err) {
+      log('Expression failed', err);
+    }
+  }
 }
 
 // ===== WEBSOCKET FOR SOLANA DATA =====
 function connectWebSocket() {
-  ws = new WebSocket(HELIUS_WS);
+  if (ws) {
+    ws.close();
+  }
   
-  ws.onopen = () => {
-    log('WebSocket connected');
-    document.getElementById('wsLight')?.classList.add('online');
-  };
-  
-  ws.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    // Parse Solana data (e.g., TPS, price if available)
-    updateTPS(data.tps); // Example
-  };
-  
-  ws.onclose = () => {
-    log('WebSocket closed, reconnecting...');
-    document.getElementById('wsLight')?.classList.remove('online');
-    wsReconnectTimer = setTimeout(connectWebSocket, 5000);
-  };
-  
-  ws.onerror = (err) => log('WebSocket error', err);
-}
-
-// ===== FETCH PRICE (FALLBACK) =====
-async function fetchPrice() {
   try {
-    const res = await fetch('/api/price?ids=' + SOL_MINT);
-    const data = await res.json();
-    const solPrice = document.getElementById('solPrice');
-    if (solPrice && data.data && data.data[SOL_MINT] && data.data[SOL_MINT].price) {
-      solPrice.textContent = `SOL — $${data.data[SOL_MINT].price.toFixed(2)}`;
-    }
+    ws = new WebSocket(HELIUS_WS);
+    
+    ws.onopen = () => {
+      log('WebSocket connected');
+      const wsLight = document.getElementById('wsLight');
+      if (wsLight) wsLight.classList.add('online');
+    };
+    
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.tps) updateTPS(data.tps);
+      } catch (err) {
+        log('WebSocket message parse error', err);
+      }
+    };
+    
+    ws.onclose = () => {
+      log('WebSocket closed, reconnecting...');
+      const wsLight = document.getElementById('wsLight');
+      if (wsLight) wsLight.classList.remove('online');
+      
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+    };
+    
+    ws.onerror = (err) => log('WebSocket error', err);
+    
   } catch (err) {
-    log('Price fetch failed', err);
+    log('WebSocket connection failed', err);
+    // Fallback to polling
+    if (!tpsUpdateTimer) {
+      tpsUpdateTimer = setInterval(fetchTPS, 10000);
+    }
   }
 }
 
-// ===== FETCH TPS (FALLBACK) =====
+// ===== UPDATE TPS =====
+function updateTPS(tps) {
+  const networkTPS = document.getElementById('networkTPS');
+  if (networkTPS) {
+    networkTPS.textContent = `${tps} TPS`;
+  }
+}
+
+// ===== FETCH PRICE (FIXED) =====
+async function fetchPrice() {
+  try {
+    const res = await fetch(`/api/price?ids=${SOL_MINT}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const data = await res.json();
+    log('Price data received', data);
+    
+    const solPrice = document.getElementById('solPrice');
+    if (solPrice) {
+      if (data.data && data.data[SOL_MINT] && data.data[SOL_MINT].price) {
+        const price = data.data[SOL_MINT].price;
+        solPrice.textContent = `SOL — $${price.toFixed(2)}`;
+        solPrice.style.color = '#00ff88'; // Success color
+      } else if (data.price) {
+        // Alternative response format
+        solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
+        solPrice.style.color = '#00ff88';
+      } else {
+        solPrice.textContent = 'SOL — Price unavailable';
+        solPrice.style.color = '#ff6b6b'; // Error color
+      }
+    } else {
+      log('solPrice element not found in DOM');
+    }
+  } catch (err) {
+    log('Price fetch failed', err);
+    const solPrice = document.getElementById('solPrice');
+    if (solPrice) {
+      solPrice.textContent = 'SOL — Error';
+      solPrice.style.color = '#ff6b6b';
+    }
+  }
+}
+
+// ===== FETCH TPS (FIXED) =====
 async function fetchTPS() {
   try {
     const res = await fetch('/api/tps');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
     const data = await res.json();
-    const networkTPS = document.getElementById('networkTPS');
-    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
+    log('TPS data received', data);
+    
+    if (data.tps) {
+      updateTPS(data.tps);
+    }
   } catch (err) {
     log('TPS fetch failed', err);
+    const networkTPS = document.getElementById('networkTPS');
+    if (networkTPS) {
+      networkTPS.textContent = 'TPS Error';
+      networkTPS.style.color = '#ff6b6b';
+    }
   }
 }
 
@@ -245,59 +414,97 @@ async function sendMessage(text) {
       body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation] })
     });
     
-    if (!res.ok) throw new Error('Chat API failed');
+    if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
     
     const { content } = await res.json();
     conversation.push({ role: 'assistant', content });
     
     // Save chat history
-    localStorage.setItem('solmateConversation', JSON.stringify(conversation));
+    try {
+      localStorage.setItem('solmateConversation', JSON.stringify(conversation));
+    } catch (storageErr) {
+      log('Failed to save conversation', storageErr);
+    }
     
     queueTTS(content);
     return content;
   } catch (err) {
     log('Chat failed', err);
-    alert('Chat error: ' + err.message + '. Try again!');
+    const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
+    alert(errorMsg);
+    return errorMsg;
   }
 }
 
 // ===== QUEUE TTS =====
-function queueTTS(text, voice = 'verse') {
+function queueTTS(text, voice = 'nova') {
   audioQueue.push({ text, voice });
   if (!isPlaying) playNextAudio();
 }
 
-// ===== FALLBACK BROWSER TTS (BLOCKER FIX) =====
+// ===== FALLBACK BROWSER TTS =====
 function fallbackTTS(text, voice) {
-  const utterance = new SpeechSynthesisUtterance(text);
-  const voices = speechSynthesis.getVoices();
-  utterance.voice = voices.find(v => v.name.toLowerCase().includes(voice)) || voices[0];
-  utterance.onend = playNextAudio;
-  speechSynthesis.speak(utterance);
-  // Lip sync simulation
-  setExpression('aa', 0.5); // Example viseme
+  try {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    const selectedVoice = voices.find(v => v.name.toLowerCase().includes(voice.toLowerCase())) || voices[0];
+    if (selectedVoice) utterance.voice = selectedVoice;
+    
+    utterance.onend = () => {
+      isPlaying = false;
+      setExpression('aa', 0); // Close mouth
+      playNextAudio();
+    };
+    
+    utterance.onstart = () => {
+      setExpression('aa', 0.5); // Open mouth for lip sync
+    };
+    
+    speechSynthesis.speak(utterance);
+    isPlaying = true;
+  } catch (err) {
+    log('Fallback TTS failed', err);
+    isPlaying = false;
+    playNextAudio();
+  }
 }
 
 // ===== PLAY AUDIO FROM API =====
 async function playAudio(blob, voice) {
-  isPlaying = true;
-  const audio = new Audio(URL.createObjectURL(blob));
-  audio.onended = () => {
+  try {
+    isPlaying = true;
+    const audio = new Audio(URL.createObjectURL(blob));
+    
+    audio.onended = () => {
+      isPlaying = false;
+      setExpression('aa', 0); // Close mouth
+      playNextAudio();
+    };
+    
+    audio.onerror = (err) => {
+      log('Audio play failed, falling back to browser TTS', err);
+      isPlaying = false;
+      fallbackTTS(audioQueue[0]?.text || '', voice);
+    };
+    
+    // Start lip sync
+    setExpression('aa', 0.8);
+    
+    await audio.play();
+  } catch (err) {
+    log('Audio play error', err);
     isPlaying = false;
-    playNextAudio();
-  };
-  audio.onerror = () => {
-    log('Audio play failed, falling back');
-    fallbackTTS(audioQueue[0].text, voice);
-  };
-  audio.play().catch(err => log('Audio play error', err)); // Handle autoplay error
-  // Lip sync (simplified)
-  setExpression('aa', 0.8); // Adjust based on audio analysis if possible
+    fallbackTTS(audioQueue[0]?.text || '', voice);
+  }
 }
 
 // ===== PLAY NEXT IN QUEUE =====
 async function playNextAudio() {
-  if (audioQueue.length === 0) return;
+  if (audioQueue.length === 0) {
+    isPlaying = false;
+    return;
+  }
+  
   const { text, voice } = audioQueue.shift();
   
   try {
@@ -307,13 +514,17 @@ async function playNextAudio() {
       body: JSON.stringify({ text, voice })
     });
     
-    if (res.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
+    if (!res.ok || res.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
       fallbackTTS(text, voice);
       return;
     }
     
     const blob = await res.blob();
-    playAudio(blob, voice);
+    if (blob.size === 0) {
+      throw new Error('Empty audio response');
+    }
+    
+    await playAudio(blob, voice);
   } catch (err) {
     log('TTS queue failed', err);
     fallbackTTS(text, voice);
@@ -325,6 +536,7 @@ function clearAudioQueue() {
   audioQueue = [];
   speechSynthesis.cancel();
   isPlaying = false;
+  setExpression('aa', 0); // Close mouth
 }
 
 // ===== SETUP UI =====
@@ -332,16 +544,26 @@ function setupUI() {
   // Theme toggle
   const themeBtn = document.getElementById('themeToggle');
   if (themeBtn) {
-    themeBtn.addEventListener('click', () => document.documentElement.classList.toggle('light'));
+    themeBtn.addEventListener('click', () => {
+      document.documentElement.classList.toggle('light');
+    });
   }
   
   // Health button
   const healthBtn = document.getElementById('healthBtn');
   if (healthBtn) {
     healthBtn.addEventListener('click', async () => {
-      const res = await fetch('/api/health');
-      const data = await res.json();
-      alert(`Health: ${data.ok ? 'OK' : 'Failed'}\nOpenAI: ${data.env ? 'Set' : 'Missing'}\nAssets: VRM ${data.assets.vrm ? 'OK' : 'Missing'}, Logo OK`);
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        alert(`Health Check:\n` +
+              `Status: ${data.ok ? 'OK' : 'Failed'}\n` +
+              `OpenAI: ${data.env ? 'Connected' : 'Missing API Key'}\n` +
+              `VRM Avatar: ${currentVRM ? 'Loaded' : 'Failed'}\n` +
+              `Three.js: ${THREE ? 'Loaded' : 'Failed'}`);
+      } catch (err) {
+        alert('Health check failed: ' + err.message);
+      }
     });
   }
   
@@ -350,7 +572,7 @@ function setupUI() {
   const promptInput = document.getElementById('promptInput');
   const sendBtn = document.getElementById('sendBtn');
   
-  if (chatForm) {
+  if (chatForm && promptInput && sendBtn) {
     chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -359,9 +581,14 @@ function setupUI() {
       
       promptInput.value = '';
       sendBtn.disabled = true;
+      sendBtn.textContent = 'Thinking...';
       
-      await sendMessage(text);
-      sendBtn.disabled = false;
+      try {
+        await sendMessage(text);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+      }
     });
   }
   
@@ -390,40 +617,68 @@ function setupUI() {
   });
   
   // Load saved conversation
-  const saved = localStorage.getItem('solmateConversation');
-  if (saved) conversation = JSON.parse(saved);
+  try {
+    const saved = localStorage.getItem('solmateConversation');
+    if (saved) conversation = JSON.parse(saved);
+  } catch (err) {
+    log('Failed to load conversation history', err);
+  }
+  
+  // Enable audio on first interaction (fix autoplay issue)
+  document.addEventListener('click', enableAudio, { once: true });
+  document.addEventListener('keydown', enableAudio, { once: true });
+}
+
+// ===== ENABLE AUDIO =====
+function enableAudio() {
+  // Create a silent audio context to enable audio
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  audioContext.resume();
+  log('Audio context enabled');
 }
 
 // ===== MAIN INIT =====
 async function init() {
   log('Initializing Solmate...');
   
-  // Setup UI
-  setupUI();
-  
-  // Initialize Three.js and load VRM
-  await initThree();
-  
-  // Start animations
-  setTimeout(blink, 2000);
-  
-  // Connect WebSocket
-  connectWebSocket();
-  
-  // Start price updates
-  fetchPrice();
-  priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
-  
-  // Start TPS updates
-  fetchTPS();
-  tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
-  
-  log('Solmate initialized successfully!');
-  
-  // Welcome message
-  setTimeout(() => {
-    queueTTS("Hello, i'm your Solana Solmate. How can I help you?", 'nova');
-  }, 1000);
+  try {
+    // Setup UI first
+    setupUI();
+    
+    // Initialize Three.js and load VRM
+    await initThree();
+    
+    // Start animations
+    setTimeout(() => {
+      blink();
+    }, 2000);
+    
+    // Connect WebSocket
+    connectWebSocket();
+    
+    // Start price updates
+    await fetchPrice();
+    priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
+    
+    // Start TPS updates  
+    await fetchTPS();
+    if (!tpsUpdateTimer) {
+      tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
+    }
+    
+    log('Solmate initialized successfully!');
+    
+    // Welcome message (delay to allow user interaction)
+    setTimeout(() => {
+      queueTTS("Hello, I'm your Solana Solmate. How can I help you today?", 'nova');
+    }, 2000);
+    
+  } catch (err) {
+    log('Initialization failed', err);
+    // Continue with limited functionality
+    setupUI();
+    createSimpleFallback();
+  }
 }
 
 // ===== CLEANUP =====
@@ -432,18 +687,22 @@ window.addEventListener('beforeunload', () => {
   if (ws) ws.close();
   
   // Clear timers
-  clearTimeout(wsReconnectTimer);
-  clearInterval(priceUpdateTimer);
-  clearInterval(tpsUpdateTimer);
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  if (priceUpdateTimer) clearInterval(priceUpdateTimer);
+  if (tpsUpdateTimer) clearInterval(tpsUpdateTimer);
   
   // Clear audio
   clearAudioQueue();
   
   // Dispose Three.js
-  if (renderer) renderer.dispose();
-  if (currentVRM) {
+  if (renderer) {
+    renderer.dispose();
+  }
+  if (currentVRM && scene) {
     scene.remove(currentVRM.scene);
-    VRM.dispose(currentVRM);
+    if (window.VRM && VRM.dispose) {
+      VRM.dispose(currentVRM);
+    }
   }
 });
 
