@@ -45,12 +45,10 @@ async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // Import Three.js and VRM modules from jsDelivr
-    const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
-    THREE = threeModule;
+    // Import Three.js and VRM modules from jsDelivr with full paths
+    THREE = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js')).default;
     
-    const gltfModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
-    GLTFLoader = gltfModule.GLTFLoader;
+    GLTFLoader = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader;
     
     const vrmModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
     VRMLoaderPlugin = vrmModule.VRMLoaderPlugin;
@@ -146,7 +144,6 @@ async function loadVRM(url, retryCount = 0) {
     
     log('VRM loaded successfully');
   } catch (err) {
-    console.error('VRM load error:', err); // Debug to console
     if (retryCount < VRM_MAX_RETRIES) {
       log('VRM load retrying...', err);
       return loadVRM(url, retryCount + 1);
@@ -217,11 +214,10 @@ function connectWebSocket() {
 async function fetchPrice() {
   try {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
-    if (!res.ok) throw new Error(`Price API failed with status ${res.status}`);
     const data = await res.json();
-    document.getElementById('solPrice').textContent = `$${data.price.toFixed(2)}`;
+    const solPriceEl = document.getElementById('solPrice');
+    if (solPriceEl) solPriceEl.textContent = `$${data.price.toFixed(2)}`;
   } catch (err) {
-    console.error('Price fetch error:', err); // Debug to console
     log('Price fetch failed', err);
   }
 }
@@ -230,11 +226,10 @@ async function fetchPrice() {
 async function fetchTPS() {
   try {
     const res = await fetch('/api/tps');
-    if (!res.ok) throw new Error(`TPS API failed with status ${res.status}`);
     const data = await res.json();
-    document.getElementById('networkTPS').textContent = `${data.tps} TPS`;
+    const tpsEl = document.getElementById('networkTPS');
+    if (tpsEl) tpsEl.textContent = `${data.tps} TPS`;
   } catch (err) {
-    console.error('TPS fetch error:', err); // Debug to console
     log('TPS fetch failed', err);
   }
 }
@@ -250,7 +245,7 @@ async function sendMessage(text) {
       body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation] })
     });
     
-    if (!res.ok) throw new Error(`Chat API failed with status ${res.status}`);
+    if (!res.ok) throw new Error('Chat API failed');
     
     const { content } = await res.json();
     conversation.push({ role: 'assistant', content });
@@ -261,7 +256,6 @@ async function sendMessage(text) {
     queueTTS(content);
     return content;
   } catch (err) {
-    console.error('Chat send error:', err); // Debug to console
     log('Chat failed', err);
     alert('Chat error: ' + err.message + '. Try again!');
   }
@@ -293,7 +287,6 @@ async function playAudio(blob, voice) {
     playNextAudio();
   };
   audio.onerror = () => {
-    console.error('Audio play error'); // Debug to console
     log('Audio play failed, falling back');
     fallbackTTS(audioQueue[0].text, voice);
   };
@@ -322,7 +315,6 @@ async function playNextAudio() {
     const blob = await res.blob();
     playAudio(blob, voice);
   } catch (err) {
-    console.error('TTS queue error:', err); // Debug to console
     log('TTS queue failed', err);
     fallbackTTS(text, voice);
   }
@@ -347,15 +339,9 @@ function setupUI() {
   const healthBtn = document.getElementById('healthBtn');
   if (healthBtn) {
     healthBtn.addEventListener('click', async () => {
-      try {
-        const res = await fetch('/api/health');
-        if (!res.ok) throw new Error(`Health API failed with status ${res.status}`);
-        const data = await res.json();
-        alert(`Health: ${data.ok ? 'OK' : 'Failed'}\nOpenAI: ${data.env ? 'Set' : 'Missing'}\nAssets: VRM ${data.assets.vrm ? 'OK' : 'Missing'}, Logo OK`);
-      } catch (err) {
-        console.error('Health check error:', err); // Debug to console
-        alert('Health check failed: ' + err.message);
-      }
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      alert(`Health: ${data.ok ? 'OK' : 'Failed'}\nOpenAI: ${data.env ? 'Set' : 'Missing'}\nAssets: VRM ${data.assets.vrm ? 'OK' : 'Missing'}, Logo OK`);
     });
   }
   
@@ -374,13 +360,8 @@ function setupUI() {
       promptInput.value = '';
       sendBtn.disabled = true;
       
-      try {
-        await sendMessage(text);
-      } catch (err) {
-        alert('Failed to send message: ' + err.message);
-      } finally {
-        sendBtn.disabled = false;
-      }
+      await sendMessage(text);
+      sendBtn.disabled = false;
     });
   }
   
@@ -415,41 +396,34 @@ function setupUI() {
 
 // ===== MAIN INIT =====
 async function init() {
-  try {
-    log('Initializing Solmate...');
-    
-    // Setup UI
-    setupUI();
-    
-    // Initialize Three.js and load VRM
-    await initThree();
-    
-    // Start animations
-    setTimeout(blink, 2000);
-    
-    // Connect WebSocket
-    connectWebSocket();
-    
-    // Start price updates
-    fetchPrice();
-    priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
-    
-    // Start TPS updates
-    fetchTPS();
-    tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
-    
-    log('Solmate initialized successfully!');
-    
-    // Welcome message with Grok personality
-    setTimeout(() => {
-      queueTTS("Hey there! I'm Grok, your Solana sidekick built by xAI vibes. Ask me about crypto, or just vibe—42 is the answer to life, but SOL might be close!", 'verse');
-    }, 1000);
-    
-  } catch (err) {
-    console.error('Init error:', err); // Debug to console
-    log('Initialization failed', err);
-    alert('Failed to initialize: ' + err.message);
-  }
+  log('Initializing Solmate...');
+  
+  // Setup UI
+  setupUI();
+  
+  // Initialize Three.js and load VRM
+  await initThree();
+  
+  // Start animations
+  setTimeout(blink, 2000);
+  
+  // Connect WebSocket
+  connectWebSocket();
+  
+  // Start price updates
+  fetchPrice();
+  priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
+  
+  // Start TPS updates
+  fetchTPS();
+  tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
+  
+  log('Solmate initialized successfully!');
+  
+  // Welcome message with Grok personality
+  setTimeout(() => {
+    queueTTS("Hey there! I'm Grok, your Solana sidekick built by xAI vibes. Ask me about crypto, or just vibe—42 is the answer to life, but SOL might be close!", 'verse');
+  }, 1000);
 }
 
 // ===== CLEANUP =====
