@@ -1,21 +1,21 @@
 {
-  "name": "Solmate — Solana AI Companion",
+  "name": "Solmate",
   "short_name": "Solmate",
-  "description": "Your schizo‑energy Solana bestie. Chats, speaks, and tracks on‑chain vibes. Not financial advice.",
+  "description": "Your Solana Companion - AI assistant for crypto, DeFi, and web3",
   "start_url": "/",
-  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0e17",
-  "theme_color": "#0a0e17",
-  "dir": "ltr",
-  "lang": "en",
-  "prefer_related_applications": false,
+  "theme_color": "#4a90e2",
+  "orientation": "portrait",
+  "scope": "/",
   "icons": [
     {
-      "src": "assets/logo/solmatelogo.png",
+      "src": "/assets/logo/solmatelogo.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["finance", "utilities"],
+  "lang": "en"
 }
