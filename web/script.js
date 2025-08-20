@@ -272,324 +272,496 @@ async function createEmbeddedGLTFLoader() {
   try {
     log('Creating embedded GLTF loader for VRM support...');
     
-    // Create a minimal GLTF loader that can handle basic GLTF/VRM files
-    const GLTFLoaderCode = `
-      THREE.GLTFLoader = function() {
-        this.manager = THREE.DefaultLoadingManager;
-        this.path = '';
-      };
+    // Create a GLTF loader that can handle VRM files
+    window.THREE.GLTFLoader = function() {
+      this.manager = THREE.DefaultLoadingManager;
+      this.path = '';
+    };
+    
+    window.THREE.GLTFLoader.prototype = {
+      constructor: THREE.GLTFLoader,
       
-      THREE.GLTFLoader.prototype = {
-        constructor: THREE.GLTFLoader,
+      load: function(url, onLoad, onProgress, onError) {
+        const scope = this;
+        const loader = new THREE.FileLoader(scope.manager);
+        loader.setPath(scope.path);
+        loader.setResponseType('arraybuffer');
         
-        load: function(url, onLoad, onProgress, onError) {
-          const scope = this;
-          const loader = new THREE.FileLoader(scope.manager);
-          loader.setPath(scope.path);
-          loader.setResponseType('arraybuffer');
+        loader.load(url, function(data) {
+          try {
+            scope.parse(data, onLoad, onError);
+          } catch (e) {
+            if (onError) {
+              onError(e);
+            } else {
+              console.error(e);
+            }
+            scope.manager.itemError(url);
+          }
+        }, onProgress, onError);
+      },
+      
+      setPath: function(path) {
+        this.path = path;
+        return this;
+      },
+      
+      parse: function(data, onLoad, onError) {
+        try {
+          // Enhanced GLTF parsing to extract actual mesh data
+          const gltfData = this.parseGLB(data);
           
-          loader.load(url, function(data) {
-            try {
-              scope.parse(data, onLoad, onError);
-            } catch (e) {
-              if (onError) {
-                onError(e);
-              } else {
-                console.error(e);
-              }
-              scope.manager.itemError(url);
-            }
-          }, onProgress, onError);
-        },
-        
-        setPath: function(path) {
-          this.path = path;
-          return this;
-        },
-        
-        parse: function(data, onLoad, onError) {
-          try {
-            // Enhanced GLTF parsing to extract actual mesh data
-            const gltfData = this.parseGLB(data);
-            
-            if (!gltfData) {
-              throw new Error('Invalid GLTF/GLB file');
-            }
-            
-            // Create scene structure
-            const scene = new THREE.Group();
-            const animations = [];
-            
-            // Try to extract and load actual meshes from the GLTF data
-            if (gltfData.json && gltfData.json.meshes) {
-              log('Found', gltfData.json.meshes.length, 'meshes in VRM file');
-              this.loadActualMeshes(gltfData, scene);
-            } else {
-              log('No mesh data found, creating placeholder character');
-              this.loadMeshes(gltfData, scene);
-            }
-            
-            const result = {
-              scene: scene,
-              scenes: [scene],
-              animations: animations,
-              cameras: [],
-              userData: gltfData.userData || {}
-            };
-            
-            if (onLoad) onLoad(result);
-            
-          } catch (error) {
-            console.error('GLTF parsing error:', error);
-            if (onError) onError(error);
+          if (!gltfData) {
+            throw new Error('Invalid GLTF/GLB file');
           }
-        },
-        
-        parseGLB: function(data) {
-          try {
-            const view = new DataView(data);
-            
-            // Check GLB magic number
-            const magic = view.getUint32(0, true);
-            if (magic !== 0x46546C67) { // 'glTF'
-              console.warn('Not a valid GLB file');
-              return { meshes: [], userData: {} };
-            }
-            
-            const version = view.getUint32(4, true);
-            const length = view.getUint32(8, true);
-            
-            console.log('GLB file detected:', { version, length });
-            
-            // Parse chunks
-            let offset = 12;
-            let jsonChunk = null;
-            let binaryChunk = null;
-            
-            while (offset < length) {
-              const chunkLength = view.getUint32(offset, true);
-              const chunkType = view.getUint32(offset + 4, true);
-              
-              if (chunkType === 0x4E4F534A) { // 'JSON'
-                const jsonBytes = new Uint8Array(data, offset + 8, chunkLength);
-                const jsonString = new TextDecoder().decode(jsonBytes);
-                jsonChunk = JSON.parse(jsonString);
-              } else if (chunkType === 0x004E4942) { // 'BIN\0'
-                binaryChunk = new Uint8Array(data, offset + 8, chunkLength);
-              }
-              
-              offset += 8 + chunkLength;
-            }
-            
-            return {
-              json: jsonChunk,
-              binary: binaryChunk,
-              userData: { 
-                isVRM: true,
-                hasRealData: !!jsonChunk
-              }
-            };
-            
-          } catch (error) {
-            console.error('GLB parsing error:', error);
-            return { meshes: [], userData: {} };
-          }
-        },
-        
-        loadActualMeshes: function(gltfData, scene) {
-          try {
-            log('Attempting to load actual VRM meshes...');
-            
-            const json = gltfData.json;
-            const binary = gltfData.binary;
-            
-            if (!json || !json.meshes) {
-              throw new Error('No mesh data in GLTF JSON');
-            }
-            
-            log('GLTF structure:', {
-              meshes: json.meshes.length,
-              materials: json.materials ? json.materials.length : 0,
-              accessors: json.accessors ? json.accessors.length : 0,
-              bufferViews: json.bufferViews ? json.bufferViews.length : 0
-            });
-            
-            // Create a group for all meshes
-            const characterGroup = new THREE.Group();
-            characterGroup.name = 'VRM_Character_Real';
-            
-            // Process each mesh
-            for (let i = 0; i < json.meshes.length; i++) {
-              const meshData = json.meshes[i];
-              log(`Processing mesh ${i}:`, meshData.name || `Mesh_${i}`);
-              
-              // For each primitive in the mesh
-              for (let j = 0; j < meshData.primitives.length; j++) {
-                const primitive = meshData.primitives[j];
-                
-                try {
-                  const geometry = this.createGeometryFromPrimitive(primitive, json, binary);
-                  const material = this.createMaterialFromPrimitive(primitive, json);
-                  
-                  if (geometry && material) {
-                    const mesh = new THREE.Mesh(geometry, material);
-                    mesh.name = `${meshData.name || 'Mesh'}_${j}`;
-                    characterGroup.add(mesh);
-                    log(`Added mesh: ${mesh.name}`);
-                  }
-                } catch (primitiveError) {
-                  log(`Failed to process primitive ${j} of mesh ${i}:`, primitiveError);
-                }
-              }
-            }
-            
-            // If we successfully created meshes, add them
-            if (characterGroup.children.length > 0) {
-              scene.add(characterGroup);
-              log(`✅ Successfully loaded ${characterGroup.children.length} mesh parts from VRM`);
-            } else {
-              throw new Error('No meshes could be created from VRM data');
-            }
-            
-          } catch (error) {
-            log('Failed to load actual meshes, falling back to placeholder:', error);
+          
+          // Create scene structure
+          const scene = new THREE.Group();
+          const animations = [];
+          
+          // Try to extract and load actual meshes from the GLTF data
+          if (gltfData.json && gltfData.json.meshes) {
+            console.log('Found ' + gltfData.json.meshes.length + ' meshes in VRM file');
+            this.loadActualMeshes(gltfData, scene);
+          } else {
+            console.log('No mesh data found, creating placeholder character');
             this.loadMeshes(gltfData, scene);
           }
-        },
-        
-        createGeometryFromPrimitive: function(primitive, json, binary) {
-          try {
-            const geometry = new THREE.BufferGeometry();
-            
-            // Get position data
-            if (primitive.attributes.POSITION !== undefined) {
-              const positionAccessor = json.accessors[primitive.attributes.POSITION];
-              const positions = this.getAccessorData(positionAccessor, json, binary);
-              if (positions) {
-                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-              }
-            }
-            
-            // Get normal data
-            if (primitive.attributes.NORMAL !== undefined) {
-              const normalAccessor = json.accessors[primitive.attributes.NORMAL];
-              const normals = this.getAccessorData(normalAccessor, json, binary);
-              if (normals) {
-                geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-              }
-            }
-            
-            // Get UV data
-            if (primitive.attributes.TEXCOORD_0 !== undefined) {
-              const uvAccessor = json.accessors[primitive.attributes.TEXCOORD_0];
-              const uvs = this.getAccessorData(uvAccessor, json, binary);
-              if (uvs) {
-                geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-              }
-            }
-            
-            // Get indices
-            if (primitive.indices !== undefined) {
-              const indexAccessor = json.accessors[primitive.indices];
-              const indices = this.getAccessorData(indexAccessor, json, binary);
-              if (indices) {
-                geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-              }
-            }
-            
-            return geometry;
-            
-          } catch (error) {
-            log('Geometry creation failed:', error);
-            return null;
+          
+          const result = {
+            scene: scene,
+            scenes: [scene],
+            animations: animations,
+            cameras: [],
+            userData: gltfData.userData || {}
+          };
+          
+          if (onLoad) onLoad(result);
+          
+        } catch (error) {
+          console.error('GLTF parsing error:', error);
+          if (onError) onError(error);
+        }
+      },
+      
+      parseGLB: function(data) {
+        try {
+          const view = new DataView(data);
+          
+          // Check GLB magic number
+          const magic = view.getUint32(0, true);
+          if (magic !== 0x46546C67) { // 'glTF'
+            console.warn('Not a valid GLB file');
+            return { meshes: [], userData: {} };
           }
-        },
-        
-        createMaterialFromPrimitive: function(primitive, json) {
-          try {
-            if (primitive.material !== undefined && json.materials) {
-              const materialData = json.materials[primitive.material];
+          
+          const version = view.getUint32(4, true);
+          const length = view.getUint32(8, true);
+          
+          console.log('GLB file detected:', { version: version, length: length });
+          
+          // Parse chunks
+          let offset = 12;
+          let jsonChunk = null;
+          let binaryChunk = null;
+          
+          while (offset < length) {
+            const chunkLength = view.getUint32(offset, true);
+            const chunkType = view.getUint32(offset + 4, true);
+            
+            if (chunkType === 0x4E4F534A) { // 'JSON'
+              const jsonBytes = new Uint8Array(data, offset + 8, chunkLength);
+              const jsonString = new TextDecoder().decode(jsonBytes);
+              jsonChunk = JSON.parse(jsonString);
+            } else if (chunkType === 0x004E4942) { // 'BIN\0'
+              binaryChunk = new Uint8Array(data, offset + 8, chunkLength);
+            }
+            
+            offset += 8 + chunkLength;
+          }
+          
+          return {
+            json: jsonChunk,
+            binary: binaryChunk,
+            userData: { 
+              isVRM: true,
+              hasRealData: !!jsonChunk
+            }
+          };
+          
+        } catch (error) {
+          console.error('GLB parsing error:', error);
+          return { meshes: [], userData: {} };
+        }
+      },
+      
+      loadActualMeshes: function(gltfData, scene) {
+        try {
+          console.log('Attempting to load actual VRM meshes...');
+          
+          const json = gltfData.json;
+          const binary = gltfData.binary;
+          
+          if (!json || !json.meshes) {
+            throw new Error('No mesh data in GLTF JSON');
+          }
+          
+          console.log('GLTF structure:', {
+            meshes: json.meshes.length,
+            materials: json.materials ? json.materials.length : 0,
+            accessors: json.accessors ? json.accessors.length : 0,
+            bufferViews: json.bufferViews ? json.bufferViews.length : 0
+          });
+          
+          // Create a group for all meshes
+          const characterGroup = new THREE.Group();
+          characterGroup.name = 'VRM_Character_Real';
+          
+          // Process each mesh
+          for (let i = 0; i < json.meshes.length; i++) {
+            const meshData = json.meshes[i];
+            console.log('Processing mesh ' + i + ': ' + (meshData.name || ('Mesh_' + i)));
+            
+            // For each primitive in the mesh
+            for (let j = 0; j < meshData.primitives.length; j++) {
+              const primitive = meshData.primitives[j];
               
-              // Create a basic material with the right color
-              let color = 0xffffff;
-              if (materialData.pbrMetallicRoughness && materialData.pbrMetallicRoughness.baseColorFactor) {
-                const factor = materialData.pbrMetallicRoughness.baseColorFactor;
-                color = new THREE.Color(factor[0], factor[1], factor[2]);
+              try {
+                const geometry = this.createGeometryFromPrimitive(primitive, json, binary);
+                const material = this.createMaterialFromPrimitive(primitive, json);
+                
+                if (geometry && material) {
+                  const mesh = new THREE.Mesh(geometry, material);
+                  mesh.name = (meshData.name || 'Mesh') + '_' + j;
+                  characterGroup.add(mesh);
+                  console.log('Added mesh: ' + mesh.name);
+                }
+              } catch (primitiveError) {
+                console.log('Failed to process primitive ' + j + ' of mesh ' + i + ':', primitiveError);
               }
-              
-              return new THREE.MeshLambertMaterial({ 
-                color: color,
-                transparent: true,
-                opacity: 0.9
-              });
             }
-            
-            // Default material
-            return new THREE.MeshLambertMaterial({ color: 0xcccccc });
-            
-          } catch (error) {
-            log('Material creation failed:', error);
-            return new THREE.MeshLambertMaterial({ color: 0xcccccc });
           }
-        },
-        
-        getAccessorData: function(accessor, json, binary) {
-          try {
-            if (!accessor || !json.bufferViews || !binary) return null;
+          
+          // If we successfully created meshes, add them
+          if (characterGroup.children.length > 0) {
+            scene.add(characterGroup);
+            console.log('Successfully loaded ' + characterGroup.children.length + ' mesh parts from VRM');
+          } else {
+            throw new Error('No meshes could be created from VRM data');
+          }
+          
+        } catch (error) {
+          console.log('Failed to load actual meshes, falling back to placeholder:', error);
+          this.loadMeshes(gltfData, scene);
+        }
+      },
+      
+      createGeometryFromPrimitive: function(primitive, json, binary) {
+        try {
+          const geometry = new THREE.BufferGeometry();
+          
+          // Get position data
+          if (primitive.attributes.POSITION !== undefined) {
+            const positionAccessor = json.accessors[primitive.attributes.POSITION];
+            const positions = this.getAccessorData(positionAccessor, json, binary);
+            if (positions) {
+              geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            }
+          }
+          
+          // Get normal data
+          if (primitive.attributes.NORMAL !== undefined) {
+            const normalAccessor = json.accessors[primitive.attributes.NORMAL];
+            const normals = this.getAccessorData(normalAccessor, json, binary);
+            if (normals) {
+              geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+            }
+          }
+          
+          // Get UV data
+          if (primitive.attributes.TEXCOORD_0 !== undefined) {
+            const uvAccessor = json.accessors[primitive.attributes.TEXCOORD_0];
+            const uvs = this.getAccessorData(uvAccessor, json, binary);
+            if (uvs) {
+              geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+            }
+          }
+          
+          // Get indices
+          if (primitive.indices !== undefined) {
+            const indexAccessor = json.accessors[primitive.indices];
+            const indices = this.getAccessorData(indexAccessor, json, binary);
+            if (indices) {
+              geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+            }
+          }
+          
+          return geometry;
+          
+        } catch (error) {
+          console.log('Geometry creation failed:', error);
+          return null;
+        }
+      },
+      
+      createMaterialFromPrimitive: function(primitive, json) {
+        try {
+          if (primitive.material !== undefined && json.materials) {
+            const materialData = json.materials[primitive.material];
             
-            const bufferView = json.bufferViews[accessor.bufferView];
-            if (!bufferView) return null;
-            
-            const componentSize = this.getComponentSize(accessor.componentType);
-            const elementSize = this.getElementSize(accessor.type);
-            const totalSize = componentSize * elementSize;
-            
-            const start = (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
-            const length = accessor.count * totalSize;
-            
-            const slice = binary.slice(start, start + length);
-            
-            // Convert to Float32Array for Three.js
-            if (accessor.componentType === 5126) { // FLOAT
-              return new Float32Array(slice.buffer, slice.byteOffset, slice.byteLength / 4);
-            } else if (accessor.componentType === 5123) { // UNSIGNED_SHORT
-              return new Uint16Array(slice.buffer, slice.byteOffset, slice.byteLength / 2);
-            } else if (accessor.componentType === 5125) { // UNSIGNED_INT
-              return new Uint32Array(slice.buffer, slice.byteOffset, slice.byteLength / 4);
+            // Create a basic material with the right color
+            let color = 0xffffff;
+            if (materialData.pbrMetallicRoughness && materialData.pbrMetallicRoughness.baseColorFactor) {
+              const factor = materialData.pbrMetallicRoughness.baseColorFactor;
+              color = new THREE.Color(factor[0], factor[1], factor[2]);
             }
             
+            return new THREE.MeshLambertMaterial({ 
+              color: color,
+              transparent: true,
+              opacity: 0.9
+            });
+          }
+          
+          // Default material
+          return new THREE.MeshLambertMaterial({ color: 0xcccccc });
+          
+        } catch (error) {
+          console.log('Material creation failed:', error);
+          return new THREE.MeshLambertMaterial({ color: 0xcccccc });
+        }
+      },
+      
+      getAccessorData: function(accessor, json, binary) {
+        try {
+          if (!accessor || !json.bufferViews || !binary) return null;
+          
+          const bufferView = json.bufferViews[accessor.bufferView];
+          if (!bufferView) return null;
+          
+          const componentSize = this.getComponentSize(accessor.componentType);
+          const elementSize = this.getElementSize(accessor.type);
+          const totalSize = componentSize * elementSize;
+          
+          const start = (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
+          const length = accessor.count * totalSize;
+          
+          const slice = binary.slice(start, start + length);
+          
+          // Convert to Float32Array for Three.js
+          if (accessor.componentType === 5126) { // FLOAT
+            return new Float32Array(slice.buffer, slice.byteOffset, slice.byteLength / 4);
+          } else if (accessor.componentType === 5123) { // UNSIGNED_SHORT
+            return new Uint16Array(slice.buffer, slice.byteOffset, slice.byteLength / 2);
+          } else if (accessor.componentType === 5125) { // UNSIGNED_INT
+            return new Uint32Array(slice.buffer, slice.byteOffset, slice.byteLength / 4);
+          }
+          
+          return null;
+          
+        } catch (error) {
+          console.log('Accessor data extraction failed:', error);
+          return null;
+        }
+      },
+      
+      getComponentSize: function(componentType) {
+        switch (componentType) {
+          case 5120: return 1; // BYTE
+          case 5121: return 1; // UNSIGNED_BYTE
+          case 5122: return 2; // SHORT
+          case 5123: return 2; // UNSIGNED_SHORT
+          case 5125: return 4; // UNSIGNED_INT
+          case 5126: return 4; // FLOAT
+          default: return 1;
+        }
+      },
+      
+      getElementSize: function(type) {
+        switch (type) {
+          case 'SCALAR': return 1;
+          case 'VEC2': return 2;
+          case 'VEC3': return 3;
+          case 'VEC4': return 4;
+          case 'MAT2': return 4;
+          case 'MAT3': return 9;
+          case 'MAT4': return 16;
+          default: return 1;
+        }
+      },
+      
+      loadMeshes: function(gltfData, scene) {
+        // Create a properly proportioned character using basic geometry
+        const group = new THREE.Group();
+        group.name = 'VRM_Character';
+        
+        // Create a more realistic character scale
+        const scale = 1;
+        
+        // Head (positioned higher)
+        const headGeometry = new THREE.SphereGeometry(0.12 * scale, 16, 16);
+        const headMaterial = new THREE.MeshLambertMaterial({ 
+          color: 0xffdbac,
+          transparent: true,
+          opacity: 0.95
+        });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.y = 1.4 * scale;
+        head.name = 'Head';
+        group.add(head);
+        
+        // Hair (anime style, properly sized)
+        const hairGeometry = new THREE.SphereGeometry(0.14 * scale, 16, 12);
+        const hairMaterial = new THREE.MeshLambertMaterial({ color: 0xcc3333 });
+        const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+        hair.position.y = 1.45 * scale;
+        hair.scale.set(1, 0.8, 1.1);
+        hair.name = 'Hair';
+        group.add(hair);
+        
+        // Neck
+        const neckGeometry = new THREE.CylinderGeometry(0.04 * scale, 0.05 * scale, 0.1 * scale, 8);
+        const neckMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        const neck = new THREE.Mesh(neckGeometry, neckMaterial);
+        neck.position.y = 1.25 * scale;
+        neck.name = 'Neck';
+        group.add(neck);
+        
+        // Torso
+        const torsoGeometry = new THREE.CylinderGeometry(0.12 * scale, 0.15 * scale, 0.4 * scale, 8);
+        const torsoMaterial = new THREE.MeshLambertMaterial({ color: 0x6699ff });
+        const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
+        torso.position.y = 1.0 * scale;
+        torso.name = 'Torso';
+        group.add(torso);
+        
+        // Arms
+        const armGeometry = new THREE.CylinderGeometry(0.03 * scale, 0.04 * scale, 0.3 * scale, 6);
+        const armMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        
+        const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+        leftArm.position.set(-0.18 * scale, 1.05 * scale, 0);
+        leftArm.rotation.z = 0.15;
+        leftArm.name = 'LeftArm';
+        group.add(leftArm);
+        
+        const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+        rightArm.position.set(0.18 * scale, 1.05 * scale, 0);
+        rightArm.rotation.z = -0.15;
+        rightArm.name = 'RightArm';
+        group.add(rightArm);
+        
+        // Waist
+        const waistGeometry = new THREE.CylinderGeometry(0.1 * scale, 0.12 * scale, 0.15 * scale, 8);
+        const waistMaterial = new THREE.MeshLambertMaterial({ color: 0x5588dd });
+        const waist = new THREE.Mesh(waistGeometry, waistMaterial);
+        waist.position.y = 0.7 * scale;
+        waist.name = 'Waist';
+        group.add(waist);
+        
+        // Legs
+        const legGeometry = new THREE.CylinderGeometry(0.05 * scale, 0.06 * scale, 0.5 * scale, 6);
+        const legMaterial = new THREE.MeshLambertMaterial({ color: 0x4466aa });
+        
+        const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+        leftLeg.position.set(-0.07 * scale, 0.35 * scale, 0);
+        leftLeg.name = 'LeftLeg';
+        group.add(leftLeg);
+        
+        const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+        rightLeg.position.set(0.07 * scale, 0.35 * scale, 0);
+        rightLeg.name = 'RightLeg';
+        group.add(rightLeg);
+        
+        // Feet
+        const footGeometry = new THREE.BoxGeometry(0.08 * scale, 0.04 * scale, 0.12 * scale);
+        const footMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        
+        const leftFoot = new THREE.Mesh(footGeometry, footMaterial);
+        leftFoot.position.set(-0.07 * scale, 0.08 * scale, 0.02 * scale);
+        leftFoot.name = 'LeftFoot';
+        group.add(leftFoot);
+        
+        const rightFoot = new THREE.Mesh(footGeometry, footMaterial);
+        rightFoot.position.set(0.07 * scale, 0.08 * scale, 0.02 * scale);
+        rightFoot.name = 'RightFoot';
+        group.add(rightFoot);
+        
+        // Eyes
+        const eyeGeometry = new THREE.SphereGeometry(0.015 * scale, 8, 8);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(-0.04 * scale, 1.42 * scale, 0.1 * scale);
+        group.add(leftEye);
+        
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(0.04 * scale, 1.42 * scale, 0.1 * scale);
+        group.add(rightEye);
+        
+        // Position the entire character properly
+        group.position.y = -0.1; // Slight offset so feet are near ground
+        
+        scene.add(group);
+        
+        console.log('VRM-style character mesh created from embedded loader');
+        console.log('Character height: ' + (1.5 * scale) + ', Character positioned at y: ' + group.position.y);
+      }
+    };
+    
+    // Verify it was created
+    if (THREE.GLTFLoader) {
+      log('✅ Embedded GLTF loader created successfully');
+      
+      // Test the loader
+      const testLoader = new THREE.GLTFLoader();
+      if (testLoader && typeof testLoader.load === 'function') {
+        log('✅ Embedded GLTF loader is functional');
+        return true;
+      } else {
+        throw new Error('Embedded GLTF loader not functional');
+      }
+    } else {
+      throw new Error('Failed to create embedded GLTF loader');
+    }
+    
+  } catch (err) {
+    log('❌ Failed to create embedded GLTF loader', err);
+    throw err;
+  }
+}
+                        
             return null;
             
           } catch (error) {
-            log('Accessor data extraction failed:', error);
+            console.log('Accessor data extraction failed:', error);
             return null;
           }
-        },
-        
-        getComponentSize: function(componentType) {
-          switch (componentType) {
-            case 5120: return 1; // BYTE
-            case 5121: return 1; // UNSIGNED_BYTE
-            case 5122: return 2; // SHORT
-            case 5123: return 2; // UNSIGNED_SHORT
-            case 5125: return 4; // UNSIGNED_INT
-            case 5126: return 4; // FLOAT
-            default: return 1;
-          }
-        },
-        
-        getElementSize: function(type) {
-          switch (type) {
-            case 'SCALAR': return 1;
-            case 'VEC2': return 2;
-            case 'VEC3': return 3;
-            case 'VEC4': return 4;
-            case 'MAT2': return 4;
-            case 'MAT3': return 9;
-            case 'MAT4': return 16;
-            default: return 1;
-          }
-        },
+        }
+      }
+    };
+    
+    // Verify it was created
+    if (THREE.GLTFLoader) {
+      log('✅ Embedded GLTF loader created successfully');
+      
+      // Test the loader
+      const testLoader = new THREE.GLTFLoader();
+      if (testLoader && typeof testLoader.load === 'function') {
+        log('✅ Embedded GLTF loader is functional');
+        return true;
+      } else {
+        throw new Error('Embedded GLTF loader not functional');
+      }
+    } else {
+      throw new Error('Failed to create embedded GLTF loader');
+    }
+    
+  } catch (err) {
+    log('❌ Failed to create embedded GLTF loader', err);
+    throw err;
+  }
+}
         
         loadMeshes: function(gltfData, scene) {
           // Create a properly proportioned character using basic geometry
