@@ -40,7 +40,7 @@ function log(msg, data = null) {
   }
 }
 
-// ===== THREE.JS SETUP (FIXED WITH MULTIPLE CDN FALLBACKS) =====
+// ===== THREE.JS SETUP (NOW WITH VRM LOADING) =====
 async function initThree() {
   try {
     log('=== STARTING THREE.JS INITIALIZATION ===');
@@ -96,8 +96,34 @@ async function initThree() {
       throw new Error(`THREE basic test failed: ${threeError.message}`);
     }
     
-    // STEP 3: Skip GLTF loader for now to get basic scene working
-    log('Skipping GLTF loader for initial testing');
+    // STEP 3: Load GLTFLoader for VRM support
+    if (!THREE.GLTFLoader) {
+      log('Loading GLTF Loader for VRM support...');
+      const gltfSources = [
+        'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+        'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+        'https://threejs.org/examples/js/loaders/GLTFLoader.js'
+      ];
+      
+      let gltfLoaded = false;
+      for (const source of gltfSources) {
+        try {
+          log(`Trying GLTF loader from: ${source}`);
+          await loadScript(source);
+          if (THREE.GLTFLoader) {
+            log('GLTF Loader loaded successfully from:', source);
+            gltfLoaded = true;
+            break;
+          }
+        } catch (gltfError) {
+          log(`GLTF loader failed from ${source}:`, gltfError);
+        }
+      }
+      
+      if (!gltfLoaded) {
+        log('GLTF loader failed from all sources, VRM loading will be disabled');
+      }
+    }
     
     log('=== SETTING UP THREE.JS SCENE ===');
     
@@ -164,7 +190,7 @@ async function initThree() {
     clock = new THREE.Clock();
     log('Clock created');
     
-    // STEP 9: Create immediate fallback
+    // STEP 9: Create immediate fallback (but try VRM first)
     log('Creating fallback avatar...');
     await createFallbackAvatar();
     
@@ -173,6 +199,20 @@ async function initThree() {
     animate();
     
     log('=== THREE.JS INITIALIZATION COMPLETE ===');
+    
+    // STEP 11: Try to load VRM file after scene is ready
+    if (THREE.GLTFLoader) {
+      setTimeout(async () => {
+        try {
+          log('=== ATTEMPTING VRM LOAD ===');
+          await loadVRMFile(VRM_PATH);
+        } catch (vrmError) {
+          log('VRM loading failed, keeping fallback avatar', vrmError);
+        }
+      }, 2000);
+    } else {
+      log('Skipping VRM load - GLTF loader not available');
+    }
     
   } catch (err) {
     log('=== THREE.JS INITIALIZATION FAILED ===', err);
@@ -275,14 +315,11 @@ async function createFallbackAvatar() {
   }
 }
 
-// ===== VRM LOADING WITH IMPROVED FALLBACK =====
-async function loadVRM(url, retryCount = 0) {
+// ===== LOAD VRM FILE (SIMPLIFIED VERSION) =====
+async function loadVRMFile(url, retryCount = 0) {
   try {
-    log(`Loading VRM (attempt ${retryCount + 1}) from: ${url}`);
-    
-    if (!THREE) {
-      throw new Error('Three.js not loaded');
-    }
+    log(`=== LOADING VRM FILE (attempt ${retryCount + 1}) ===`);
+    log('VRM URL:', url);
     
     if (!THREE.GLTFLoader) {
       throw new Error('GLTFLoader not available');
@@ -291,70 +328,96 @@ async function loadVRM(url, retryCount = 0) {
     // Check if VRM file exists first
     log('Checking VRM file availability...');
     const checkResponse = await fetch(url, { method: 'HEAD' });
-    log(`VRM file check response: ${checkResponse.status}`, {
-      ok: checkResponse.ok,
-      headers: Object.fromEntries(checkResponse.headers.entries())
-    });
+    log(`VRM file check: ${checkResponse.status} ${checkResponse.statusText}`);
     
     if (!checkResponse.ok) {
-      throw new Error(`VRM file not accessible: ${checkResponse.status} ${checkResponse.statusText}`);
+      throw new Error(`VRM file not accessible: ${checkResponse.status}`);
     }
     
     const contentLength = checkResponse.headers.get('content-length');
-    log(`VRM file size: ${contentLength ? Math.round(contentLength / 1024 / 1024) + 'MB' : 'unknown'}`);
+    const fileSizeMB = contentLength ? Math.round(contentLength / 1024 / 1024) : 'unknown';
+    log(`VRM file size: ${fileSizeMB}MB`);
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      log('VRM loading timed out');
-    }, ASSET_LOAD_TIMEOUT);
-    
+    // Load as regular GLTF first (simpler than VRM)
+    log('Loading VRM file as GLTF...');
     const loader = new THREE.GLTFLoader();
     
-    // Try to register VRM plugin if available
-    if (window.VRMLoaderPlugin) {
-      log('Registering VRM loader plugin...');
-      loader.register((parser) => new VRMLoaderPlugin(parser));
-    } else {
-      log('VRM plugin not available, loading as regular GLTF');
-    }
-    
-    log('Starting GLTF/VRM loading...');
     const gltf = await new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('VRM loading timeout'));
+      }, ASSET_LOAD_TIMEOUT);
+      
       loader.load(
         url,
         (loadedGltf) => {
-          log('GLTF loaded successfully', {
+          clearTimeout(timeoutId);
+          log('GLTF loaded successfully');
+          log('GLTF info:', {
             scenes: loadedGltf.scenes.length,
             animations: loadedGltf.animations.length,
-            hasVRM: !!loadedGltf.userData.vrm
+            cameras: loadedGltf.cameras.length,
+            userData: Object.keys(loadedGltf.userData || {})
           });
           resolve(loadedGltf);
         },
         (progress) => {
-          const percent = Math.round((progress.loaded / progress.total) * 100);
-          log(`Loading progress: ${percent}%`);
-          const statusEl = document.getElementById('loadingStatus');
-          if (statusEl) statusEl.textContent = `Loading avatar: ${percent}%`;
+          if (progress.total > 0) {
+            const percent = Math.round((progress.loaded / progress.total) * 100);
+            log(`Loading progress: ${percent}%`);
+            const statusEl = document.getElementById('loadingStatus');
+            if (statusEl) statusEl.textContent = `Loading avatar: ${percent}%`;
+          }
         },
         (error) => {
-          log('GLTF loading failed', error);
+          clearTimeout(timeoutId);
+          log('GLTF loading error:', error);
           reject(error);
         }
       );
     });
     
-    clearTimeout(timeoutId);
-    
-    // Remove fallback avatar if it exists
-    const existingFallback = scene.getObjectByName('fallbackAvatar');
-    if (existingFallback) {
-      scene.remove(existingFallback);
+    // Remove the fallback sphere
+    const fallbackAvatar = scene.getObjectByName('fallbackAvatar');
+    if (fallbackAvatar) {
+      log('Removing fallback avatar');
+      scene.remove(fallbackAvatar);
     }
     
-    // Handle VRM vs regular GLTF
-    if (gltf.userData.vrm) {
-      log('VRM data found, using VRM avatar');
+    // Add the loaded model to the scene
+    if (gltf.scene) {
+      log('Adding GLTF scene to Three.js scene');
+      gltf.scene.position.y = -1; // Adjust position
+      gltf.scene.name = 'vrmModel';
+      scene.add(gltf.scene);
+      
+      // Setup animations if available
+      if (gltf.animations.length > 0) {
+        log(`Setting up ${gltf.animations.length} animations`);
+        mixer = new THREE.AnimationMixer(gltf.scene);
+        const action = mixer.clipAction(gltf.animations[0]);
+        action.play();
+      }
+      
+      log('✅ VRM model loaded and added to scene successfully');
+      
+      // Hide loading status
+      const statusEl = document.getElementById('loadingStatus');
+      if (statusEl) statusEl.style.display = 'none';
+      
+    } else {
+      throw new Error('No scene found in GLTF file');
+    }
+    
+  } catch (err) {
+    if (retryCount < VRM_MAX_RETRIES) {
+      log(`VRM load retry ${retryCount + 1} in 3 seconds...`, err);
+      setTimeout(() => loadVRMFile(url, retryCount + 1), 3000);
+    } else {
+      log('❌ VRM loading failed completely', err);
+      throw err;
+    }
+  }
+}');
       currentVRM = gltf.userData.vrm;
       currentVRM.scene.position.y = -1;
       scene.add(currentVRM.scene);
