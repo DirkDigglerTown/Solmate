@@ -1901,3 +1901,242 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
+// ===== ADD THIS TO THE END OF YOUR EXISTING script.js =====
+
+// Replace the existing processAndAddVRM function with enhanced version
+async function processAndAddVRMEnhanced(gltf) {
+  log('🎨 Processing VRM with enhanced textures and animations...');
+  
+  // STEP 1: Apply proper materials and textures
+  gltf.scene.traverse((child) => {
+    if (child.isMesh) {
+      const meshName = child.name.toLowerCase();
+      let newMaterial;
+      
+      // Apply materials based on mesh names
+      if (meshName.includes('hair')) {
+        newMaterial = new THREE.MeshStandardMaterial({
+          color: 0xff69b4,  // Pink hair
+          roughness: 0.3,
+          metalness: 0.1
+        });
+      } else if (meshName.includes('face') || meshName.includes('body') || meshName.includes('skin')) {
+        newMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffdbac,  // Skin tone
+          roughness: 0.6,
+          metalness: 0.0
+        });
+      } else if (meshName.includes('cloth') || meshName.includes('top') || meshName.includes('shirt')) {
+        newMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffffff,  // White clothing
+          roughness: 0.7,
+          metalness: 0.0
+        });
+      } else if (meshName.includes('skirt') || meshName.includes('bottom')) {
+        newMaterial = new THREE.MeshStandardMaterial({
+          color: 0x2c2c2c,  // Dark skirt
+          roughness: 0.5,
+          metalness: 0.1
+        });
+      } else {
+        newMaterial = new THREE.MeshStandardMaterial({
+          color: 0xcccccc,
+          roughness: 0.5,
+          metalness: 0.1
+        });
+      }
+      
+      // Copy existing texture if available
+      if (child.material && child.material.map) {
+        newMaterial.map = child.material.map;
+      }
+      
+      child.material = newMaterial;
+      log(`Applied material to: ${child.name}`);
+    }
+  });
+  
+  // STEP 2: Proper scaling and positioning (keep original logic)
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  
+  let scale = 1.0;
+  if (size.y > 50) {
+    scale = 1.8 / size.y;
+    gltf.scene.scale.setScalar(scale);
+    log(`Applied scaling: ${scale.toFixed(4)}`);
+  }
+  
+  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
+  const scaledSize = scaledBox.getSize(new THREE.Vector3());
+  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  
+  gltf.scene.position.x = -scaledCenter.x;
+  gltf.scene.position.y = -scaledBox.min.y;
+  gltf.scene.position.z = -scaledCenter.z;
+  
+  gltf.scene.name = 'VRM_Model';
+  scene.add(gltf.scene);
+  
+  // STEP 3: Camera positioning
+  const finalHeight = scaledSize.y;
+  const finalWidth = Math.max(scaledSize.x, scaledSize.z);
+  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
+  const lookAtHeight = finalHeight * 0.6;
+  
+  camera.position.set(0, lookAtHeight, cameraDistance);
+  camera.lookAt(0, lookAtHeight, 0);
+  
+  // STEP 4: Add custom animations
+  addVRMIdleAnimations(gltf.scene);
+  
+  // STEP 5: Setup VRM expressions if available
+  if (gltf.userData && gltf.userData.vrm) {
+    currentVRM = gltf.userData.vrm;
+    log('VRM expressions available');
+  }
+  
+  log('✅ Enhanced VRM setup complete!');
+}
+
+// Add idle animations to make the character move
+function addVRMIdleAnimations(vrmScene) {
+  let time = 0;
+  let blinkTimer = 0;
+  
+  function animateVRM() {
+    if (!scene.getObjectByName('VRM_Model')) return;
+    
+    time += 0.016;
+    blinkTimer += 0.016;
+    
+    // Breathing (very subtle)
+    const breathingScale = 1 + Math.sin(time * 2) * 0.005;
+    vrmScene.scale.y = vrmScene.scale.x * breathingScale;
+    
+    // Gentle body sway
+    vrmScene.rotation.y = Math.sin(time * 0.5) * 0.02;
+    
+    // Random head movement
+    vrmScene.traverse((child) => {
+      if (child.name.toLowerCase().includes('head') || child.name.toLowerCase().includes('neck')) {
+        child.rotation.y = Math.sin(time * 0.8) * 0.05;
+        child.rotation.x = Math.sin(time * 0.6) * 0.02;
+      }
+    });
+    
+    // Blinking simulation
+    if (blinkTimer > 3 + Math.random() * 2) {
+      vrmScene.traverse((child) => {
+        if (child.isMesh && child.name.toLowerCase().includes('eye')) {
+          child.scale.y = 0.1;
+          setTimeout(() => {
+            child.scale.y = 1;
+          }, 120);
+        }
+      });
+      blinkTimer = 0;
+    }
+    
+    requestAnimationFrame(animateVRM);
+  }
+  
+  animateVRM();
+  log('🎭 Idle animations started');
+}
+
+// Enhanced lighting for better visibility
+function enhanceSceneLighting() {
+  // Remove existing lights
+  const lightsToRemove = [];
+  scene.traverse((child) => {
+    if (child.isLight) {
+      lightsToRemove.push(child);
+    }
+  });
+  lightsToRemove.forEach(light => scene.remove(light));
+  
+  // Add professional lighting setup
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+  
+  const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  mainLight.position.set(2, 3, 2);
+  scene.add(mainLight);
+  
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+  fillLight.position.set(-1, 1, 1);
+  scene.add(fillLight);
+  
+  const rimLight = new THREE.DirectionalLight(0xaaccff, 0.5);
+  rimLight.position.set(0, 1, -2);
+  scene.add(rimLight);
+  
+  log('💡 Enhanced lighting applied');
+}
+
+// Fix audio autoplay issues
+function fixAudioSystem() {
+  let audioEnabled = false;
+  
+  function enableAudio() {
+    if (!audioEnabled) {
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext.resume();
+        audioEnabled = true;
+        log('🔊 Audio system enabled');
+        
+        // Test TTS
+        setTimeout(() => {
+          queueTTS("Audio is now working! I can speak to you.", 'nova');
+        }, 500);
+      } catch (err) {
+        log('Audio enable failed:', err);
+      }
+    }
+  }
+  
+  // Enable audio on any user interaction
+  ['click', 'keydown', 'touchstart', 'mousedown'].forEach(event => {
+    document.addEventListener(event, enableAudio, { once: true });
+  });
+  
+  // Also enable when send button is clicked
+  const sendBtn = document.getElementById('sendBtn');
+  if (sendBtn) {
+    sendBtn.addEventListener('click', enableAudio);
+  }
+}
+
+// Replace the original processAndAddVRM function
+if (typeof processAndAddVRM !== 'undefined') {
+  window.originalProcessAndAddVRM = processAndAddVRM;
+  window.processAndAddVRM = processAndAddVRMEnhanced;
+}
+
+// Apply enhancements to existing VRM if already loaded
+const existingVRM = scene?.getObjectByName('VRM_Model');
+if (existingVRM) {
+  log('Enhancing existing VRM...');
+  enhanceSceneLighting();
+  addVRMIdleAnimations(existingVRM);
+}
+
+// Fix audio and lighting
+enhanceSceneLighting();
+fixAudioSystem();
+
+// Manual reload function for console
+window.reloadWithEnhancements = function() {
+  forceReloadVRM();
+  setTimeout(() => {
+    enhanceSceneLighting();
+  }, 2000);
+};
+
+console.log('🎨 VRM Enhancements Applied!');
+console.log('🔧 If VRM is still white, run: reloadWithEnhancements()');
+console.log('🔊 Click anywhere to enable audio');
