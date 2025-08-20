@@ -693,6 +693,7 @@ async function createEmbeddedGLTFLoader() {
     throw new Error('Failed to create enhanced GLTF loader');
   }
 }
+
 // ===== ALTERNATIVE VRM LOADING (WITHOUT GLTF LOADER) =====
 async function loadVRMAlternative(url) {
   try {
@@ -816,7 +817,7 @@ async function loadVRMAlternative(url) {
   }
 }
 
-// ===== LOAD VRM FILE (IMPROVED WITH BETTER ERROR HANDLING) =====
+// ===== LOAD VRM FILE (FIXED CAMERA AND SCALING) =====
 async function loadVRMFile(url, retryCount = 0) {
   try {
     log(`=== LOADING VRM FILE (attempt ${retryCount + 1}) ===`);
@@ -904,37 +905,62 @@ async function loadVRMFile(url, retryCount = 0) {
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
       
-      log('Model bounding box:', { size, center });
+      log('Model bounding box:', { 
+        size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+        center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) },
+        boundingBox: {
+          min: { x: box.min.x.toFixed(2), y: box.min.y.toFixed(2), z: box.min.z.toFixed(2) },
+          max: { x: box.max.x.toFixed(2), y: box.max.y.toFixed(2), z: box.max.z.toFixed(2) }
+        }
+      });
       
-      // Scale the model to a reasonable size (about 2 units tall)
-      const maxDimension = Math.max(size.x, size.y, size.z);
-      const targetHeight = 2;
-      const scale = targetHeight / maxDimension;
+      // FIXED SCALING: Check if model needs scaling (VRM models are usually properly sized)
+      let scale = 1.0;
+      if (size.y > 10 || size.y < 0.5) {
+        // Only scale if model is unusually large or small
+        const targetHeight = 1.8;
+        scale = targetHeight / size.y;
+        gltf.scene.scale.setScalar(scale);
+        log('Applied scaling due to unusual size:', scale);
+      } else {
+        log('Using original VRM scale (model is properly sized)');
+      }
       
-      gltf.scene.scale.setScalar(scale);
-      log('Applied scale:', scale);
-      
-      // Position the model so its bottom is at y=0 and it's centered
+      // FIXED POSITIONING: Center the character and put feet on ground
       gltf.scene.position.x = -center.x * scale;
-      gltf.scene.position.y = -box.min.y * scale; // Put bottom at y=0
+      gltf.scene.position.y = -box.min.y * scale; // This puts the bottom at y=0
       gltf.scene.position.z = -center.z * scale;
       
-      gltf.scene.name = 'vrmModel';
+      gltf.scene.name = 'VRM_Model';
       
       // Add to scene
       scene.add(gltf.scene);
       
-      // Adjust camera to look at the character properly
-      const characterHeight = size.y * scale;
-      const lookAtHeight = characterHeight * 0.6; // Look at face/chest area
+      // FIXED CAMERA: Position camera to look at character properly (using actual scaled values)
+      const actualHeight = size.y * scale;
+      const actualWidth = Math.max(size.x, size.z) * scale;
       
-      camera.position.set(0, lookAtHeight, 3);
+      // Position camera based on actual model size
+      const cameraDistance = Math.max(actualHeight * 1.2, actualWidth * 1.5, 2.5);
+      const lookAtHeight = actualHeight * 0.5; // Look at center of character
+      
+      // Set camera position
+      camera.position.set(0, lookAtHeight, cameraDistance);
       camera.lookAt(0, lookAtHeight, 0);
       
-      log('Camera repositioned to:', { 
-        position: camera.position, 
-        lookAt: `(0, ${lookAtHeight}, 0)`,
-        characterHeight 
+      // Update camera controls if they exist
+      if (window.controls && controls.target) {
+        controls.target.set(0, lookAtHeight, 0);
+        controls.update();
+      }
+      
+      log('FIXED Camera positioning:', {
+        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        lookAt: `(0, ${lookAtHeight.toFixed(2)}, 0)`,
+        actualHeight: actualHeight.toFixed(2),
+        cameraDistance: cameraDistance.toFixed(2),
+        originalSize: `${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`,
+        appliedScale: scale.toFixed(3)
       });
       
       // Setup animations if available
@@ -985,6 +1011,35 @@ async function loadVRMFile(url, retryCount = 0) {
       log('❌ VRM loading failed completely after all retries', err);
       throw err;
     }
+  }
+}
+
+// ===== CAMERA RESET FUNCTION =====
+function resetCamera() {
+  // Find the VRM model in the scene
+  const vrmModel = scene.getObjectByName('VRM_Model');
+  
+  if (vrmModel) {
+    // Recalculate bounding box
+    const box = new THREE.Box3().setFromObject(vrmModel);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    
+    const characterHeight = size.y;
+    const characterWidth = Math.max(size.x, size.z);
+    const cameraDistance = Math.max(characterHeight * 1.2, characterWidth * 1.5, 2.5);
+    const lookAtHeight = characterHeight * 0.5;
+    
+    // Smoothly move camera to proper position
+    camera.position.set(0, lookAtHeight, cameraDistance);
+    camera.lookAt(0, lookAtHeight, 0);
+    
+    log('Camera reset to proper VRM viewing position');
+  } else {
+    // Default camera position if no VRM
+    camera.position.set(0, 1.3, 2.5);
+    camera.lookAt(0, 1, 0);
+    log('Camera reset to default position');
   }
 }
 
@@ -1233,9 +1288,9 @@ async function fetchPrice() {
     log('Final price extraction result:', { price, priceSource });
     
     if (price !== null && !isNaN(price) && price > 0) {
-      solPrice.textContent = `SOL — $${price.toFixed(2)}`;
+      solPrice.textContent = `SOL — ${price.toFixed(2)}`;
       solPrice.style.color = '#00ff88'; // Success color
-      log(`✅ SUCCESS: Price updated to $${price.toFixed(2)} (${priceSource})`);
+      log(`✅ SUCCESS: Price updated to ${price.toFixed(2)} (${priceSource})`);
     } else {
       solPrice.textContent = 'SOL — Data parsing error';
       solPrice.style.color = '#ff6b6b'; // Error color
@@ -1433,7 +1488,6 @@ function setupUI() {
     healthBtn.addEventListener('click', async () => {
       try {
         const res = await fetch('/api/health');
-        const data = await res.json();
         alert(`Health Check:\n` +
               `Status: ${data.ok ? 'OK' : 'Failed'}\n` +
               `OpenAI: ${data.env ? 'Connected' : 'Missing API Key'}\n` +
