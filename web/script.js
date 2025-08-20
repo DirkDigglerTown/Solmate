@@ -4,7 +4,7 @@
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = 'https://vrm.dev/vrm/samples/AliciaSolid.vrm'; // Test public anime girl VRM - change back to '/assets/avatar/solmate.vrm' after testing
+const VRM_PATH = 'https://vrm.dev/vrm/samples/AliciaSolid.vrm'; // Sexy anime girl test VRM - change back to '/assets/avatar/solmate.vrm' after
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -216,6 +216,8 @@ async function fetchPrice() {
     const solPrice = document.getElementById('solPrice');
     if (solPrice && data.data && data.data[SOL_MINT] && data.data[SOL_MINT].price) {
       solPrice.textContent = `SOL — $${data.data[SOL_MINT].price.toFixed(2)}`;
+    } else {
+      log('Price data invalid', data);
     }
   } catch (err) {
     log('Price fetch failed', err);
@@ -228,7 +230,7 @@ async function fetchTPS() {
     const res = await fetch('/api/tps');
     const data = await res.json();
     const networkTPS = document.getElementById('networkTPS');
-    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
+    if (networkTPS && data && data.tps) networkTPS.textContent = `${data.tps} TPS`;
   } catch (err) {
     log('TPS fetch failed', err);
   }
@@ -420,7 +422,7 @@ async function init() {
   
   log('Solmate initialized successfully!');
   
-  // Welcome message with Grok personality
+  // Welcome message
   setTimeout(() => {
     queueTTS("Hello, i'm your Solana Solmate. How can I help you?", 'nova');
   }, 1000);
