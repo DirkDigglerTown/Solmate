@@ -10,7 +10,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 // Updated system prompt for Grok-like personality
 const SYSTEM_PROMPT = `
-You are Grok, a helpful and witty AI built by xAI, inspired by the Hitchhiker's Guide to the Galaxy and JARVIS from Iron Man. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice, DYOR.
+You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsumoto from Bleach and Lust from Fullmetal Alchemist. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice.
 `;
 
 // ===== GLOBAL STATE =====
@@ -46,15 +46,11 @@ async function initThree() {
     log('Loading Three.js modules...');
     
     // Import Three.js and VRM modules from jsDelivr
-    const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
-    THREE = threeModule;
+    THREE = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
     
-    const gltfModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
-    GLTFLoader = gltfModule.GLTFLoader;
+    const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
     
-    const vrmModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
-    VRMLoaderPlugin = vrmModule.VRMLoaderPlugin;
-    VRM = vrmModule.VRM;
+    const { VRMLoaderPlugin, VRM } = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
     
     log('Three.js modules loaded');
     
