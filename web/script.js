@@ -24,7 +24,6 @@ let wsReconnectTimer = null;
 let priceUpdateTimer = null;
 let tpsUpdateTimer = null;
 let conversation = [];
-let userInteracted = false; // For audio autoplay policy
 
 // ===== LOGGING =====
 function log(msg, data = null) {
@@ -46,7 +45,7 @@ async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // Import Three.js and VRM modules from jsDelivr with full paths
+    // Import Three.js and VRM modules from jsDelivr
     const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
     THREE = threeModule.default || threeModule;
     
@@ -219,7 +218,7 @@ async function fetchPrice() {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
     const data = await res.json();
     const solPrice = document.getElementById('solPrice');
-    if (solPrice) solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
+    if (solPrice && data && data.price) solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
   } catch (err) {
     log('Price fetch failed', err);
   }
@@ -231,7 +230,7 @@ async function fetchTPS() {
     const res = await fetch('/api/tps');
     const data = await res.json();
     const networkTPS = document.getElementById('networkTPS');
-    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
+    if (networkTPS && data && data.tps) networkTPS.textContent = `${data.tps} TPS`;
   } catch (err) {
     log('TPS fetch failed', err);
   }
