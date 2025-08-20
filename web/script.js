@@ -24,6 +24,7 @@ let wsReconnectTimer = null;
 let priceUpdateTimer = null;
 let tpsUpdateTimer = null;
 let conversation = [];
+let userInteracted = false; // For audio autoplay policy
 
 // ===== LOGGING =====
 function log(msg, data = null) {
@@ -45,7 +46,7 @@ async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // Import Three.js and VRM modules from jsDelivr with full paths
+    // Import Three.js and VRM modules from jsDelivr with full URLs
     THREE = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js')).default;
     
     GLTFLoader = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader;
@@ -215,8 +216,8 @@ async function fetchPrice() {
   try {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
     const data = await res.json();
-    const solPriceEl = document.getElementById('solPrice');
-    if (solPriceEl) solPriceEl.textContent = `$${data.price.toFixed(2)}`;
+    const priceEl = document.getElementById('solPrice');
+    if (priceEl) priceEl.textContent = `SOL — $${data.price.toFixed(2)}`;
   } catch (err) {
     log('Price fetch failed', err);
   }
@@ -264,7 +265,7 @@ async function sendMessage(text) {
 // ===== QUEUE TTS =====
 function queueTTS(text, voice = 'verse') {
   audioQueue.push({ text, voice });
-  if (!isPlaying) playNextAudio();
+  if (!isPlaying && userInteracted) playNextAudio(); // Wait for user interaction
 }
 
 // ===== FALLBACK BROWSER TTS (BLOCKER FIX) =====
@@ -357,6 +358,8 @@ function setupUI() {
       const text = promptInput.value.trim();
       if (!text) return;
       
+      userInteracted = true; // User clicked, allow audio
+      
       promptInput.value = '';
       sendBtn.disabled = true;
       
@@ -392,6 +395,9 @@ function setupUI() {
   // Load saved conversation
   const saved = localStorage.getItem('solmateConversation');
   if (saved) conversation = JSON.parse(saved);
+
+  // User interaction for audio
+  document.addEventListener('click', () => userInteracted = true, { once: true });
 }
 
 // ===== MAIN INIT =====
