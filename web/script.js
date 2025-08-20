@@ -1,5 +1,5 @@
 // web/script.js
-// Clean implementation with VRM Loading, Three.js, Chat, TTS, and UI
+// Clean Solmate implementation - VRM, Chat, TTS, Animation
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
@@ -16,6 +16,8 @@ let THREE, scene, camera, renderer, mixer, clock;
 let currentVRM = null;
 let conversation = [];
 let priceUpdateTimer = null;
+let enhancedTTS = null;
+let vrmAnimator = null;
 
 // ===== LOGGING =====
 function log(msg, data = null) {
@@ -178,7 +180,7 @@ class EnhancedTTSSystem {
   }
   
   startLipSync() {
-    if (window.vrmAnimator) window.vrmAnimator.startTalking();
+    if (vrmAnimator) vrmAnimator.startTalking();
     if (currentVRM && currentVRM.expressionManager) {
       try {
         currentVRM.expressionManager.setValue('aa', 0.8);
@@ -190,7 +192,7 @@ class EnhancedTTSSystem {
   }
   
   stopLipSync() {
-    if (window.vrmAnimator) window.vrmAnimator.stopTalking();
+    if (vrmAnimator) vrmAnimator.stopTalking();
     if (currentVRM && currentVRM.expressionManager) {
       try {
         currentVRM.expressionManager.setValue('aa', 0);
@@ -804,8 +806,8 @@ async function sendMessage(text) {
     enhancedTTS.queue(content, 'nova');
     
     // Set happy expression
-    if (window.vrmAnimator) {
-      window.vrmAnimator.setExpression('happy', 0.8, 3000);
+    if (vrmAnimator) {
+      vrmAnimator.setExpression('happy', 0.8, 3000);
     }
     
     log(`✅ Chat response: "${content.substring(0, 50)}..."`);
@@ -902,37 +904,37 @@ function updateLoadingProgress(stage, percent = null) {
 }
 
 // ===== MANUAL TESTING FUNCTIONS =====
-window.testTTS = function(text = "Hello! I'm Solmate, your Solana companion. This is a test of my voice system!") {
+function testTTS(text = "Hello! I'm Solmate, your Solana companion. This is a test of my voice system!") {
   log('🎤 Testing TTS...');
   enhancedTTS.speak(text);
-};
+}
 
-window.testAnimations = function() {
+function testAnimations() {
   log('🎭 Testing animations...');
-  if (window.vrmAnimator) {
-    window.vrmAnimator.setExpression('happy', 1, 2000);
-    setTimeout(() => window.vrmAnimator.setExpression('surprised', 1, 2000), 2500);
-    setTimeout(() => window.vrmAnimator.setExpression('neutral', 1, 1000), 5000);
+  if (vrmAnimator) {
+    vrmAnimator.setExpression('happy', 1, 2000);
+    setTimeout(() => vrmAnimator.setExpression('surprised', 1, 2000), 2500);
+    setTimeout(() => vrmAnimator.setExpression('neutral', 1, 1000), 5000);
   }
-};
+}
 
-window.fixTPose = function() {
+function fixTPose() {
   log('🔧 Manually fixing T-pose...');
-  if (window.vrmAnimator && window.vrmAnimator.vrmModel) {
-    window.vrmAnimator.fixTPose();
+  if (vrmAnimator && vrmAnimator.vrmModel) {
+    vrmAnimator.fixTPose();
   } else {
     log('❌ No VRM model found');
   }
-};
+}
 
-window.startTalking = function() {
-  if (window.vrmAnimator) {
-    window.vrmAnimator.startTalking();
-    setTimeout(() => window.vrmAnimator.stopTalking(), 3000);
+function startTalking() {
+  if (vrmAnimator) {
+    vrmAnimator.startTalking();
+    setTimeout(() => vrmAnimator.stopTalking(), 3000);
   }
-};
+}
 
-window.patchReloadVRMTextures = function() {
+function patchReloadVRMTextures() {
   log('🔄 Reloading VRM textures...');
   const vrmModel = scene?.getObjectByName('VRM_Model');
   if (!vrmModel) {
@@ -972,9 +974,9 @@ window.patchReloadVRMTextures = function() {
   
   log('✅ VRM texture reload complete!');
   alert('VRM textures reloaded! The character should now have proper colors.');
-};
+}
 
-window.patchDiagnoseVRM = function() {
+function patchDiagnoseVRM() {
   log('🔍 Diagnosing VRM...');
   
   const vrmModel = scene?.getObjectByName('VRM_Model');
@@ -1021,13 +1023,17 @@ window.patchDiagnoseVRM = function() {
     console.log('⚠️ No textures detected - this is why the model appears colored instead of textured');
     console.log('💡 Try running: patchReloadVRMTextures()');
   }
-};
+}
 
 // ===== MAIN INITIALIZATION =====
 async function init() {
   log('=== INITIALIZING SOLMATE ===');
   
   try {
+    // Initialize systems
+    enhancedTTS = new EnhancedTTSSystem();
+    vrmAnimator = new VRMAnimator();
+    
     // Setup UI first
     setupUI();
     
@@ -1073,18 +1079,23 @@ async function init() {
   }
 }
 
-// ===== INITIALIZE SYSTEMS =====
-const enhancedTTS = new EnhancedTTSSystem();
-const vrmAnimator = new VRMAnimator();
+// ===== GLOBAL EXPORTS =====
+// Make functions available globally for testing
+window.testTTS = testTTS;
+window.testAnimations = testAnimations;
+window.fixTPose = fixTPose;
+window.startTalking = startTalking;
+window.patchReloadVRMTextures = patchReloadVRMTextures;
+window.patchDiagnoseVRM = patchDiagnoseVRM;
 
-// Make systems globally available
-window.enhancedTTS = enhancedTTS;
-window.vrmAnimator = vrmAnimator;
+// Make systems available globally
+window.enhancedTTS = () => enhancedTTS;
+window.vrmAnimator = () => vrmAnimator;
 
 // ===== CLEANUP =====
 window.addEventListener('beforeunload', () => {
   if (priceUpdateTimer) clearInterval(priceUpdateTimer);
-  enhancedTTS.clear();
+  if (enhancedTTS) enhancedTTS.clear();
   if (renderer) renderer.dispose();
 });
 
