@@ -46,10 +46,12 @@ async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // Import Three.js and VRM modules from jsDelivr with full URLs
-    THREE = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js')).default;
+    // Import Three.js and VRM modules from jsDelivr with full paths
+    const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
+    THREE = threeModule.default || threeModule;
     
-    GLTFLoader = (await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader;
+    const gltfModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
+    GLTFLoader = gltfModule.GLTFLoader;
     
     const vrmModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
     VRMLoaderPlugin = vrmModule.VRMLoaderPlugin;
@@ -216,8 +218,8 @@ async function fetchPrice() {
   try {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
     const data = await res.json();
-    const priceEl = document.getElementById('solPrice');
-    if (priceEl) priceEl.textContent = `SOL — $${data.price.toFixed(2)}`;
+    const solPrice = document.getElementById('solPrice');
+    if (solPrice) solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
   } catch (err) {
     log('Price fetch failed', err);
   }
@@ -228,8 +230,8 @@ async function fetchTPS() {
   try {
     const res = await fetch('/api/tps');
     const data = await res.json();
-    const tpsEl = document.getElementById('networkTPS');
-    if (tpsEl) tpsEl.textContent = `${data.tps} TPS`;
+    const networkTPS = document.getElementById('networkTPS');
+    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
   } catch (err) {
     log('TPS fetch failed', err);
   }
@@ -265,7 +267,7 @@ async function sendMessage(text) {
 // ===== QUEUE TTS =====
 function queueTTS(text, voice = 'verse') {
   audioQueue.push({ text, voice });
-  if (!isPlaying && userInteracted) playNextAudio(); // Wait for user interaction
+  if (!isPlaying) playNextAudio();
 }
 
 // ===== FALLBACK BROWSER TTS (BLOCKER FIX) =====
@@ -291,7 +293,7 @@ async function playAudio(blob, voice) {
     log('Audio play failed, falling back');
     fallbackTTS(audioQueue[0].text, voice);
   };
-  await audio.play();
+  audio.play().catch(err => log('Audio play error', err)); // Handle autoplay error
   // Lip sync (simplified)
   setExpression('aa', 0.8); // Adjust based on audio analysis if possible
 }
@@ -358,8 +360,6 @@ function setupUI() {
       const text = promptInput.value.trim();
       if (!text) return;
       
-      userInteracted = true; // User clicked, allow audio
-      
       promptInput.value = '';
       sendBtn.disabled = true;
       
@@ -395,9 +395,6 @@ function setupUI() {
   // Load saved conversation
   const saved = localStorage.getItem('solmateConversation');
   if (saved) conversation = JSON.parse(saved);
-
-  // User interaction for audio
-  document.addEventListener('click', () => userInteracted = true, { once: true });
 }
 
 // ===== MAIN INIT =====
