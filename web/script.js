@@ -373,86 +373,121 @@ async function createEmbeddedGLTFLoader() {
         },
         
         loadMeshes: function(gltfData, scene) {
-          // Create a placeholder mesh that looks like a character
+          // Create a properly proportioned character using basic geometry
           const group = new THREE.Group();
           group.name = 'VRM_Character';
           
-          // Create a more detailed character using basic geometry
-          // Head
-          const headGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+          // Create a more realistic character scale
+          const scale = 1;
+          
+          // Head (positioned higher)
+          const headGeometry = new THREE.SphereGeometry(0.12 * scale, 16, 16);
           const headMaterial = new THREE.MeshLambertMaterial({ 
             color: 0xffdbac,
             transparent: true,
-            opacity: 0.9
+            opacity: 0.95
           });
           const head = new THREE.Mesh(headGeometry, headMaterial);
-          head.position.y = 1.6;
+          head.position.y = 1.4 * scale;
           head.name = 'Head';
           group.add(head);
           
-          // Hair (anime style)
-          const hairGeometry = new THREE.SphereGeometry(0.18, 16, 12);
-          const hairMaterial = new THREE.MeshLambertMaterial({ color: 0xff4444 });
+          // Hair (anime style, properly sized)
+          const hairGeometry = new THREE.SphereGeometry(0.14 * scale, 16, 12);
+          const hairMaterial = new THREE.MeshLambertMaterial({ color: 0xcc3333 });
           const hair = new THREE.Mesh(hairGeometry, hairMaterial);
-          hair.position.y = 1.7;
-          hair.scale.set(1, 0.8, 1.2);
+          hair.position.y = 1.45 * scale;
+          hair.scale.set(1, 0.8, 1.1);
           hair.name = 'Hair';
           group.add(hair);
           
-          // Body
-          const bodyGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.6, 8);
-          const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x6699ff });
-          const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-          body.position.y = 1.0;
-          body.name = 'Body';
-          group.add(body);
+          // Neck
+          const neckGeometry = new THREE.CylinderGeometry(0.04 * scale, 0.05 * scale, 0.1 * scale, 8);
+          const neckMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+          const neck = new THREE.Mesh(neckGeometry, neckMaterial);
+          neck.position.y = 1.25 * scale;
+          neck.name = 'Neck';
+          group.add(neck);
+          
+          // Torso
+          const torsoGeometry = new THREE.CylinderGeometry(0.12 * scale, 0.15 * scale, 0.4 * scale, 8);
+          const torsoMaterial = new THREE.MeshLambertMaterial({ color: 0x6699ff });
+          const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
+          torso.position.y = 1.0 * scale;
+          torso.name = 'Torso';
+          group.add(torso);
           
           // Arms
-          const armGeometry = new THREE.CylinderGeometry(0.04, 0.06, 0.4, 6);
+          const armGeometry = new THREE.CylinderGeometry(0.03 * scale, 0.04 * scale, 0.3 * scale, 6);
           const armMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
           
           const leftArm = new THREE.Mesh(armGeometry, armMaterial);
-          leftArm.position.set(-0.25, 1.1, 0);
-          leftArm.rotation.z = 0.2;
+          leftArm.position.set(-0.18 * scale, 1.05 * scale, 0);
+          leftArm.rotation.z = 0.15;
           leftArm.name = 'LeftArm';
           group.add(leftArm);
           
           const rightArm = new THREE.Mesh(armGeometry, armMaterial);
-          rightArm.position.set(0.25, 1.1, 0);
-          rightArm.rotation.z = -0.2;
+          rightArm.position.set(0.18 * scale, 1.05 * scale, 0);
+          rightArm.rotation.z = -0.15;
           rightArm.name = 'RightArm';
           group.add(rightArm);
           
+          // Waist
+          const waistGeometry = new THREE.CylinderGeometry(0.1 * scale, 0.12 * scale, 0.15 * scale, 8);
+          const waistMaterial = new THREE.MeshLambertMaterial({ color: 0x5588dd });
+          const waist = new THREE.Mesh(waistGeometry, waistMaterial);
+          waist.position.y = 0.7 * scale;
+          waist.name = 'Waist';
+          group.add(waist);
+          
           // Legs
-          const legGeometry = new THREE.CylinderGeometry(0.06, 0.08, 0.6, 6);
+          const legGeometry = new THREE.CylinderGeometry(0.05 * scale, 0.06 * scale, 0.5 * scale, 6);
           const legMaterial = new THREE.MeshLambertMaterial({ color: 0x4466aa });
           
           const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-          leftLeg.position.set(-0.1, 0.4, 0);
+          leftLeg.position.set(-0.07 * scale, 0.35 * scale, 0);
           leftLeg.name = 'LeftLeg';
           group.add(leftLeg);
           
           const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
-          rightLeg.position.set(0.1, 0.4, 0);
+          rightLeg.position.set(0.07 * scale, 0.35 * scale, 0);
           rightLeg.name = 'RightLeg';
           group.add(rightLeg);
           
-          // Add some accessories to make it more anime-like
+          // Feet
+          const footGeometry = new THREE.BoxGeometry(0.08 * scale, 0.04 * scale, 0.12 * scale);
+          const footMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+          
+          const leftFoot = new THREE.Mesh(footGeometry, footMaterial);
+          leftFoot.position.set(-0.07 * scale, 0.08 * scale, 0.02 * scale);
+          leftFoot.name = 'LeftFoot';
+          group.add(leftFoot);
+          
+          const rightFoot = new THREE.Mesh(footGeometry, footMaterial);
+          rightFoot.position.set(0.07 * scale, 0.08 * scale, 0.02 * scale);
+          rightFoot.name = 'RightFoot';
+          group.add(rightFoot);
+          
           // Eyes
-          const eyeGeometry = new THREE.SphereGeometry(0.02, 8, 8);
+          const eyeGeometry = new THREE.SphereGeometry(0.015 * scale, 8, 8);
           const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
           
           const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-          leftEye.position.set(-0.05, 1.62, 0.12);
+          leftEye.position.set(-0.04 * scale, 1.42 * scale, 0.1 * scale);
           group.add(leftEye);
           
           const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-          rightEye.position.set(0.05, 1.62, 0.12);
+          rightEye.position.set(0.04 * scale, 1.42 * scale, 0.1 * scale);
           group.add(rightEye);
+          
+          // Position the entire character properly
+          group.position.y = -0.1; // Slight offset so feet are near ground
           
           scene.add(group);
           
           console.log('VRM-style character mesh created from embedded loader');
+          console.log('Character height:', 1.5 * scale, 'Character positioned at y:', group.position.y);
         }
       };
     `;
@@ -688,13 +723,43 @@ async function loadVRMFile(url, retryCount = 0) {
     if (gltf.scene) {
       log('Adding VRM scene to Three.js scene');
       
-      // Scale and position the model appropriately
-      gltf.scene.scale.setScalar(1); // Adjust scale if needed
-      gltf.scene.position.y = -1; // Adjust position
+      // Calculate the bounding box to properly scale and position
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      
+      log('Model bounding box:', { size, center });
+      
+      // Scale the model to a reasonable size (about 2 units tall)
+      const maxDimension = Math.max(size.x, size.y, size.z);
+      const targetHeight = 2;
+      const scale = targetHeight / maxDimension;
+      
+      gltf.scene.scale.setScalar(scale);
+      log('Applied scale:', scale);
+      
+      // Position the model so its bottom is at y=0 and it's centered
+      gltf.scene.position.x = -center.x * scale;
+      gltf.scene.position.y = -box.min.y * scale; // Put bottom at y=0
+      gltf.scene.position.z = -center.z * scale;
+      
       gltf.scene.name = 'vrmModel';
       
       // Add to scene
       scene.add(gltf.scene);
+      
+      // Adjust camera to look at the character properly
+      const characterHeight = size.y * scale;
+      const lookAtHeight = characterHeight * 0.6; // Look at face/chest area
+      
+      camera.position.set(0, lookAtHeight, 3);
+      camera.lookAt(0, lookAtHeight, 0);
+      
+      log('Camera repositioned to:', { 
+        position: camera.position, 
+        lookAt: `(0, ${lookAtHeight}, 0)`,
+        characterHeight 
+      });
       
       // Setup animations if available
       if (gltf.animations && gltf.animations.length > 0) {
@@ -712,13 +777,13 @@ async function loadVRMFile(url, retryCount = 0) {
       
       // Log model details for debugging
       log('VRM model details:', {
-        children: gltf.scene.children.length,
-        position: gltf.scene.position,
-        scale: gltf.scene.scale,
-        boundingBox: new THREE.Box3().setFromObject(gltf.scene)
+        finalPosition: gltf.scene.position,
+        finalScale: gltf.scene.scale,
+        boundingBox: box,
+        children: gltf.scene.children.length
       });
       
-      log('🎉 VRM model loaded and added to scene successfully!');
+      log('🎉 VRM model loaded and positioned successfully!');
       
       // Hide loading status
       const statusEl = document.getElementById('loadingStatus');
