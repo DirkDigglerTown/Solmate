@@ -55,6 +55,10 @@
         {
           "key": "Access-Control-Allow-Origin",
           "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
         }
       ]
     },
@@ -63,7 +67,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:*; connect-src 'self' https://api.openai.com https://mainnet.helius-rpc.com https://lite-api.jup.ag wss://mainnet.helius-rpc.com; frame-ancestors 'self'; media-src 'self' blob:;"
+          "value": "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://threejs.org https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:*; connect-src 'self' https://api.openai.com https://mainnet.helius-rpc.com https://lite-api.jup.ag wss://mainnet.helius-rpc.com; frame-ancestors 'self'; media-src 'self' blob:;"
         }
       ]
     }
