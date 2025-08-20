@@ -127,32 +127,56 @@ async function initThree() {
       throw new Error(`THREE basic test failed: ${threeError.message}`);
     }
     
-    // STEP 3: Load GLTFLoader for VRM support
+    // STEP 3: Load GLTFLoader for VRM support (IMPROVED)
     if (!THREE.GLTFLoader) {
       log('Loading GLTF Loader for VRM support...');
-      const gltfSources = [
-        'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js',
-        'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
-        'https://threejs.org/examples/js/loaders/GLTFLoader.js'
-      ];
       
-      let gltfLoaded = false;
-      for (const source of gltfSources) {
-        try {
-          log(`Trying GLTF loader from: ${source}`);
-          await loadScript(source);
-          if (THREE.GLTFLoader) {
-            log('GLTF Loader loaded successfully from:', source);
-            gltfLoaded = true;
-            break;
+      // Try the module-based approach first (more reliable for r158+)
+      try {
+        log('Attempting ES module import for GLTF loader...');
+        
+        // For Three.js r158+, we need to use ES modules
+        const gltfModule = await import('https://cdn.skypack.dev/three@0.158.0/examples/jsm/loaders/GLTFLoader.js');
+        THREE.GLTFLoader = gltfModule.GLTFLoader;
+        log('GLTF Loader loaded via ES module import');
+        
+      } catch (moduleError) {
+        log('ES module import failed, trying script tags...', moduleError);
+        
+        // Fallback to script tag approach with correct URLs
+        const gltfSources = [
+          // Fixed URLs for Three.js r158 (JSM instead of JS)
+          'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
+          'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
+          // Alternative CDN
+          'https://cdn.skypack.dev/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
+          // Last resort - try older version that might work
+          'https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/loaders/GLTFLoader.js'
+        ];
+        
+        let gltfLoaded = false;
+        for (const source of gltfSources) {
+          try {
+            log(`Trying GLTF loader from: ${source}`);
+            await loadScript(source);
+            
+            // Check multiple possible locations where GLTFLoader might be
+            if (THREE.GLTFLoader || window.GLTFLoader) {
+              THREE.GLTFLoader = THREE.GLTFLoader || window.GLTFLoader;
+              log('GLTF Loader loaded successfully from:', source);
+              gltfLoaded = true;
+              break;
+            } else {
+              log(`Script loaded but GLTFLoader not found from: ${source}`);
+            }
+          } catch (gltfError) {
+            log(`GLTF loader failed from ${source}:`, gltfError);
           }
-        } catch (gltfError) {
-          log(`GLTF loader failed from ${source}:`, gltfError);
         }
-      }
-      
-      if (!gltfLoaded) {
-        log('GLTF loader failed from all sources, VRM loading will be disabled');
+        
+        if (!gltfLoaded) {
+          log('All GLTF sources failed, will try to load VRM as basic mesh');
+        }
       }
     }
     
@@ -232,18 +256,19 @@ async function initThree() {
     log('=== THREE.JS INITIALIZATION COMPLETE ===');
     
     // STEP 11: Try to load VRM file after scene is ready
-    if (THREE.GLTFLoader) {
-      setTimeout(async () => {
-        try {
-          log('=== ATTEMPTING VRM LOAD ===');
+    setTimeout(async () => {
+      try {
+        log('=== ATTEMPTING VRM LOAD ===');
+        if (THREE.GLTFLoader) {
           await loadVRMFile(VRM_PATH);
-        } catch (vrmError) {
-          log('VRM loading failed, keeping fallback avatar', vrmError);
+        } else {
+          log('No GLTF loader available, trying alternative VRM loading...');
+          await loadVRMAlternative(VRM_PATH);
         }
-      }, 2000);
-    } else {
-      log('Skipping VRM load - GLTF loader not available');
-    }
+      } catch (vrmError) {
+        log('VRM loading failed, keeping fallback avatar', vrmError);
+      }
+    }, 2000);
     
   } catch (err) {
     log('=== THREE.JS INITIALIZATION FAILED ===', err);
@@ -257,7 +282,130 @@ async function initThree() {
   }
 }
 
-// ===== LOAD VRM FILE (SIMPLIFIED VERSION) =====
+// ===== ALTERNATIVE VRM LOADING (WITHOUT GLTF LOADER) =====
+async function loadVRMAlternative(url) {
+  try {
+    log('=== ALTERNATIVE VRM LOADING ===');
+    log('Attempting to load VRM without GLTF loader...');
+    
+    // Check if file exists
+    const checkResponse = await fetch(url, { method: 'HEAD' });
+    if (!checkResponse.ok) {
+      throw new Error(`VRM file not accessible: ${checkResponse.status}`);
+    }
+    
+    const fileSizeMB = Math.round((checkResponse.headers.get('content-length') || 0) / 1024 / 1024);
+    log(`VRM file found: ${fileSizeMB}MB`);
+    
+    // Since we can't parse VRM without GLTF loader, create a better placeholder
+    // Remove the basic fallback sphere
+    const fallbackAvatar = scene.getObjectByName('fallbackAvatar');
+    if (fallbackAvatar) {
+      log('Removing basic fallback avatar');
+      scene.remove(fallbackAvatar);
+    }
+    
+    // Create a more sophisticated avatar placeholder
+    log('Creating sophisticated avatar placeholder...');
+    
+    // Create a human-like figure using basic Three.js geometry
+    const avatarGroup = new THREE.Group();
+    avatarGroup.name = 'alternativeAvatar';
+    
+    // Head
+    const headGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+    const headMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Skin tone
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.y = 1.6;
+    avatarGroup.add(head);
+    
+    // Body
+    const bodyGeometry = new THREE.CylinderGeometry(0.2, 0.25, 0.8, 8);
+    const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x4a90e2 }); // Blue outfit
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.position.y = 0.8;
+    avatarGroup.add(body);
+    
+    // Arms
+    const armGeometry = new THREE.CylinderGeometry(0.05, 0.08, 0.6, 6);
+    const armMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+    
+    const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+    leftArm.position.set(-0.35, 0.9, 0);
+    leftArm.rotation.z = 0.3;
+    avatarGroup.add(leftArm);
+    
+    const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+    rightArm.position.set(0.35, 0.9, 0);
+    rightArm.rotation.z = -0.3;
+    avatarGroup.add(rightArm);
+    
+    // Legs
+    const legGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.8, 6);
+    const legMaterial = new THREE.MeshLambertMaterial({ color: 0x2c5aa0 }); // Darker blue
+    
+    const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+    leftLeg.position.set(-0.12, 0.0, 0);
+    avatarGroup.add(leftLeg);
+    
+    const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+    rightLeg.position.set(0.12, 0.0, 0);
+    avatarGroup.add(rightLeg);
+    
+    // Hair (anime-style)
+    const hairGeometry = new THREE.SphereGeometry(0.18, 16, 16);
+    const hairMaterial = new THREE.MeshLambertMaterial({ color: 0xff6b35 }); // Orange hair
+    const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+    hair.position.y = 1.7;
+    hair.scale.set(1, 0.8, 1);
+    avatarGroup.add(hair);
+    
+    // Position the avatar
+    avatarGroup.position.y = -1;
+    
+    // Add to scene
+    scene.add(avatarGroup);
+    
+    // Add simple animation
+    let time = 0;
+    function animateAvatar() {
+      time += 0.02;
+      
+      // Gentle swaying
+      avatarGroup.rotation.y = Math.sin(time * 0.5) * 0.1;
+      
+      // Head movement
+      if (head) {
+        head.rotation.y = Math.sin(time) * 0.1;
+        head.rotation.x = Math.sin(time * 0.7) * 0.05;
+      }
+      
+      // Arm movement
+      if (leftArm) {
+        leftArm.rotation.z = 0.3 + Math.sin(time * 1.2) * 0.1;
+      }
+      if (rightArm) {
+        rightArm.rotation.z = -0.3 + Math.sin(time * 1.5) * 0.1;
+      }
+      
+      requestAnimationFrame(animateAvatar);
+    }
+    animateAvatar();
+    
+    log('✅ Alternative avatar created successfully!');
+    log('This is a placeholder until we can load the actual VRM file');
+    
+    // Hide loading status
+    const statusEl = document.getElementById('loadingStatus');
+    if (statusEl) statusEl.style.display = 'none';
+    
+  } catch (err) {
+    log('❌ Alternative VRM loading failed', err);
+    throw err;
+  }
+}
+
+// ===== LOAD VRM FILE (IMPROVED WITH BETTER ERROR HANDLING) =====
 async function loadVRMFile(url, retryCount = 0) {
   try {
     log(`=== LOADING VRM FILE (attempt ${retryCount + 1}) ===`);
