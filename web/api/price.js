@@ -5,6 +5,7 @@ const { setCors, preflight, rateLimit, logStart, logOk, logWarn, logErr } = requ
 const JUP = "https://lite-api.jup.ag/price/v3";
 
 module.exports = async (req, res) => {
+  console.log('Price API called'); // Runtime log for debugging
   if (preflight(req, res)) return;
   setCors(res, req.headers.origin);
   if (rateLimit(req, res, "price")) return;
