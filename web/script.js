@@ -2946,3 +2946,509 @@ setTimeout(() => {
 console.log('🎨 DIRECT TEXTURE FIX READY!');
 console.log('🔧 Manual command: forceTextureReload()');
 console.log('📝 This fix directly addresses the baked texture issue');
+
+// SCRIPT.JS PATCH - Add this to the end of your script.js file
+// This will override the broken functions with working ones
+
+// ===== OVERRIDE BROKEN TEXTURE SYSTEM =====
+log('🔧 APPLYING SCRIPT.JS PATCH FOR VRM RENDERING...');
+
+// 1. Fix the renderer setup to prevent gray appearance
+function fixRendererSetup() {
+  if (!renderer) return;
+  
+  // Critical renderer settings for VRM
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping; // Disable tone mapping that causes gray
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setClearColor(0x0a0e17, 1.0);
+  
+  log('✅ Renderer fixed for VRM rendering');
+}
+
+// 2. Override the broken processAndAddVRM function
+const originalProcessAndAddVRM = window.processAndAddVRM;
+window.processAndAddVRM = async function(gltf) {
+  log('🎨 PATCHED VRM PROCESSING: Starting...');
+  
+  // Remove any existing models first
+  ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+    const existing = scene.getObjectByName(name);
+    if (existing) {
+      scene.remove(existing);
+      log(`Removed existing ${name}`);
+    }
+  });
+  
+  // Fix renderer first
+  fixRendererSetup();
+  
+  // Apply the comprehensive texture fix
+  await fixVRMTexturesPatch(gltf);
+  
+  // Standard positioning code
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  
+  let scale = 1.0;
+  if (size.y > 50) {
+    scale = 1.8 / size.y;
+    gltf.scene.scale.setScalar(scale);
+  }
+  
+  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
+  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  
+  gltf.scene.position.x = -scaledCenter.x;
+  gltf.scene.position.y = -scaledBox.min.y;
+  gltf.scene.position.z = -scaledCenter.z;
+  
+  gltf.scene.name = 'VRM_Model';
+  scene.add(gltf.scene);
+  
+  // Camera positioning
+  const scaledSize = scaledBox.getSize(new THREE.Vector3());
+  const finalHeight = scaledSize.y;
+  const cameraDistance = Math.max(finalHeight * 1.5, 3.0);
+  const lookAtHeight = finalHeight * 0.6;
+  
+  camera.position.set(0, lookAtHeight, cameraDistance);
+  camera.lookAt(0, lookAtHeight, 0);
+  
+  // Setup animations
+  if (gltf.animations && gltf.animations.length > 0) {
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    const action = mixer.clipAction(gltf.animations[0]);
+    action.play();
+  }
+  
+  if (gltf.userData && gltf.userData.vrm) {
+    currentVRM = gltf.userData.vrm;
+  }
+  
+  log('✅ PATCHED VRM PROCESSING: Complete!');
+};
+
+// 3. Comprehensive texture fix for the patch
+async function fixVRMTexturesPatch(gltf) {
+  log('🔧 PATCH: Fixing VRM textures...');
+  
+  // Method 1: Try to extract textures from the loaded GLTF
+  let hasWorkingTextures = false;
+  
+  gltf.scene.traverse((child) => {
+    if (child.isMesh && child.material) {
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (material.map && material.map.image) {
+        hasWorkingTextures = true;
+      }
+    }
+  });
+  
+  if (hasWorkingTextures) {
+    log('Found working textures, enhancing them...');
+    enhanceExistingTexturesPatch(gltf);
+    return;
+  }
+  
+  // Method 2: Try to extract from GLB binary data
+  try {
+    log('No working textures found, attempting GLB extraction...');
+    const response = await fetch('/assets/avatar/solmate.vrm');
+    const arrayBuffer = await response.arrayBuffer();
+    const extractedTextures = await extractTexturesFromGLBPatch(arrayBuffer);
+    
+    if (extractedTextures.length > 0) {
+      log(`Extracted ${extractedTextures.length} textures, applying them...`);
+      applyExtractedTexturesPatch(gltf, extractedTextures);
+      return;
+    }
+  } catch (err) {
+    log('GLB extraction failed:', err);
+  }
+  
+  // Method 3: Apply enhanced color materials based on VRoid character
+  log('Applying enhanced color materials for VRoid character...');
+  applyVRoidColorMaterialsPatch(gltf);
+}
+
+// 4. Enhanced existing textures
+function enhanceExistingTexturesPatch(gltf) {
+  gltf.scene.traverse((child) => {
+    if (child.isMesh && child.material) {
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      
+      if (material.map && material.map.image) {
+        // Create new material with proper settings
+        const newMaterial = new THREE.MeshStandardMaterial({
+          map: material.map,
+          transparent: false,
+          side: THREE.DoubleSide,
+          toneMapped: false, // KEY: Prevents gray appearance
+          roughness: 0.7,
+          metalness: 0.1
+        });
+        
+        // Fix texture properties
+        material.map.colorSpace = THREE.SRGBColorSpace;
+        material.map.flipY = false;
+        
+        child.material = newMaterial;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        
+        log(`Enhanced texture on: ${child.name}`);
+      }
+    }
+  });
+}
+
+// 5. Extract textures from GLB
+async function extractTexturesFromGLBPatch(arrayBuffer) {
+  const textures = [];
+  
+  try {
+    const view = new DataView(arrayBuffer);
+    const magic = view.getUint32(0, true);
+    
+    if (magic !== 0x46546C67) {
+      throw new Error('Invalid GLB file');
+    }
+    
+    const length = view.getUint32(8, true);
+    let chunkIndex = 12;
+    let jsonChunk = null;
+    let binaryChunk = null;
+    
+    while (chunkIndex < length) {
+      const chunkLength = view.getUint32(chunkIndex, true);
+      const chunkType = view.getUint32(chunkIndex + 4, true);
+      
+      if (chunkType === 0x4E4F534A) { // JSON
+        const jsonData = new Uint8Array(arrayBuffer, chunkIndex + 8, chunkLength);
+        jsonChunk = JSON.parse(new TextDecoder().decode(jsonData));
+      } else if (chunkType === 0x004E4942) { // Binary
+        binaryChunk = new Uint8Array(arrayBuffer, chunkIndex + 8, chunkLength);
+      }
+      
+      chunkIndex += 8 + chunkLength;
+    }
+    
+    if (jsonChunk && binaryChunk && jsonChunk.images) {
+      for (let i = 0; i < jsonChunk.images.length; i++) {
+        const imageDef = jsonChunk.images[i];
+        
+        if (imageDef.bufferView !== undefined) {
+          const bufferView = jsonChunk.bufferViews[imageDef.bufferView];
+          const imageData = binaryChunk.slice(
+            bufferView.byteOffset || 0,
+            (bufferView.byteOffset || 0) + bufferView.byteLength
+          );
+          
+          try {
+            const blob = new Blob([imageData], { type: imageDef.mimeType || 'image/png' });
+            const url = URL.createObjectURL(blob);
+            
+            const texture = await new Promise((resolve, reject) => {
+              const loader = new THREE.TextureLoader();
+              loader.load(url, (tex) => {
+                URL.revokeObjectURL(url);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.flipY = false;
+                resolve(tex);
+              }, undefined, reject);
+            });
+            
+            textures.push(texture);
+            log(`Extracted texture ${i}: ${imageDef.mimeType}`);
+          } catch (err) {
+            log(`Failed to extract texture ${i}:`, err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    log('GLB parsing error:', err);
+  }
+  
+  return textures;
+}
+
+// 6. Apply extracted textures
+function applyExtractedTexturesPatch(gltf, textures) {
+  const meshes = [];
+  gltf.scene.traverse((child) => {
+    if (child.isMesh) {
+      meshes.push(child);
+    }
+  });
+  
+  meshes.forEach((mesh, index) => {
+    if (index < textures.length) {
+      const material = new THREE.MeshStandardMaterial({
+        map: textures[index],
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+      
+      mesh.material = material;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      
+      log(`Applied extracted texture ${index} to: ${mesh.name}`);
+    }
+  });
+}
+
+// 7. Apply VRoid-specific color materials (fallback)
+function applyVRoidColorMaterialsPatch(gltf) {
+  log('Applying VRoid character colors...');
+  
+  // Based on the VRoid Hub character, these are the expected colors
+  const vroidColors = [
+    { color: 0x8B4513, name: 'hair' },      // Brown hair
+    { color: 0xFFDBB5, name: 'skin' },      // Skin tone  
+    { color: 0xFF6B6B, name: 'top' },       // Red/coral top
+    { color: 0x4169E1, name: 'skirt' },     // Blue skirt
+    { color: 0xFF4444, name: 'socks' },     // Red striped socks
+    { color: 0x2E4A8B, name: 'shoes' }      // Dark blue shoes
+  ];
+  
+  const meshes = [];
+  gltf.scene.traverse((child) => {
+    if (child.isMesh) {
+      meshes.push(child);
+    }
+  });
+  
+  // Sort meshes by name for consistent assignment
+  meshes.sort((a, b) => a.name.localeCompare(b.name));
+  
+  meshes.forEach((mesh, index) => {
+    const colorConfig = vroidColors[index % vroidColors.length];
+    
+    const material = new THREE.MeshStandardMaterial({
+      color: colorConfig.color,
+      side: THREE.DoubleSide,
+      toneMapped: false, // Critical for preventing gray appearance
+      roughness: 0.6,
+      metalness: 0.1,
+      envMapIntensity: 0.3
+    });
+    
+    mesh.material = material;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    
+    log(`Applied ${colorConfig.name} color (${colorConfig.color.toString(16)}) to: ${mesh.name}`);
+  });
+}
+
+// 8. Fix lighting for VRM characters
+function setupVRMLightingPatch() {
+  // Remove existing lights that might cause issues
+  const lightsToRemove = [];
+  scene.traverse((child) => {
+    if (child.isLight) {
+      lightsToRemove.push(child);
+    }
+  });
+  lightsToRemove.forEach(light => scene.remove(light));
+  
+  // Add VRM-optimized lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+  scene.add(ambientLight);
+  
+  // Main directional light
+  const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  mainLight.position.set(1, 2, 1);
+  mainLight.castShadow = true;
+  scene.add(mainLight);
+  
+  // Fill light to reduce harsh shadows
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  fillLight.position.set(-1, 1, -1);
+  scene.add(fillLight);
+  
+  log('✅ VRM lighting setup complete');
+}
+
+// 9. Manual texture reload function
+window.patchReloadVRMTextures = async function() {
+  log('🔄 PATCH: Reloading VRM textures...');
+  
+  const vrmModel = scene.getObjectByName('VRM_Model');
+  if (!vrmModel) {
+    log('❌ No VRM model found');
+    alert('No VRM model found. Please wait for the model to load first.');
+    return;
+  }
+  
+  // Create fake GLTF for processing
+  const fakeGltf = { scene: vrmModel };
+  
+  try {
+    await fixVRMTexturesPatch(fakeGltf);
+    setupVRMLightingPatch();
+    fixRendererSetup();
+    
+    log('✅ VRM texture reload complete!');
+    alert('VRM textures reloaded! The character should now have proper colors.');
+  } catch (err) {
+    log('❌ VRM texture reload failed:', err);
+    alert('VRM texture reload failed: ' + err.message);
+  }
+};
+
+// 10. Force reload entire VRM with patches
+window.patchReloadEntireVRM = async function() {
+  log('🔄 PATCH: Force reloading entire VRM...');
+  
+  // Remove existing VRM
+  ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+    const existing = scene.getObjectByName(name);
+    if (existing) {
+      scene.remove(existing);
+      log(`Removed ${name}`);
+    }
+  });
+  
+  // Reset camera
+  camera.position.set(0, 1.3, 2.5);
+  camera.lookAt(0, 1, 0);
+  
+  // Fix renderer
+  fixRendererSetup();
+  setupVRMLightingPatch();
+  
+  // Create temporary fallback
+  createFallbackAvatar();
+  
+  // Attempt to reload VRM
+  setTimeout(async () => {
+    try {
+      await loadVRMWithReliableLoader('/assets/avatar/solmate.vrm');
+      log('✅ Complete VRM reload successful!');
+    } catch (err) {
+      log('❌ Complete VRM reload failed:', err);
+      alert('VRM reload failed: ' + err.message);
+    }
+  }, 1000);
+};
+
+// 11. Diagnostic function
+window.patchDiagnoseVRM = function() {
+  log('🔍 PATCH: Diagnosing VRM rendering...');
+  
+  const vrmModel = scene.getObjectByName('VRM_Model');
+  if (!vrmModel) {
+    console.log('❌ No VRM model found in scene');
+    return;
+  }
+  
+  console.log('📊 VRM Diagnostic Report:');
+  console.log('========================');
+  
+  let meshCount = 0;
+  let texturedMeshes = 0;
+  let materialTypes = {};
+  
+  vrmModel.traverse((child) => {
+    if (child.isMesh) {
+      meshCount++;
+      
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      const materialType = material.constructor.name;
+      materialTypes[materialType] = (materialTypes[materialType] || 0) + 1;
+      
+      console.log(`Mesh: ${child.name}`);
+      console.log(`  Material: ${materialType}`);
+      console.log(`  Has Texture: ${!!(material.map && material.map.image)}`);
+      console.log(`  Color: #${material.color.getHexString()}`);
+      console.log(`  ToneMapped: ${material.toneMapped}`);
+      console.log(`  Side: ${material.side}`);
+      
+      if (material.map && material.map.image) {
+        texturedMeshes++;
+        console.log(`  Texture Size: ${material.map.image.width}x${material.map.image.height}`);
+      }
+      console.log('---');
+    }
+  });
+  
+  console.log(`📈 Summary:`);
+  console.log(`  Total Meshes: ${meshCount}`);
+  console.log(`  Textured Meshes: ${texturedMeshes}`);
+  console.log(`  Material Types:`, materialTypes);
+  console.log(`  Renderer ColorSpace: ${renderer.outputColorSpace}`);
+  console.log(`  Renderer ToneMapping: ${renderer.toneMapping}`);
+  
+  if (texturedMeshes === 0) {
+    console.log('⚠️  No textures detected - this is likely why the model appears gray');
+    console.log('💡 Try running: patchReloadVRMTextures()');
+  }
+};
+
+// 12. Apply patches immediately
+function applyPatchesImmediate() {
+  log('🚀 APPLYING IMMEDIATE PATCHES...');
+  
+  // Fix renderer immediately
+  setTimeout(() => {
+    fixRendererSetup();
+    setupVRMLightingPatch();
+    
+    // Apply to existing VRM if present
+    const existingVRM = scene?.getObjectByName('VRM_Model');
+    if (existingVRM) {
+      log('🎯 Applying patches to existing VRM...');
+      window.patchReloadVRMTextures();
+    }
+  }, 2000);
+  
+  log('✅ IMMEDIATE PATCHES APPLIED');
+}
+
+// Apply patches
+applyPatchesImmediate();
+
+// Add functions to global scope for manual use
+window.fixRendererSetup = fixRendererSetup;
+window.setupVRMLightingPatch = setupVRMLightingPatch;
+window.applyVRoidColorMaterialsPatch = applyVRoidColorMaterialsPatch;
+
+console.log('🎨 SCRIPT.JS PATCH APPLIED!');
+console.log('🔧 New manual commands:');
+console.log('  - patchReloadVRMTextures() - Reload textures only');
+console.log('  - patchReloadEntireVRM() - Force reload entire VRM');
+console.log('  - patchDiagnoseVRM() - Detailed diagnostic report');
+console.log('  - fixRendererSetup() - Fix renderer settings');
+console.log('  - setupVRMLightingPatch() - Fix lighting');
+console.log('  - applyVRoidColorMaterialsPatch() - Apply character colors');
+
+// Auto-reload in 5 seconds if model is still gray
+setTimeout(() => {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (vrmModel) {
+    // Check if model is gray (no textures)
+    let hasTextures = false;
+    vrmModel.traverse((child) => {
+      if (child.isMesh && child.material) {
+        const material = Array.isArray(child.material) ? child.material[0] : child.material;
+        if (material.map && material.map.image) {
+          hasTextures = true;
+        }
+      }
+    });
+    
+    if (!hasTextures) {
+      log('🔄 Auto-applying texture fix...');
+      window.patchReloadVRMTextures();
+    }
+  }
+}, 5000);
