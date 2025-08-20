@@ -4,7 +4,7 @@
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = '/assets/avatar/solmate.vrm'; // For testing, change to a public URL like 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@1.0.9/assets/vrm-samples/vrm-1.0/Female.vrm' if needed
+const VRM_PATH = '/assets/avatar/solmate.vrm';
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -46,15 +46,11 @@ async function initThree() {
     log('Loading Three.js modules...');
     
     // Import Three.js and VRM modules from jsDelivr
-    const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
-    THREE = threeModule.default || threeModule;
+    THREE = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
     
-    const gltfModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
-    GLTFLoader = gltfModule.GLTFLoader;
+    const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
     
-    const vrmModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
-    VRMLoaderPlugin = vrmModule.VRMLoaderPlugin;
-    VRM = vrmModule.VRM;
+    const { VRMLoaderPlugin, VRM } = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
     
     log('Three.js modules loaded');
     
@@ -95,7 +91,7 @@ async function initThree() {
     // Clock and mixer for animations
     clock = new THREE.Clock();
     
-    // Load VRM with improved error handling and logging
+    // Load VRM with improved error handling
     await loadVRM(VRM_PATH);
     
     // Start animation loop
@@ -109,11 +105,7 @@ async function initThree() {
 // ===== VRM LOADING WITH IMPROVED FALLBACK (BLOCKER FIX) =====
 async function loadVRM(url, retryCount = 0) {
   try {
-    log(`Loading VRM (attempt ${retryCount + 1}) from ${url}...`);
-    
-    const response = await fetch(url); // Log fetch for VRM
-    if (!response.ok) throw new Error(`VRM fetch failed with status ${response.status}`);
-    log('VRM fetch successful', { size: response.headers.get('content-length') });
+    log(`Loading VRM (attempt ${retryCount + 1})...`);
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ASSET_LOAD_TIMEOUT);
@@ -221,8 +213,8 @@ async function fetchPrice() {
   try {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
     const data = await res.json();
-    const solPriceEl = document.getElementById('solPrice');
-    if (solPriceEl) solPriceEl.textContent = `SOL — $${data.price.toFixed(2)}`;
+    const solPrice = document.getElementById('solPrice');
+    if (solPrice && data && data.price) solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
   } catch (err) {
     log('Price fetch failed', err);
   }
@@ -234,7 +226,7 @@ async function fetchTPS() {
     const res = await fetch('/api/tps');
     const data = await res.json();
     const networkTPS = document.getElementById('networkTPS');
-    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
+    if (networkTPS && data && data.tps) networkTPS.textContent = `${data.tps} TPS`;
   } catch (err) {
     log('TPS fetch failed', err);
   }
@@ -428,7 +420,7 @@ async function init() {
   
   // Welcome message with Grok personality
   setTimeout(() => {
-    queueTTS("Hey there! I'm Grok, your Solana sidekick built by xAI vibes. Ask me about crypto, or just vibe—42 is the answer to life, but SOL might be close!", 'verse');
+    queueTTS("Hello, i'm your Solana Solmate. How can I help you?", 'nova');
   }, 1000);
 }
 
