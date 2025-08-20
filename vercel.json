@@ -7,7 +7,7 @@
     },
     {
       "source": "/manifest.webmanifest",
-      "destination": "/manifest.webmanifest"
+      "destination": "/web/manifest.webmanifest"
     },
     {
       "source": "/(.*)",
