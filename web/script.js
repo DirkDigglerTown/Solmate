@@ -40,31 +40,44 @@ function log(msg, data = null) {
   }
 }
 
-// ===== THREE.JS SETUP (FIXED) =====
+// ===== THREE.JS SETUP (FIXED WITH MULTIPLE CDN FALLBACKS) =====
 async function initThree() {
   try {
     log('=== STARTING THREE.JS INITIALIZATION ===');
     log('Loading Three.js modules...');
     
-    // STEP 1: Load Three.js core with detailed debugging
+    // STEP 1: Load Three.js core with multiple CDN fallbacks
     if (!window.THREE) {
-      log('Three.js not found in window, loading from CDN...');
-      try {
-        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
-        log('Three.js script load completed, checking window.THREE...');
-        
-        if (!window.THREE) {
-          log('ERROR: window.THREE is still undefined after script load');
-          throw new Error('Three.js script loaded but window.THREE is undefined');
+      log('Three.js not found in window, trying multiple CDN sources...');
+      
+      const threeSources = [
+        'https://unpkg.com/three@0.158.0/build/three.min.js',
+        'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js'
+      ];
+      
+      let threeLoaded = false;
+      for (const source of threeSources) {
+        try {
+          log(`Trying Three.js source: ${source}`);
+          await loadScript(source);
+          
+          if (window.THREE) {
+            THREE = window.THREE;
+            log('Three.js core loaded successfully from:', source);
+            log('THREE object keys:', Object.keys(THREE).slice(0, 10));
+            threeLoaded = true;
+            break;
+          } else {
+            log(`Script loaded but window.THREE is undefined for: ${source}`);
+          }
+        } catch (scriptError) {
+          log(`Three.js failed from ${source}:`, scriptError);
         }
-        
-        THREE = window.THREE;
-        log('Three.js core assigned successfully');
-        log('THREE object keys:', Object.keys(THREE).slice(0, 10)); // Show first 10 keys
-        
-      } catch (scriptError) {
-        log('Failed to load Three.js script', scriptError);
-        throw new Error(`Three.js script loading failed: ${scriptError.message}`);
+      }
+      
+      if (!threeLoaded) {
+        throw new Error('All Three.js CDN sources failed to load');
       }
     } else {
       log('Three.js already available in window');
@@ -83,34 +96,8 @@ async function initThree() {
       throw new Error(`THREE basic test failed: ${threeError.message}`);
     }
     
-    // STEP 3: Load GLTFLoader with multiple fallbacks
-    if (!THREE.GLTFLoader) {
-      log('GLTF Loader not found, attempting to load...');
-      const gltfSources = [
-        'https://threejs.org/examples/js/loaders/GLTFLoader.js',
-        'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
-        'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js'
-      ];
-      
-      let gltfLoaded = false;
-      for (const source of gltfSources) {
-        try {
-          log(`Trying GLTF loader source: ${source}`);
-          await loadScript(source);
-          if (THREE.GLTFLoader) {
-            log('GLTF Loader loaded successfully from:', source);
-            gltfLoaded = true;
-            break;
-          }
-        } catch (gltfError) {
-          log(`GLTF loader failed from ${source}:`, gltfError);
-        }
-      }
-      
-      if (!gltfLoaded) {
-        log('All GLTF loader sources failed, will skip 3D model loading');
-      }
-    }
+    // STEP 3: Skip GLTF loader for now to get basic scene working
+    log('Skipping GLTF loader for initial testing');
     
     log('=== SETTING UP THREE.JS SCENE ===');
     
@@ -186,16 +173,6 @@ async function initThree() {
     animate();
     
     log('=== THREE.JS INITIALIZATION COMPLETE ===');
-    
-    // STEP 11: Try VRM loading after basic setup works
-    setTimeout(async () => {
-      try {
-        log('=== ATTEMPTING VRM LOAD ===');
-        await loadVRM(VRM_PATH);
-      } catch (vrmError) {
-        log('VRM loading failed, keeping fallback', vrmError);
-      }
-    }, 3000);
     
   } catch (err) {
     log('=== THREE.JS INITIALIZATION FAILED ===', err);
@@ -811,44 +788,70 @@ function enableAudio() {
 
 // ===== MAIN INIT =====
 async function init() {
-  log('Initializing Solmate...');
+  log('=== INITIALIZING SOLMATE ===');
   
   try {
-    // Setup UI first
+    // STEP 1: Setup UI first
+    log('Setting up UI...');
     setupUI();
     
-    // Initialize Three.js and load VRM
-    await initThree();
+    // STEP 2: Start API calls immediately (don't wait for Three.js)
+    log('Starting API calls...');
     
-    // Start animations
-    setTimeout(() => {
-      blink();
-    }, 2000);
-    
-    // Connect WebSocket
-    connectWebSocket();
-    
-    // Start price updates
+    // Fetch price and TPS immediately
+    log('Fetching initial price data...');
     await fetchPrice();
-    priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
     
-    // Start TPS updates  
+    log('Fetching initial TPS data...');
     await fetchTPS();
-    if (!tpsUpdateTimer) {
-      tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
+    
+    // Start periodic updates
+    log('Starting periodic updates...');
+    priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
+    tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
+    
+    // STEP 3: Try to initialize Three.js (but don't let it block everything)
+    try {
+      log('Attempting Three.js initialization...');
+      await initThree();
+      
+      // Start animations if Three.js worked
+      setTimeout(() => {
+        blink();
+      }, 2000);
+      
+    } catch (threeError) {
+      log('Three.js failed, continuing with audio-only mode', threeError);
+      // Continue without 3D - the app is still functional
     }
     
-    log('Solmate initialized successfully!');
+    // STEP 4: Connect WebSocket (independent of Three.js)
+    log('Connecting WebSocket...');
+    connectWebSocket();
     
-    // Welcome message (delay to allow user interaction)
+    log('=== SOLMATE INITIALIZATION COMPLETE ===');
+    
+    // STEP 5: Welcome message (delay to allow user interaction)
     setTimeout(() => {
       queueTTS("Hello, I'm your Solana Solmate. How can I help you today?", 'nova');
     }, 2000);
     
   } catch (err) {
-    log('Initialization failed', err);
-    // Continue with limited functionality
+    log('=== INITIALIZATION FAILED ===', err);
+    // Even if initialization fails, try to set up basic functionality
     setupUI();
+    
+    // Try price/TPS anyway
+    try {
+      await fetchPrice();
+      await fetchTPS();
+      priceUpdateTimer = setInterval(fetchPrice, 30000);
+      tpsUpdateTimer = setInterval(fetchTPS, 60000);
+    } catch (apiError) {
+      log('API calls also failed', apiError);
+    }
+    
+    // Create simple fallback
     createSimpleFallback();
   }
 }
