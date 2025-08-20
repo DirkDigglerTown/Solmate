@@ -7,7 +7,7 @@
     },
     {
       "source": "/manifest.webmanifest",
-      "destination": "/manifest.webmanifest"
+      "destination": "/web/manifest.webmanifest"
     },
     {
       "source": "/(.*)",
@@ -35,6 +35,15 @@
           "key": "Content-Type",
           "value": "application/octet-stream"
         },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
         {
           "key": "Access-Control-Allow-Origin",
           "value": "*"
