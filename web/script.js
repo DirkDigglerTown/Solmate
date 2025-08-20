@@ -45,42 +45,48 @@ async function initThree() {
   try {
     log('Loading Three.js modules...');
     
-    // FIXED: Load Three.js via script tags instead of ES6 imports
+    // FIXED: Load Three.js via script tags with better error handling
     if (!window.THREE) {
+      log('Loading Three.js core...');
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
       THREE = window.THREE;
+      log('Three.js core loaded');
     }
     
-    // Load GLTFLoader
-    if (!window.GLTFLoader) {
-      await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
-      GLTFLoader = THREE.GLTFLoader;
+    // Verify THREE is available
+    if (!THREE) {
+      throw new Error('Three.js failed to load - window.THREE is undefined');
     }
     
-    // Load VRM (try alternative approach)
-    if (!window.VRM) {
+    // Load GLTFLoader - use a more reliable CDN
+    if (!THREE.GLTFLoader) {
+      log('Loading GLTF Loader...');
       try {
-        log('Loading VRM library...');
-        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.js');
-        VRM = window.VRM;
-        VRMLoaderPlugin = window.VRMLoaderPlugin;
-        log('VRM library loaded successfully');
-      } catch (vrmError) {
-        log('VRM loader failed, will try loading as regular GLTF', vrmError);
-        // We'll handle this fallback in loadVRM function
+        await loadScript('https://threejs.org/examples/js/loaders/GLTFLoader.js');
+        GLTFLoader = THREE.GLTFLoader;
+        log('GLTF Loader loaded successfully');
+      } catch (gltfError) {
+        log('Official GLTF loader failed, trying alternative', gltfError);
+        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
+        GLTFLoader = THREE.GLTFLoader;
       }
     }
     
-    log('Three.js modules loaded');
+    // Skip VRM for now to isolate the issue
+    log('Skipping VRM loader for debugging - will load basic GLTF only');
+    
+    log('Three.js modules loaded, setting up scene...');
     
     // Setup scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0e17);
+    log('Scene created');
     
     // Setup camera
     camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
     camera.position.set(0, 1.3, 2.5);
     camera.lookAt(0, 1, 0);
+    log('Camera created');
     
     // Setup renderer
     const canvas = document.getElementById('vrmCanvas');
@@ -96,12 +102,18 @@ async function initThree() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     
-    // Handle different Three.js versions
-    if (renderer.outputColorSpace !== undefined) {
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-    } else if (renderer.outputEncoding !== undefined) {
-      renderer.outputEncoding = THREE.sRGBEncoding;
+    // Handle different Three.js versions safely
+    try {
+      if (renderer.outputColorSpace !== undefined) {
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+      } else if (renderer.outputEncoding !== undefined) {
+        renderer.outputEncoding = THREE.sRGBEncoding;
+      }
+    } catch (colorSpaceError) {
+      log('Color space setting failed, continuing anyway', colorSpaceError);
     }
+    
+    log('Renderer created');
     
     // Lights
     const ambient = new THREE.AmbientLight(0xffffff, 0.6);
@@ -110,22 +122,28 @@ async function initThree() {
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight.position.set(1, 1, 1);
     scene.add(dirLight);
+    log('Lights added');
     
-    // Clock and mixer for animations
+    // Clock for animations
     clock = new THREE.Clock();
     
-    // Try to load VRM, fallback if it fails
-    try {
-      await loadVRM(VRM_PATH);
-    } catch (vrmError) {
-      log('VRM loading failed, using fallback', vrmError);
-      await createFallbackAvatar();
-    }
+    // Create a simple test object first
+    await createFallbackAvatar();
     
     // Start animation loop
     animate();
     
     log('Three.js initialized successfully');
+    
+    // Try to load VRM after basic setup works
+    setTimeout(async () => {
+      try {
+        log('Attempting VRM load after basic setup...');
+        await loadVRM(VRM_PATH);
+      } catch (vrmError) {
+        log('VRM loading failed, keeping fallback', vrmError);
+      }
+    }, 2000);
     
   } catch (err) {
     log('Three.js init failed', err);
@@ -180,21 +198,33 @@ function createSimpleFallback() {
 
 // ===== CREATE FALLBACK AVATAR =====
 async function createFallbackAvatar() {
-  // Create a simple geometric avatar as fallback
-  const geometry = new THREE.SphereGeometry(0.3, 32, 32);
-  const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
-  const avatar = new THREE.Mesh(geometry, material);
-  avatar.position.set(0, 0.5, 0);
-  scene.add(avatar);
-  
-  // Add simple animation
-  function animateFallback() {
-    avatar.rotation.y += 0.01;
-    requestAnimationFrame(animateFallback);
+  try {
+    // Create a simple geometric avatar as fallback
+    const geometry = new THREE.SphereGeometry(0.3, 32, 32);
+    const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
+    const avatar = new THREE.Mesh(geometry, material);
+    avatar.position.set(0, 0.5, 0);
+    avatar.name = 'fallbackAvatar';
+    scene.add(avatar);
+    
+    // Add simple animation
+    let animationId;
+    function animateFallback() {
+      if (scene.getObjectByName('fallbackAvatar')) {
+        avatar.rotation.y += 0.01;
+        animationId = requestAnimationFrame(animateFallback);
+      }
+    }
+    animateFallback();
+    
+    // Hide loading status since we have something to show
+    const statusEl = document.getElementById('loadingStatus');
+    if (statusEl) statusEl.style.display = 'none';
+    
+    log('Fallback avatar created');
+  } catch (err) {
+    log('Failed to create fallback avatar', err);
   }
-  animateFallback();
-  
-  log('Fallback avatar created');
 }
 
 // ===== VRM LOADING WITH IMPROVED FALLBACK =====
@@ -268,6 +298,12 @@ async function loadVRM(url, retryCount = 0) {
     
     clearTimeout(timeoutId);
     
+    // Remove fallback avatar if it exists
+    const existingFallback = scene.getObjectByName('fallbackAvatar');
+    if (existingFallback) {
+      scene.remove(existingFallback);
+    }
+    
     // Handle VRM vs regular GLTF
     if (gltf.userData.vrm) {
       log('VRM data found, using VRM avatar');
@@ -281,6 +317,7 @@ async function loadVRM(url, retryCount = 0) {
       if (gltf.scenes.length > 0) {
         const model = gltf.scenes[0];
         model.position.y = -1;
+        model.name = 'gltfModel';
         scene.add(model);
         
         if (gltf.animations.length > 0) {
@@ -410,17 +447,27 @@ async function fetchPrice() {
     
     const solPrice = document.getElementById('solPrice');
     if (solPrice) {
-      if (data.data && data.data[SOL_MINT] && data.data[SOL_MINT].price) {
-        const price = data.data[SOL_MINT].price;
-        solPrice.textContent = `SOL — $${price.toFixed(2)}`;
+      // Handle multiple possible response formats
+      let price = null;
+      
+      if (data.data && data.data[SOL_MINT] && typeof data.data[SOL_MINT].price === 'number') {
+        price = data.data[SOL_MINT].price;
+      } else if (data.price && typeof data.price === 'number') {
+        price = data.price;
+      } else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'number') {
+        price = data[SOL_MINT];
+      } else if (typeof data === 'number') {
+        price = data;
+      }
+      
+      if (price !== null && !isNaN(price)) {
+        solPrice.textContent = `SOL — ${price.toFixed(2)}`;
         solPrice.style.color = '#00ff88'; // Success color
-      } else if (data.price) {
-        // Alternative response format
-        solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
-        solPrice.style.color = '#00ff88';
+        log(`Price updated: ${price.toFixed(2)}`);
       } else {
-        solPrice.textContent = 'SOL — Price unavailable';
+        solPrice.textContent = 'SOL — Data format error';
         solPrice.style.color = '#ff6b6b'; // Error color
+        log('Price data format not recognized', data);
       }
     } else {
       log('solPrice element not found in DOM');
@@ -429,7 +476,7 @@ async function fetchPrice() {
     log('Price fetch failed', err);
     const solPrice = document.getElementById('solPrice');
     if (solPrice) {
-      solPrice.textContent = 'SOL — Error';
+      solPrice.textContent = 'SOL — Network error';
       solPrice.style.color = '#ff6b6b';
     }
   }
