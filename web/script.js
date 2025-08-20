@@ -4,7 +4,7 @@
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = 'https://raw.githubusercontent.com/vrm-c/vrm-samples/main/vrm/AliciaSolid.vrm'; // Sexy anime girl VRM - change back to '/assets/avatar/solmate.vrm' after
+const VRM_PATH = '/assets/avatar/solmate.vrm';
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -46,11 +46,15 @@ async function initThree() {
     log('Loading Three.js modules...');
     
     // Import Three.js and VRM modules from jsDelivr
-    THREE = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
+    const threeModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js');
+    THREE = threeModule;
     
-    const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
+    const gltfModule = await import('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js');
+    GLTFLoader = gltfModule.GLTFLoader;
     
-    const { VRMLoaderPlugin, VRM } = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
+    const vrmModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js');
+    VRMLoaderPlugin = vrmModule.VRMLoaderPlugin;
+    VRM = vrmModule.VRM;
     
     log('Three.js modules loaded');
     
