@@ -4,7 +4,7 @@
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = '/assets/avatar/solmate.vrm';
+const VRM_PATH = '/assets/avatar/solmate.vrm'; // For testing, change to a public URL like 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@1.0.9/assets/vrm-samples/vrm-1.0/Female.vrm' if needed
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -95,7 +95,7 @@ async function initThree() {
     // Clock and mixer for animations
     clock = new THREE.Clock();
     
-    // Load VRM with improved error handling
+    // Load VRM with improved error handling and logging
     await loadVRM(VRM_PATH);
     
     // Start animation loop
@@ -109,7 +109,11 @@ async function initThree() {
 // ===== VRM LOADING WITH IMPROVED FALLBACK (BLOCKER FIX) =====
 async function loadVRM(url, retryCount = 0) {
   try {
-    log(`Loading VRM (attempt ${retryCount + 1})...`);
+    log(`Loading VRM (attempt ${retryCount + 1}) from ${url}...`);
+    
+    const response = await fetch(url); // Log fetch for VRM
+    if (!response.ok) throw new Error(`VRM fetch failed with status ${response.status}`);
+    log('VRM fetch successful', { size: response.headers.get('content-length') });
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ASSET_LOAD_TIMEOUT);
@@ -217,8 +221,8 @@ async function fetchPrice() {
   try {
     const res = await fetch('/api/price?ids=' + SOL_MINT);
     const data = await res.json();
-    const solPrice = document.getElementById('solPrice');
-    if (solPrice && data && data.price) solPrice.textContent = `SOL — $${data.price.toFixed(2)}`;
+    const solPriceEl = document.getElementById('solPrice');
+    if (solPriceEl) solPriceEl.textContent = `SOL — $${data.price.toFixed(2)}`;
   } catch (err) {
     log('Price fetch failed', err);
   }
@@ -230,7 +234,7 @@ async function fetchTPS() {
     const res = await fetch('/api/tps');
     const data = await res.json();
     const networkTPS = document.getElementById('networkTPS');
-    if (networkTPS && data && data.tps) networkTPS.textContent = `${data.tps} TPS`;
+    if (networkTPS) networkTPS.textContent = `${data.tps} TPS`;
   } catch (err) {
     log('TPS fetch failed', err);
   }
