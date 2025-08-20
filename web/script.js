@@ -4,7 +4,7 @@
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = 'https://github.com/vrm-c/vrm-samples/raw/main/vrm/AliciaSolid.vrm'; // Sexy anime girl VRM - change back to '/assets/avatar/solmate.vrm' after
+const VRM_PATH = 'https://raw.githubusercontent.com/vrm-c/vrm-samples/main/vrm/AliciaSolid.vrm'; // Sexy anime girl VRM - change back to '/assets/avatar/solmate.vrm' after
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -216,8 +216,6 @@ async function fetchPrice() {
     const solPrice = document.getElementById('solPrice');
     if (solPrice && data.data && data.data[SOL_MINT] && data.data[SOL_MINT].price) {
       solPrice.textContent = `SOL — $${data.data[SOL_MINT].price.toFixed(2)}`;
-    } else {
-      log('Invalid price data', data);
     }
   } catch (err) {
     log('Price fetch failed', err);
