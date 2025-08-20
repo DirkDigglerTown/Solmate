@@ -60,12 +60,14 @@ async function initThree() {
     // Load VRM (try alternative approach)
     if (!window.VRM) {
       try {
+        log('Loading VRM library...');
         await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.js');
         VRM = window.VRM;
         VRMLoaderPlugin = window.VRMLoaderPlugin;
+        log('VRM library loaded successfully');
       } catch (vrmError) {
-        log('VRM loader failed, continuing without VRM', vrmError);
-        // We'll handle this fallback later
+        log('VRM loader failed, will try loading as regular GLTF', vrmError);
+        // We'll handle this fallback in loadVRM function
       }
     }
     
@@ -198,55 +200,107 @@ async function createFallbackAvatar() {
 // ===== VRM LOADING WITH IMPROVED FALLBACK =====
 async function loadVRM(url, retryCount = 0) {
   try {
-    log(`Loading VRM (attempt ${retryCount + 1})...`);
+    log(`Loading VRM (attempt ${retryCount + 1}) from: ${url}`);
     
-    if (!GLTFLoader || !VRMLoaderPlugin) {
-      throw new Error('VRM dependencies not loaded');
+    if (!THREE) {
+      throw new Error('Three.js not loaded');
     }
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), ASSET_LOAD_TIMEOUT);
+    if (!THREE.GLTFLoader) {
+      throw new Error('GLTFLoader not available');
+    }
     
     // Check if VRM file exists first
+    log('Checking VRM file availability...');
     const checkResponse = await fetch(url, { method: 'HEAD' });
+    log(`VRM file check response: ${checkResponse.status}`, {
+      ok: checkResponse.ok,
+      headers: Object.fromEntries(checkResponse.headers.entries())
+    });
+    
     if (!checkResponse.ok) {
-      throw new Error(`VRM file not found: ${checkResponse.status}`);
+      throw new Error(`VRM file not accessible: ${checkResponse.status} ${checkResponse.statusText}`);
     }
     
-    const loader = new THREE.GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
+    const contentLength = checkResponse.headers.get('content-length');
+    log(`VRM file size: ${contentLength ? Math.round(contentLength / 1024 / 1024) + 'MB' : 'unknown'}`);
     
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      log('VRM loading timed out');
+    }, ASSET_LOAD_TIMEOUT);
+    
+    const loader = new THREE.GLTFLoader();
+    
+    // Try to register VRM plugin if available
+    if (window.VRMLoaderPlugin) {
+      log('Registering VRM loader plugin...');
+      loader.register((parser) => new VRMLoaderPlugin(parser));
+    } else {
+      log('VRM plugin not available, loading as regular GLTF');
+    }
+    
+    log('Starting GLTF/VRM loading...');
     const gltf = await new Promise((resolve, reject) => {
       loader.load(
         url,
-        resolve,
+        (loadedGltf) => {
+          log('GLTF loaded successfully', {
+            scenes: loadedGltf.scenes.length,
+            animations: loadedGltf.animations.length,
+            hasVRM: !!loadedGltf.userData.vrm
+          });
+          resolve(loadedGltf);
+        },
         (progress) => {
           const percent = Math.round((progress.loaded / progress.total) * 100);
+          log(`Loading progress: ${percent}%`);
           const statusEl = document.getElementById('loadingStatus');
           if (statusEl) statusEl.textContent = `Loading avatar: ${percent}%`;
         },
-        reject
+        (error) => {
+          log('GLTF loading failed', error);
+          reject(error);
+        }
       );
     });
     
     clearTimeout(timeoutId);
     
-    if (!gltf.userData.vrm) {
-      throw new Error('No VRM data found in file');
+    // Handle VRM vs regular GLTF
+    if (gltf.userData.vrm) {
+      log('VRM data found, using VRM avatar');
+      currentVRM = gltf.userData.vrm;
+      currentVRM.scene.position.y = -1;
+      scene.add(currentVRM.scene);
+      mixer = new THREE.AnimationMixer(currentVRM.scene);
+    } else {
+      log('No VRM data, using as regular GLTF model');
+      // Use the first scene as a regular 3D model
+      if (gltf.scenes.length > 0) {
+        const model = gltf.scenes[0];
+        model.position.y = -1;
+        scene.add(model);
+        
+        if (gltf.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(model);
+          const action = mixer.clipAction(gltf.animations[0]);
+          action.play();
+        }
+      }
     }
     
-    currentVRM = gltf.userData.vrm;
-    currentVRM.scene.position.y = -1;
-    scene.add(currentVRM.scene);
+    // Hide loading status
+    const statusEl = document.getElementById('loadingStatus');
+    if (statusEl) statusEl.style.display = 'none';
     
-    mixer = new THREE.AnimationMixer(currentVRM.scene);
-    
-    log('VRM loaded successfully');
+    log('VRM/Model loaded successfully');
     
   } catch (err) {
     if (retryCount < VRM_MAX_RETRIES) {
       log(`VRM load retry ${retryCount + 1}...`, err);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
       return loadVRM(url, retryCount + 1);
     }
     
