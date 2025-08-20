@@ -2588,3 +2588,361 @@ applyComprehensiveFixes();
 console.log('🎨 Comprehensive VRM fixes loaded!');
 console.log('🔧 Commands: reloadWithComprehensiveFixes(), testVRMExpressions()');
 console.log('🔊 Click anywhere to enable audio and expressions');
+
+// ===== DIRECT VRM TEXTURE FIX =====
+// Add this at the very end of your script.js to override the broken texture system
+
+// Override the processAndAddVRM function with a working texture fix
+window.processAndAddVRM = async function(gltf) {
+  log('🎨 DIRECT TEXTURE FIX: Processing VRM...');
+  
+  // STEP 1: Force extract and apply textures properly
+  await forceExtractVRMTextures(gltf);
+  
+  // STEP 2: Apply proper scaling and positioning
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  
+  let scale = 1.0;
+  if (size.y > 50) {
+    scale = 1.8 / size.y;
+    gltf.scene.scale.setScalar(scale);
+    log(`Applied scaling: ${scale.toFixed(4)}`);
+  }
+  
+  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
+  const scaledSize = scaledBox.getSize(new THREE.Vector3());
+  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  
+  gltf.scene.position.x = -scaledCenter.x;
+  gltf.scene.position.y = -scaledBox.min.y;
+  gltf.scene.position.z = -scaledCenter.z;
+  
+  gltf.scene.name = 'VRM_Model';
+  scene.add(gltf.scene);
+  
+  // STEP 3: Camera positioning
+  const finalHeight = scaledSize.y;
+  const finalWidth = Math.max(scaledSize.x, scaledSize.z);
+  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
+  const lookAtHeight = finalHeight * 0.6;
+  
+  camera.position.set(0, lookAtHeight, cameraDistance);
+  camera.lookAt(0, lookAtHeight, 0);
+  
+  // STEP 4: Add animations
+  addWorkingAnimations(gltf.scene);
+  
+  log('✅ DIRECT FIX: VRM setup complete!');
+};
+
+// ===== FORCE TEXTURE EXTRACTION =====
+async function forceExtractVRMTextures(gltf) {
+  log('🔍 FORCE EXTRACTING VRM TEXTURES...');
+  
+  // Method 1: Check if textures are already loaded properly
+  let texturesFound = 0;
+  gltf.scene.traverse((child) => {
+    if (child.isMesh && child.material) {
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (material.map && material.map.image) {
+        texturesFound++;
+        log(`Found working texture on: ${child.name}`);
+      }
+    }
+  });
+  
+  if (texturesFound > 0) {
+    log(`Found ${texturesFound} working textures, enhancing them...`);
+    enhanceExistingTextures(gltf);
+    return;
+  }
+  
+  // Method 2: Force extract from GLB binary data
+  log('No working textures found, extracting from GLB data...');
+  
+  try {
+    // Access the raw GLB data from the loader
+    const rawData = await fetch('/assets/avatar/solmate.vrm');
+    const arrayBuffer = await rawData.arrayBuffer();
+    
+    // Parse GLB manually to extract textures
+    const extractedTextures = await extractTexturesFromGLB(arrayBuffer);
+    
+    if (extractedTextures.length > 0) {
+      log(`Extracted ${extractedTextures.length} textures from GLB`);
+      applyExtractedTextures(gltf, extractedTextures);
+    } else {
+      log('No textures in GLB, applying color-based materials');
+      applyColorBasedMaterials(gltf);
+    }
+    
+  } catch (err) {
+    log('GLB extraction failed, using color fallback:', err);
+    applyColorBasedMaterials(gltf);
+  }
+}
+
+// ===== EXTRACT TEXTURES FROM GLB =====
+async function extractTexturesFromGLB(arrayBuffer) {
+  const textures = [];
+  
+  try {
+    const view = new DataView(arrayBuffer);
+    const magic = view.getUint32(0, true);
+    
+    if (magic !== 0x46546C67) {
+      throw new Error('Not a valid GLB file');
+    }
+    
+    const length = view.getUint32(8, true);
+    let chunkIndex = 12;
+    let jsonChunk = null;
+    let binaryChunk = null;
+    
+    // Extract chunks
+    while (chunkIndex < length) {
+      const chunkLength = view.getUint32(chunkIndex, true);
+      const chunkType = view.getUint32(chunkIndex + 4, true);
+      
+      if (chunkType === 0x4E4F534A) { // JSON
+        const jsonData = new Uint8Array(arrayBuffer, chunkIndex + 8, chunkLength);
+        const jsonText = new TextDecoder().decode(jsonData);
+        jsonChunk = JSON.parse(jsonText);
+      } else if (chunkType === 0x004E4942) { // Binary
+        binaryChunk = new Uint8Array(arrayBuffer, chunkIndex + 8, chunkLength);
+      }
+      
+      chunkIndex += 8 + chunkLength;
+    }
+    
+    if (!jsonChunk || !binaryChunk) {
+      throw new Error('Missing JSON or binary chunk');
+    }
+    
+    log('GLB parsed successfully:', {
+      images: jsonChunk.images?.length || 0,
+      textures: jsonChunk.textures?.length || 0,
+      materials: jsonChunk.materials?.length || 0
+    });
+    
+    // Extract images from binary data
+    if (jsonChunk.images && jsonChunk.bufferViews) {
+      for (let i = 0; i < jsonChunk.images.length; i++) {
+        const imageDef = jsonChunk.images[i];
+        
+        if (imageDef.bufferView !== undefined) {
+          const bufferView = jsonChunk.bufferViews[imageDef.bufferView];
+          const imageData = binaryChunk.slice(bufferView.byteOffset, bufferView.byteOffset + bufferView.byteLength);
+          
+          try {
+            const blob = new Blob([imageData], { type: imageDef.mimeType || 'image/png' });
+            const url = URL.createObjectURL(blob);
+            
+            const texture = await new Promise((resolve, reject) => {
+              const loader = new THREE.TextureLoader();
+              loader.load(url, (tex) => {
+                URL.revokeObjectURL(url);
+                
+                // Configure texture properly for VRM
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.flipY = false;
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.generateMipmaps = true;
+                
+                resolve(tex);
+              }, undefined, reject);
+            });
+            
+            textures.push(texture);
+            log(`Extracted texture ${i}: ${imageDef.mimeType}, size: ${imageData.length} bytes`);
+            
+          } catch (texError) {
+            log(`Failed to create texture ${i}:`, texError);
+          }
+        }
+      }
+    }
+    
+  } catch (err) {
+    log('GLB parsing failed:', err);
+  }
+  
+  return textures;
+}
+
+// ===== ENHANCE EXISTING TEXTURES =====
+function enhanceExistingTextures(gltf) {
+  log('🎨 Enhancing existing textures...');
+  
+  gltf.scene.traverse((child) => {
+    if (child.isMesh) {
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      
+      if (material.map && material.map.image) {
+        // Create new material with proper settings
+        const newMaterial = new THREE.MeshStandardMaterial({
+          map: material.map,
+          transparent: material.transparent,
+          side: THREE.DoubleSide,
+          toneMapped: false // KEY: Prevents gray appearance
+        });
+        
+        // Configure texture properly
+        if (material.map) {
+          material.map.colorSpace = THREE.SRGBColorSpace;
+          material.map.flipY = false;
+        }
+        
+        child.material = newMaterial;
+        log(`Enhanced texture material for: ${child.name}`);
+      }
+    }
+  });
+}
+
+// ===== APPLY EXTRACTED TEXTURES =====
+function applyExtractedTextures(gltf, textures) {
+  log('🎨 Applying extracted textures to meshes...');
+  
+  let textureIndex = 0;
+  
+  gltf.scene.traverse((child) => {
+    if (child.isMesh && textureIndex < textures.length) {
+      const texture = textures[textureIndex];
+      
+      const material = new THREE.MeshStandardMaterial({
+        map: texture,
+        side: THREE.DoubleSide,
+        toneMapped: false
+      });
+      
+      child.material = material;
+      log(`Applied extracted texture ${textureIndex} to: ${child.name}`);
+      
+      textureIndex++;
+    }
+  });
+  
+  // If we have extra meshes without textures, apply colors
+  if (textureIndex === 0) {
+    log('No textures could be applied, falling back to colors');
+    applyColorBasedMaterials(gltf);
+  }
+}
+
+// ===== COLOR-BASED MATERIALS (BACKUP) =====
+function applyColorBasedMaterials(gltf) {
+  log('🎨 Applying color-based materials...');
+  
+  const colors = [
+    0xff69b4, // Pink (hair)
+    0xffdbac, // Skin tone
+    0xffffff, // White (clothes)
+    0x333333  // Dark (skirt)
+  ];
+  
+  let colorIndex = 0;
+  
+  gltf.scene.traverse((child) => {
+    if (child.isMesh) {
+      const color = colors[colorIndex % colors.length];
+      
+      const material = new THREE.MeshStandardMaterial({
+        color: color,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        roughness: 0.5,
+        metalness: 0.1
+      });
+      
+      child.material = material;
+      log(`Applied color ${color.toString(16)} to: ${child.name}`);
+      
+      colorIndex++;
+    }
+  });
+}
+
+// ===== WORKING ANIMATIONS =====
+function addWorkingAnimations(vrmScene) {
+  log('🎭 Adding working animations...');
+  
+  let time = 0;
+  let blinkTimer = 0;
+  
+  function animate() {
+    if (!scene.getObjectByName('VRM_Model')) return;
+    
+    time += 0.016;
+    blinkTimer += 0.016;
+    
+    // Breathing
+    const breathScale = 1 + Math.sin(time * 2) * 0.005;
+    vrmScene.scale.y = vrmScene.scale.x * breathScale;
+    
+    // Swaying
+    vrmScene.rotation.y = Math.sin(time * 0.5) * 0.02;
+    
+    // Head movement
+    vrmScene.traverse((child) => {
+      if (child.name.toLowerCase().includes('head')) {
+        child.rotation.y = Math.sin(time * 0.8) * 0.05;
+        child.rotation.x = Math.sin(time * 0.6) * 0.02;
+      }
+    });
+    
+    // Blinking
+    if (blinkTimer > 3) {
+      vrmScene.traverse((child) => {
+        if (child.isMesh && child.name.toLowerCase().includes('eye')) {
+          child.scale.y = 0.1;
+          setTimeout(() => {
+            child.scale.y = 1;
+          }, 120);
+        }
+      });
+      blinkTimer = 0;
+    }
+    
+    requestAnimationFrame(animate);
+  }
+  
+  animate();
+  log('🎭 Working animations started');
+}
+
+// ===== MANUAL TEXTURE RELOAD =====
+window.forceTextureReload = async function() {
+  log('🔄 FORCE RELOADING TEXTURES...');
+  
+  const vrmModel = scene.getObjectByName('VRM_Model');
+  if (!vrmModel) {
+    log('No VRM model found');
+    return;
+  }
+  
+  // Try to reload textures on existing model
+  const fakeGltf = { scene: vrmModel };
+  await forceExtractVRMTextures(fakeGltf);
+  
+  log('✅ Texture reload complete');
+};
+
+// ===== IMMEDIATE APPLICATION =====
+log('🚀 DIRECT TEXTURE FIX LOADED');
+
+// Apply to existing VRM if present
+setTimeout(() => {
+  const existingVRM = scene?.getObjectByName('VRM_Model');
+  if (existingVRM) {
+    log('Applying direct fix to existing VRM...');
+    window.forceTextureReload();
+  }
+}, 1000);
+
+console.log('🎨 DIRECT TEXTURE FIX READY!');
+console.log('🔧 Manual command: forceTextureReload()');
+console.log('📝 This fix directly addresses the baked texture issue');
