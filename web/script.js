@@ -1902,65 +1902,259 @@ if (document.readyState === 'loading') {
   init();
 }
 
-// ===== ADD THIS TO THE END OF YOUR EXISTING script.js =====
+// ===== COMPREHENSIVE VRM FIX =====
+// Replace the problematic section at the end of your script.js with this
 
-// Replace the existing processAndAddVRM function with enhanced version
-async function processAndAddVRMEnhanced(gltf) {
-  log('🎨 Processing VRM with enhanced textures and animations...');
+// First, fix the scene reference error at line 2054
+function enhanceSceneLighting() {
+  // Check if scene exists first
+  if (!scene) {
+    log('Scene not available yet, skipping lighting enhancement');
+    return;
+  }
   
-  // STEP 1: Apply proper materials and textures
+  // Remove existing lights
+  const lightsToRemove = [];
+  scene.traverse((child) => {
+    if (child.isLight) {
+      lightsToRemove.push(child);
+    }
+  });
+  lightsToRemove.forEach(light => scene.remove(light));
+  
+  // Add professional lighting setup for VRM
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambientLight);
+  
+  const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  mainLight.position.set(2, 3, 2);
+  scene.add(mainLight);
+  
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+  fillLight.position.set(-1, 1, 1);
+  scene.add(fillLight);
+  
+  const rimLight = new THREE.DirectionalLight(0xaaccff, 0.6);
+  rimLight.position.set(0, 1, -2);
+  scene.add(rimLight);
+  
+  log('💡 Enhanced lighting applied');
+}
+
+// ===== ADVANCED VRM TEXTURE FIXING =====
+async function fixVRMTextures(gltf) {
+  log('🎨 Applying advanced VRM texture fixes...');
+  
+  // Extract and apply embedded textures from GLB
+  const textureMap = new Map();
+  
+  // If this is a GLB with embedded textures, extract them
+  if (gltf.parser && gltf.parser.json) {
+    const json = gltf.parser.json;
+    const parser = gltf.parser;
+    
+    // Extract embedded textures
+    if (json.textures && json.images && parser.body) {
+      for (let i = 0; i < json.textures.length; i++) {
+        try {
+          const textureDef = json.textures[i];
+          const imageDef = json.images[textureDef.source];
+          
+          if (imageDef && imageDef.bufferView !== undefined) {
+            const bufferView = json.bufferViews[imageDef.bufferView];
+            const imageData = parser.body.slice(bufferView.byteOffset, bufferView.byteOffset + bufferView.byteLength);
+            
+            const blob = new Blob([imageData], { type: imageDef.mimeType });
+            const url = URL.createObjectURL(blob);
+            
+            const texture = await new Promise((resolve, reject) => {
+              const loader = new THREE.TextureLoader();
+              loader.load(url, 
+                (tex) => {
+                  URL.revokeObjectURL(url);
+                  // Fix texture properties for VRM
+                  tex.colorSpace = THREE.SRGBColorSpace;
+                  tex.flipY = false; // VRM textures don't need flipping
+                  tex.wrapS = THREE.RepeatWrapping;
+                  tex.wrapT = THREE.RepeatWrapping;
+                  resolve(tex);
+                },
+                undefined,
+                reject
+              );
+            });
+            
+            textureMap.set(i, texture);
+            log(`Extracted texture ${i}: ${imageDef.mimeType}`);
+          }
+        } catch (err) {
+          log(`Failed to extract texture ${i}:`, err);
+        }
+      }
+    }
+  }
+  
+  // Apply textures and enhanced materials to meshes
   gltf.scene.traverse((child) => {
     if (child.isMesh) {
       const meshName = child.name.toLowerCase();
-      let newMaterial;
+      log(`Processing mesh: ${child.name}`);
       
-      // Apply materials based on mesh names
-      if (meshName.includes('hair')) {
+      // Determine material type based on mesh name and apply proper colors
+      let materialConfig = getMaterialConfig(meshName);
+      
+      // Create appropriate material
+      let newMaterial;
+      if (materialConfig.useStandard) {
         newMaterial = new THREE.MeshStandardMaterial({
-          color: 0xff69b4,  // Pink hair
-          roughness: 0.3,
-          metalness: 0.1
-        });
-      } else if (meshName.includes('face') || meshName.includes('body') || meshName.includes('skin')) {
-        newMaterial = new THREE.MeshStandardMaterial({
-          color: 0xffdbac,  // Skin tone
-          roughness: 0.6,
-          metalness: 0.0
-        });
-      } else if (meshName.includes('cloth') || meshName.includes('top') || meshName.includes('shirt')) {
-        newMaterial = new THREE.MeshStandardMaterial({
-          color: 0xffffff,  // White clothing
-          roughness: 0.7,
-          metalness: 0.0
-        });
-      } else if (meshName.includes('skirt') || meshName.includes('bottom')) {
-        newMaterial = new THREE.MeshStandardMaterial({
-          color: 0x2c2c2c,  // Dark skirt
-          roughness: 0.5,
-          metalness: 0.1
+          color: materialConfig.color,
+          roughness: materialConfig.roughness,
+          metalness: materialConfig.metalness,
+          side: THREE.DoubleSide,
+          transparent: materialConfig.transparent,
+          toneMapped: false // Fix gray appearance
         });
       } else {
-        newMaterial = new THREE.MeshStandardMaterial({
-          color: 0xcccccc,
-          roughness: 0.5,
-          metalness: 0.1
+        newMaterial = new THREE.MeshLambertMaterial({
+          color: materialConfig.color,
+          side: THREE.DoubleSide,
+          transparent: materialConfig.transparent,
+          toneMapped: false // Fix gray appearance
         });
       }
       
-      // Copy existing texture if available
-      if (child.material && child.material.map) {
-        newMaterial.map = child.material.map;
+      // Try to apply extracted texture if available
+      const originalMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+      
+      // Look for texture in various places
+      let appliedTexture = false;
+      
+      // Method 1: Use extracted texture from textureMap
+      if (originalMaterial && originalMaterial.map && originalMaterial.map.image) {
+        // Find matching texture in our extracted map
+        for (const [index, texture] of textureMap.entries()) {
+          if (texture && texture.image) {
+            newMaterial.map = texture;
+            appliedTexture = true;
+            log(`Applied extracted texture to ${child.name}`);
+            break;
+          }
+        }
       }
       
+      // Method 2: Copy existing texture if available
+      if (!appliedTexture && originalMaterial && originalMaterial.map) {
+        newMaterial.map = originalMaterial.map.clone();
+        newMaterial.map.colorSpace = THREE.SRGBColorSpace;
+        newMaterial.map.flipY = false;
+        appliedTexture = true;
+        log(`Applied existing texture to ${child.name}`);
+      }
+      
+      // Method 3: Try to extract from material properties
+      if (!appliedTexture && originalMaterial) {
+        // Check for other texture properties
+        if (originalMaterial.emissiveMap) {
+          newMaterial.map = originalMaterial.emissiveMap.clone();
+          appliedTexture = true;
+        } else if (originalMaterial.normalMap) {
+          // Use normal map as base if no diffuse
+          newMaterial.normalMap = originalMaterial.normalMap.clone();
+        }
+      }
+      
+      // Apply the enhanced material
       child.material = newMaterial;
-      log(`Applied material to: ${child.name}`);
+      child.castShadow = true;
+      child.receiveShadow = true;
+      
+      log(`Applied ${appliedTexture ? 'textured' : 'colored'} material to: ${child.name}`);
     }
   });
   
-  // STEP 2: Proper scaling and positioning (keep original logic)
+  log('✅ VRM texture enhancement complete');
+}
+
+// ===== MATERIAL CONFIGURATION =====
+function getMaterialConfig(meshName) {
+  // Enhanced material detection based on mesh names
+  const name = meshName.toLowerCase();
+  
+  if (name.includes('hair') || name.includes('前髪') || name.includes('後髪')) {
+    return {
+      color: 0xff69b4, // Pink hair
+      roughness: 0.4,
+      metalness: 0.0,
+      useStandard: true,
+      transparent: false
+    };
+  } else if (name.includes('face') || name.includes('body') || name.includes('skin') || name.includes('顔') || name.includes('体')) {
+    return {
+      color: 0xffdbac, // Skin tone
+      roughness: 0.7,
+      metalness: 0.0,
+      useStandard: true,
+      transparent: false
+    };
+  } else if (name.includes('eye') || name.includes('瞳') || name.includes('iris')) {
+    return {
+      color: 0x4169e1, // Blue eyes
+      roughness: 0.1,
+      metalness: 0.2,
+      useStandard: true,
+      transparent: false
+    };
+  } else if (name.includes('cloth') || name.includes('top') || name.includes('shirt') || name.includes('服') || name.includes('上')) {
+    return {
+      color: 0xffffff, // White clothing
+      roughness: 0.8,
+      metalness: 0.0,
+      useStandard: true,
+      transparent: false
+    };
+  } else if (name.includes('skirt') || name.includes('bottom') || name.includes('pants') || name.includes('スカート') || name.includes('下')) {
+    return {
+      color: 0x2c2c2c, // Dark bottom
+      roughness: 0.6,
+      metalness: 0.1,
+      useStandard: true,
+      transparent: false
+    };
+  } else if (name.includes('accessory') || name.includes('decoration') || name.includes('ribbon')) {
+    return {
+      color: 0xff1493, // Bright pink accessories
+      roughness: 0.3,
+      metalness: 0.1,
+      useStandard: true,
+      transparent: false
+    };
+  } else {
+    return {
+      color: 0xcccccc, // Default gray
+      roughness: 0.5,
+      metalness: 0.1,
+      useStandard: false,
+      transparent: false
+    };
+  }
+}
+
+// ===== ENHANCED VRM PROCESSING =====
+async function processAndAddVRMEnhanced(gltf) {
+  log('🎨 Processing VRM with advanced texture and animation system...');
+  
+  // STEP 1: Fix textures first
+  await fixVRMTextures(gltf);
+  
+  // STEP 2: Proper scaling and positioning
   const box = new THREE.Box3().setFromObject(gltf.scene);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
+  
+  log('VRM dimensions:', {
+    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+    center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
+  });
   
   let scale = 1.0;
   if (size.y > 50) {
@@ -1973,6 +2167,7 @@ async function processAndAddVRMEnhanced(gltf) {
   const scaledSize = scaledBox.getSize(new THREE.Vector3());
   const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
   
+  // Center and position
   gltf.scene.position.x = -scaledCenter.x;
   gltf.scene.position.y = -scaledBox.min.y;
   gltf.scene.position.z = -scaledCenter.z;
@@ -1989,54 +2184,109 @@ async function processAndAddVRMEnhanced(gltf) {
   camera.position.set(0, lookAtHeight, cameraDistance);
   camera.lookAt(0, lookAtHeight, 0);
   
-  // STEP 4: Add custom animations
-  addVRMIdleAnimations(gltf.scene);
+  // STEP 4: Setup advanced animations
+  setupAdvancedVRMAnimations(gltf);
   
   // STEP 5: Setup VRM expressions if available
   if (gltf.userData && gltf.userData.vrm) {
     currentVRM = gltf.userData.vrm;
     log('VRM expressions available');
+    setupVRMExpressions();
   }
   
   log('✅ Enhanced VRM setup complete!');
 }
 
-// Add idle animations to make the character move
-function addVRMIdleAnimations(vrmScene) {
+// ===== ADVANCED ANIMATION SYSTEM =====
+function setupAdvancedVRMAnimations(gltf) {
+  log('🎭 Setting up advanced VRM animations...');
+  
+  // Setup built-in animations if available
+  if (gltf.animations && gltf.animations.length > 0) {
+    log(`Found ${gltf.animations.length} built-in animations`);
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    
+    gltf.animations.forEach((clip, index) => {
+      const action = mixer.clipAction(clip);
+      action.setLoop(THREE.LoopRepeat);
+      action.play();
+      log(`Playing animation: ${clip.name || `Animation_${index}`}`);
+    });
+  }
+  
+  // Add custom idle animations
+  addAdvancedIdleAnimations(gltf.scene);
+  
+  // Setup morph target animations for expressions
+  setupMorphTargetAnimations(gltf.scene);
+}
+
+// ===== ADVANCED IDLE ANIMATIONS =====
+function addAdvancedIdleAnimations(vrmScene) {
   let time = 0;
   let blinkTimer = 0;
+  let headMovementTimer = 0;
+  
+  // Find important bones/objects
+  const headBone = findBoneByName(vrmScene, ['head', 'Head', 'neck', 'Neck']);
+  const eyeBones = {
+    left: findBoneByName(vrmScene, ['leftEye', 'LeftEye', 'eye_L']),
+    right: findBoneByName(vrmScene, ['rightEye', 'RightEye', 'eye_R'])
+  };
   
   function animateVRM() {
     if (!scene.getObjectByName('VRM_Model')) return;
     
     time += 0.016;
     blinkTimer += 0.016;
+    headMovementTimer += 0.016;
     
-    // Breathing (very subtle)
-    const breathingScale = 1 + Math.sin(time * 2) * 0.005;
+    // Breathing animation (very subtle)
+    const breathingScale = 1 + Math.sin(time * 2.5) * 0.003;
     vrmScene.scale.y = vrmScene.scale.x * breathingScale;
     
     // Gentle body sway
-    vrmScene.rotation.y = Math.sin(time * 0.5) * 0.02;
+    vrmScene.rotation.y = Math.sin(time * 0.7) * 0.015;
+    vrmScene.rotation.z = Math.sin(time * 0.5) * 0.005;
     
-    // Random head movement
-    vrmScene.traverse((child) => {
-      if (child.name.toLowerCase().includes('head') || child.name.toLowerCase().includes('neck')) {
-        child.rotation.y = Math.sin(time * 0.8) * 0.05;
-        child.rotation.x = Math.sin(time * 0.6) * 0.02;
+    // Advanced head movement
+    if (headBone) {
+      if (headMovementTimer > 2 + Math.random() * 3) {
+        // Random head movement every 2-5 seconds
+        headBone.rotation.y = (Math.random() - 0.5) * 0.3;
+        headBone.rotation.x = (Math.random() - 0.5) * 0.1;
+        headMovementTimer = 0;
+      } else {
+        // Smooth back to center
+        headBone.rotation.y *= 0.98;
+        headBone.rotation.x *= 0.98;
       }
-    });
+      
+      // Add subtle continuous movement
+      headBone.rotation.y += Math.sin(time * 0.8) * 0.02;
+      headBone.rotation.x += Math.sin(time * 0.6) * 0.01;
+    }
     
-    // Blinking simulation
-    if (blinkTimer > 3 + Math.random() * 2) {
-      vrmScene.traverse((child) => {
-        if (child.isMesh && child.name.toLowerCase().includes('eye')) {
-          child.scale.y = 0.1;
-          setTimeout(() => {
-            child.scale.y = 1;
-          }, 120);
-        }
-      });
+    // Eye movement
+    if (eyeBones.left || eyeBones.right) {
+      const eyeMovement = {
+        x: Math.sin(time * 1.2) * 0.1,
+        y: Math.sin(time * 0.9) * 0.05
+      };
+      
+      if (eyeBones.left) {
+        eyeBones.left.rotation.x = eyeMovement.y;
+        eyeBones.left.rotation.y = eyeMovement.x;
+      }
+      if (eyeBones.right) {
+        eyeBones.right.rotation.x = eyeMovement.y;
+        eyeBones.right.rotation.y = eyeMovement.x;
+      }
+    }
+    
+    // Enhanced blinking with morph targets
+    if (blinkTimer > 2 + Math.random() * 3) {
+      performBlink(vrmScene);
       blinkTimer = 0;
     }
     
@@ -2044,41 +2294,133 @@ function addVRMIdleAnimations(vrmScene) {
   }
   
   animateVRM();
-  log('🎭 Idle animations started');
+  log('🎭 Advanced idle animations started');
 }
 
-// Enhanced lighting for better visibility
-function enhanceSceneLighting() {
-  // Remove existing lights
-  const lightsToRemove = [];
-  scene.traverse((child) => {
-    if (child.isLight) {
-      lightsToRemove.push(child);
+// ===== ENHANCED BLINKING =====
+function performBlink(vrmScene) {
+  // Method 1: Try VRM expressions if available
+  if (currentVRM && currentVRM.expressionManager) {
+    try {
+      currentVRM.expressionManager.setValue('blink', 1.0);
+      setTimeout(() => {
+        if (currentVRM) currentVRM.expressionManager.setValue('blink', 0);
+      }, 120);
+      return;
+    } catch (err) {
+      log('VRM expression blink failed:', err);
+    }
+  }
+  
+  // Method 2: Use morph targets
+  vrmScene.traverse((child) => {
+    if (child.isMesh && child.morphTargetDictionary) {
+      const blinkTargets = ['blink', 'Blink', 'eye_close', 'EyeClose'];
+      
+      for (const target of blinkTargets) {
+        if (child.morphTargetDictionary[target] !== undefined) {
+          const index = child.morphTargetDictionary[target];
+          child.morphTargetInfluences[index] = 1.0;
+          
+          setTimeout(() => {
+            child.morphTargetInfluences[index] = 0.0;
+          }, 120);
+          return;
+        }
+      }
     }
   });
-  lightsToRemove.forEach(light => scene.remove(light));
   
-  // Add professional lighting setup
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambientLight);
-  
-  const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  mainLight.position.set(2, 3, 2);
-  scene.add(mainLight);
-  
-  const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-  fillLight.position.set(-1, 1, 1);
-  scene.add(fillLight);
-  
-  const rimLight = new THREE.DirectionalLight(0xaaccff, 0.5);
-  rimLight.position.set(0, 1, -2);
-  scene.add(rimLight);
-  
-  log('💡 Enhanced lighting applied');
+  // Method 3: Scale eye meshes
+  vrmScene.traverse((child) => {
+    if (child.isMesh && child.name.toLowerCase().includes('eye')) {
+      child.scale.y = 0.1;
+      setTimeout(() => {
+        child.scale.y = 1.0;
+      }, 120);
+    }
+  });
 }
 
-// Fix audio autoplay issues
-function fixAudioSystem() {
+// ===== MORPH TARGET ANIMATION SETUP =====
+function setupMorphTargetAnimations(vrmScene) {
+  vrmScene.traverse((child) => {
+    if (child.isMesh && child.morphTargetDictionary) {
+      log(`Found morph targets on ${child.name}:`, Object.keys(child.morphTargetDictionary));
+      
+      // Initialize all morph target influences to 0
+      if (child.morphTargetInfluences) {
+        for (let i = 0; i < child.morphTargetInfluences.length; i++) {
+          child.morphTargetInfluences[i] = 0;
+        }
+      }
+    }
+  });
+}
+
+// ===== VRM EXPRESSIONS SETUP =====
+function setupVRMExpressions() {
+  if (!currentVRM) return;
+  
+  try {
+    // Test available expressions
+    const expressions = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'blink'];
+    
+    expressions.forEach(expr => {
+      try {
+        currentVRM.expressionManager.setValue(expr, 0);
+        log(`VRM expression available: ${expr}`);
+      } catch (err) {
+        // Expression not available
+      }
+    });
+    
+    // Set to neutral
+    currentVRM.expressionManager.setValue('neutral', 1);
+    
+  } catch (err) {
+    log('VRM expression setup failed:', err);
+  }
+}
+
+// ===== UTILITY FUNCTIONS =====
+function findBoneByName(object, names) {
+  let foundBone = null;
+  
+  object.traverse((child) => {
+    if (child.isBone || child.type === 'Bone') {
+      const childName = child.name.toLowerCase();
+      for (const name of names) {
+        if (childName.includes(name.toLowerCase())) {
+          foundBone = child;
+          return;
+        }
+      }
+    }
+  });
+  
+  return foundBone;
+}
+
+// ===== EXPRESSION CONTROL FOR TTS =====
+function setVRMExpression(expression, value = 1.0, duration = 500) {
+  if (!currentVRM) return;
+  
+  try {
+    currentVRM.expressionManager.setValue(expression, value);
+    
+    if (duration > 0) {
+      setTimeout(() => {
+        if (currentVRM) currentVRM.expressionManager.setValue(expression, 0);
+      }, duration);
+    }
+  } catch (err) {
+    log('Expression control failed:', err);
+  }
+}
+
+// ===== ENHANCED AUDIO SYSTEM WITH EXPRESSIONS =====
+function fixAudioSystemWithExpressions() {
   let audioEnabled = false;
   
   function enableAudio() {
@@ -2089,9 +2431,10 @@ function fixAudioSystem() {
         audioEnabled = true;
         log('🔊 Audio system enabled');
         
-        // Test TTS
+        // Test TTS with expression
         setTimeout(() => {
-          queueTTS("Audio is now working! I can speak to you.", 'nova');
+          setVRMExpression('happy', 1.0, 2000);
+          queueTTS("Hello! I can now see you and speak with expressions!", 'nova');
         }, 500);
       } catch (err) {
         log('Audio enable failed:', err);
@@ -2111,32 +2454,137 @@ function fixAudioSystem() {
   }
 }
 
-// Replace the original processAndAddVRM function
-if (typeof processAndAddVRM !== 'undefined') {
-  window.originalProcessAndAddVRM = processAndAddVRM;
-  window.processAndAddVRM = processAndAddVRMEnhanced;
+// ===== ENHANCED FALLBACK TTS WITH EXPRESSIONS =====
+function fallbackTTSEnhanced(text, voice) {
+  try {
+    log(`🗣️ Enhanced TTS: "${text.substring(0, 30)}..."`);
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Get better voice
+    const voices = speechSynthesis.getVoices();
+    const femaleVoices = voices.filter(v => 
+      v.name.toLowerCase().includes('female') || 
+      v.name.toLowerCase().includes('woman') ||
+      v.name.toLowerCase().includes('alex') ||
+      v.name.toLowerCase().includes('samantha')
+    );
+    
+    const selectedVoice = femaleVoices.length > 0 ? femaleVoices[0] : voices[0];
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+    
+    utterance.rate = 0.9;
+    utterance.pitch = 1.1;
+    utterance.volume = 0.8;
+    
+    utterance.onend = () => {
+      isPlaying = false;
+      setVRMExpression('neutral', 1.0, 100);
+      playNextAudio();
+      log('✅ Enhanced TTS completed');
+    };
+    
+    utterance.onstart = () => {
+      // Set happy expression during speech
+      setVRMExpression('happy', 0.7, 0);
+      log('🎙️ Enhanced TTS started with expression');
+    };
+    
+    utterance.onerror = (err) => {
+      log('Enhanced TTS error:', err);
+      isPlaying = false;
+      setVRMExpression('neutral', 1.0, 100);
+      playNextAudio();
+    };
+    
+    speechSynthesis.speak(utterance);
+    isPlaying = true;
+    
+  } catch (err) {
+    log('Enhanced TTS failed:', err);
+    isPlaying = false;
+    playNextAudio();
+  }
 }
 
-// Apply enhancements to existing VRM if already loaded
-const existingVRM = scene?.getObjectByName('VRM_Model');
-if (existingVRM) {
-  log('Enhancing existing VRM...');
+// ===== APPLY ALL FIXES =====
+// Wait for scene to be available, then apply fixes
+function applyComprehensiveFixes() {
+  if (!scene) {
+    setTimeout(applyComprehensiveFixes, 100);
+    return;
+  }
+  
+  log('🚀 Applying comprehensive VRM fixes...');
+  
+  // Replace the original processAndAddVRM function
+  if (typeof processAndAddVRM !== 'undefined') {
+    window.originalProcessAndAddVRM = processAndAddVRM;
+    window.processAndAddVRM = processAndAddVRMEnhanced;
+  }
+  
+  // Replace fallback TTS
+  if (typeof fallbackTTS !== 'undefined') {
+    window.originalFallbackTTS = fallbackTTS;
+    window.fallbackTTS = fallbackTTSEnhanced;
+  }
+  
+  // Fix lighting
   enhanceSceneLighting();
-  addVRMIdleAnimations(existingVRM);
+  
+  // Fix audio system
+  fixAudioSystemWithExpressions();
+  
+  // Apply to existing VRM if present
+  const existingVRM = scene.getObjectByName('VRM_Model');
+  if (existingVRM) {
+    log('Applying fixes to existing VRM...');
+    const fakeGltf = { scene: existingVRM };
+    fixVRMTextures(fakeGltf);
+    addAdvancedIdleAnimations(existingVRM);
+  }
+  
+  log('✅ Comprehensive VRM fixes applied!');
 }
 
-// Fix audio and lighting
-enhanceSceneLighting();
-fixAudioSystem();
-
-// Manual reload function for console
-window.reloadWithEnhancements = function() {
+// ===== MANUAL RELOAD WITH FIXES =====
+window.reloadWithComprehensiveFixes = function() {
+  log('🔄 Reloading VRM with comprehensive fixes...');
   forceReloadVRM();
   setTimeout(() => {
     enhanceSceneLighting();
   }, 2000);
 };
 
-console.log('🎨 VRM Enhancements Applied!');
-console.log('🔧 If VRM is still white, run: reloadWithEnhancements()');
-console.log('🔊 Click anywhere to enable audio');
+// ===== EXPRESSION TESTING FUNCTION =====
+window.testVRMExpressions = function() {
+  if (!currentVRM) {
+    log('No VRM loaded to test expressions');
+    return;
+  }
+  
+  const expressions = ['happy', 'sad', 'angry', 'surprised', 'neutral'];
+  let index = 0;
+  
+  function cycleExpression() {
+    const expr = expressions[index];
+    setVRMExpression(expr, 1.0, 1500);
+    log(`Testing expression: ${expr}`);
+    
+    index = (index + 1) % expressions.length;
+    if (index < expressions.length) {
+      setTimeout(cycleExpression, 2000);
+    }
+  }
+  
+  cycleExpression();
+};
+
+// Start applying fixes
+applyComprehensiveFixes();
+
+console.log('🎨 Comprehensive VRM fixes loaded!');
+console.log('🔧 Commands: reloadWithComprehensiveFixes(), testVRMExpressions()');
+console.log('🔊 Click anywhere to enable audio and expressions');
