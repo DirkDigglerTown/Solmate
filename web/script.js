@@ -40,6 +40,37 @@ function log(msg, data = null) {
   }
 }
 
+// ===== UTILITY: LOAD SCRIPT WITH DETAILED DEBUGGING =====
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    log(`Attempting to load script: ${src}`);
+    
+    // Check if script already exists
+    const existingScript = document.querySelector(`script[src="${src}"]`);
+    if (existingScript) {
+      log(`Script already exists: ${src}`);
+      resolve();
+      return;
+    }
+    
+    const script = document.createElement('script');
+    script.src = src;
+    
+    script.onload = () => {
+      log(`Script loaded successfully: ${src}`);
+      resolve();
+    };
+    
+    script.onerror = (error) => {
+      log(`Script failed to load: ${src}`, error);
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+    
+    document.head.appendChild(script);
+    log(`Script element added to head: ${src}`);
+  });
+}
+
 // ===== THREE.JS SETUP (NOW WITH VRM LOADING) =====
 async function initThree() {
   try {
@@ -226,95 +257,6 @@ async function initThree() {
   }
 }
 
-// ===== UTILITY: LOAD SCRIPT WITH DETAILED DEBUGGING =====
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    log(`Attempting to load script: ${src}`);
-    
-    // Check if script already exists
-    const existingScript = document.querySelector(`script[src="${src}"]`);
-    if (existingScript) {
-      log(`Script already exists: ${src}`);
-      resolve();
-      return;
-    }
-    
-    const script = document.createElement('script');
-    script.src = src;
-    
-    script.onload = () => {
-      log(`Script loaded successfully: ${src}`);
-      resolve();
-    };
-    
-    script.onerror = (error) => {
-      log(`Script failed to load: ${src}`, error);
-      reject(new Error(`Failed to load script: ${src}`));
-    };
-    
-    document.head.appendChild(script);
-    log(`Script element added to head: ${src}`);
-  });
-}
-
-// ===== CREATE SIMPLE FALLBACK =====
-function createSimpleFallback() {
-  const canvas = document.getElementById('vrmCanvas');
-  if (canvas) {
-    canvas.style.display = 'none';
-  }
-  
-  const fallback = document.createElement('div');
-  fallback.style.cssText = `
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    color: white;
-    font-family: Arial, sans-serif;
-  `;
-  fallback.innerHTML = `
-    <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
-    <div style="margin-top: 20px;">
-      <h2>Solmate</h2>
-      <p>Audio-only mode active</p>
-    </div>
-  `;
-  document.body.appendChild(fallback);
-}
-
-// ===== CREATE FALLBACK AVATAR =====
-async function createFallbackAvatar() {
-  try {
-    // Create a simple geometric avatar as fallback
-    const geometry = new THREE.SphereGeometry(0.3, 32, 32);
-    const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
-    const avatar = new THREE.Mesh(geometry, material);
-    avatar.position.set(0, 0.5, 0);
-    avatar.name = 'fallbackAvatar';
-    scene.add(avatar);
-    
-    // Add simple animation
-    let animationId;
-    function animateFallback() {
-      if (scene.getObjectByName('fallbackAvatar')) {
-        avatar.rotation.y += 0.01;
-        animationId = requestAnimationFrame(animateFallback);
-      }
-    }
-    animateFallback();
-    
-    // Hide loading status since we have something to show
-    const statusEl = document.getElementById('loadingStatus');
-    if (statusEl) statusEl.style.display = 'none';
-    
-    log('Fallback avatar created');
-  } catch (err) {
-    log('Failed to create fallback avatar', err);
-  }
-}
-
 // ===== LOAD VRM FILE (SIMPLIFIED VERSION) =====
 async function loadVRMFile(url, retryCount = 0) {
   try {
@@ -417,43 +359,63 @@ async function loadVRMFile(url, retryCount = 0) {
       throw err;
     }
   }
-}');
-      currentVRM = gltf.userData.vrm;
-      currentVRM.scene.position.y = -1;
-      scene.add(currentVRM.scene);
-      mixer = new THREE.AnimationMixer(currentVRM.scene);
-    } else {
-      log('No VRM data, using as regular GLTF model');
-      // Use the first scene as a regular 3D model
-      if (gltf.scenes.length > 0) {
-        const model = gltf.scenes[0];
-        model.position.y = -1;
-        model.name = 'gltfModel';
-        scene.add(model);
-        
-        if (gltf.animations.length > 0) {
-          mixer = new THREE.AnimationMixer(model);
-          const action = mixer.clipAction(gltf.animations[0]);
-          action.play();
-        }
+}
+
+// ===== CREATE SIMPLE FALLBACK =====
+function createSimpleFallback() {
+  const canvas = document.getElementById('vrmCanvas');
+  if (canvas) {
+    canvas.style.display = 'none';
+  }
+  
+  const fallback = document.createElement('div');
+  fallback.style.cssText = `
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    font-family: Arial, sans-serif;
+  `;
+  fallback.innerHTML = `
+    <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
+    <div style="margin-top: 20px;">
+      <h2>Solmate</h2>
+      <p>Audio-only mode active</p>
+    </div>
+  `;
+  document.body.appendChild(fallback);
+}
+
+// ===== CREATE FALLBACK AVATAR =====
+async function createFallbackAvatar() {
+  try {
+    // Create a simple geometric avatar as fallback
+    const geometry = new THREE.SphereGeometry(0.3, 32, 32);
+    const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
+    const avatar = new THREE.Mesh(geometry, material);
+    avatar.position.set(0, 0.5, 0);
+    avatar.name = 'fallbackAvatar';
+    scene.add(avatar);
+    
+    // Add simple animation
+    let animationId;
+    function animateFallback() {
+      if (scene.getObjectByName('fallbackAvatar')) {
+        avatar.rotation.y += 0.01;
+        animationId = requestAnimationFrame(animateFallback);
       }
     }
+    animateFallback();
     
-    // Hide loading status
+    // Hide loading status since we have something to show
     const statusEl = document.getElementById('loadingStatus');
     if (statusEl) statusEl.style.display = 'none';
     
-    log('VRM/Model loaded successfully');
-    
+    log('Fallback avatar created');
   } catch (err) {
-    if (retryCount < VRM_MAX_RETRIES) {
-      log(`VRM load retry ${retryCount + 1}...`, err);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return loadVRM(url, retryCount + 1);
-    }
-    
-    log('VRM load failed completely', err);
-    throw err; // Re-throw to trigger fallback
+    log('Failed to create fallback avatar', err);
   }
 }
 
@@ -547,44 +509,121 @@ function updateTPS(tps) {
   }
 }
 
-// ===== FETCH PRICE (FIXED) =====
+// ===== FETCH PRICE (FIXED WITH DETAILED DEBUGGING) =====
 async function fetchPrice() {
   try {
-    const res = await fetch(`/api/price?ids=${SOL_MINT}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    log('=== FETCHING PRICE DATA ===');
+    const url = `/api/price?ids=${SOL_MINT}`;
+    log('Price API URL:', url);
     
-    const data = await res.json();
-    log('Price data received', data);
+    const res = await fetch(url);
+    log('Price API response status:', res.status);
+    log('Price API response headers:', Object.fromEntries(res.headers.entries()));
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    
+    // Get raw text first to debug
+    const text = await res.text();
+    log('Raw response text:', text.substring(0, 500)); // First 500 chars
+    
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      log('JSON parse failed:', parseError);
+      throw new Error('Invalid JSON response');
+    }
+    
+    log('Parsed data type:', typeof data);
+    log('Parsed data keys:', Object.keys(data));
+    
+    // Force detailed logging to console
+    console.log('=== COMPLETE PRICE RESPONSE DEBUG ===');
+    console.log('Status:', res.status);
+    console.log('Raw text length:', text.length);
+    console.log('Raw text sample:', text.substring(0, 200));
+    console.log('Parsed data:', data);
+    console.log('Data structure:');
+    console.log(JSON.stringify(data, null, 2));
+    console.log('=== END PRICE DEBUG ===');
     
     const solPrice = document.getElementById('solPrice');
-    if (solPrice) {
-      // Handle multiple possible response formats
-      let price = null;
-      
-      if (data.data && data.data[SOL_MINT] && typeof data.data[SOL_MINT].price === 'number') {
-        price = data.data[SOL_MINT].price;
-      } else if (data.price && typeof data.price === 'number') {
-        price = data.price;
-      } else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'number') {
-        price = data[SOL_MINT];
-      } else if (typeof data === 'number') {
-        price = data;
-      }
-      
-      if (price !== null && !isNaN(price)) {
-        solPrice.textContent = `SOL — ${price.toFixed(2)}`;
-        solPrice.style.color = '#00ff88'; // Success color
-        log(`Price updated: ${price.toFixed(2)}`);
-      } else {
-        solPrice.textContent = 'SOL — Data format error';
-        solPrice.style.color = '#ff6b6b'; // Error color
-        log('Price data format not recognized', data);
-      }
-    } else {
-      log('solPrice element not found in DOM');
+    if (!solPrice) {
+      log('ERROR: solPrice element not found in DOM');
+      return;
     }
+    
+    // Based on Jupiter Lite API v3, the response should be:
+    // { "data": { "So11111111111111111111111111111111111111112": { "id": "...", "type": "...", "price": number } } }
+    
+    let price = null;
+    let priceSource = '';
+    
+    // Method 1: Jupiter Lite API v3 format - data.data[mint].price
+    if (data.data && typeof data.data === 'object' && data.data[SOL_MINT]) {
+      const solData = data.data[SOL_MINT];
+      log('Found SOL data object:', solData);
+      if (typeof solData.price === 'number') {
+        price = solData.price;
+        priceSource = 'Jupiter API v3: data.data[SOL_MINT].price';
+      }
+    }
+    // Method 2: Direct in data object
+    else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'object' && typeof data[SOL_MINT].price === 'number') {
+      price = data[SOL_MINT].price;
+      priceSource = 'Direct mint object: data[SOL_MINT].price';
+    }
+    // Method 3: Direct price field
+    else if (typeof data.price === 'number') {
+      price = data.price;
+      priceSource = 'Direct price field';
+    }
+    // Method 4: SOL mint key as number
+    else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'number') {
+      price = data[SOL_MINT];
+      priceSource = 'Direct mint key as number';
+    }
+    // Method 5: Search for ANY reasonable price value
+    else {
+      log('No standard format found, searching entire response...');
+      function searchForPrice(obj, path = '') {
+        if (typeof obj === 'number' && obj > 1 && obj < 10000) {
+          log(`Found potential price: ${obj} at ${path || 'root'}`);
+          if (!price) {
+            price = obj;
+            priceSource = `Auto-detected number at ${path || 'root'}`;
+          }
+        } else if (typeof obj === 'object' && obj !== null) {
+          for (const [key, value] of Object.entries(obj)) {
+            const newPath = path ? `${path}.${key}` : key;
+            searchForPrice(value, newPath);
+          }
+        }
+      }
+      searchForPrice(data);
+    }
+    
+    log('Final price extraction result:', { price, priceSource });
+    
+    if (price !== null && !isNaN(price) && price > 0) {
+      solPrice.textContent = `SOL — $${price.toFixed(2)}`;
+      solPrice.style.color = '#00ff88'; // Success color
+      log(`✅ SUCCESS: Price updated to $${price.toFixed(2)} (${priceSource})`);
+    } else {
+      solPrice.textContent = 'SOL — Data parsing error';
+      solPrice.style.color = '#ff6b6b'; // Error color
+      log('❌ FAILED: Could not extract price from response');
+      log('Available data:', Object.keys(data));
+      
+      // Show what we actually got
+      if (data.data && data.data[SOL_MINT]) {
+        log('SOL mint data keys:', Object.keys(data.data[SOL_MINT]));
+        log('SOL mint data values:', data.data[SOL_MINT]);
+      }
+    }
+    
   } catch (err) {
-    log('Price fetch failed', err);
+    log('=== PRICE FETCH FAILED ===', err);
     const solPrice = document.getElementById('solPrice');
     if (solPrice) {
       solPrice.textContent = 'SOL — Network error';
