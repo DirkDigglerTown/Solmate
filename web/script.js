@@ -43,129 +43,200 @@ function log(msg, data = null) {
 // ===== THREE.JS SETUP (FIXED) =====
 async function initThree() {
   try {
+    log('=== STARTING THREE.JS INITIALIZATION ===');
     log('Loading Three.js modules...');
     
-    // FIXED: Load Three.js via script tags with better error handling
+    // STEP 1: Load Three.js core with detailed debugging
     if (!window.THREE) {
-      log('Loading Three.js core...');
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
-      THREE = window.THREE;
-      log('Three.js core loaded');
-    }
-    
-    // Verify THREE is available
-    if (!THREE) {
-      throw new Error('Three.js failed to load - window.THREE is undefined');
-    }
-    
-    // Load GLTFLoader - use a more reliable CDN
-    if (!THREE.GLTFLoader) {
-      log('Loading GLTF Loader...');
+      log('Three.js not found in window, loading from CDN...');
       try {
-        await loadScript('https://threejs.org/examples/js/loaders/GLTFLoader.js');
-        GLTFLoader = THREE.GLTFLoader;
-        log('GLTF Loader loaded successfully');
-      } catch (gltfError) {
-        log('Official GLTF loader failed, trying alternative', gltfError);
-        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
-        GLTFLoader = THREE.GLTFLoader;
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
+        log('Three.js script load completed, checking window.THREE...');
+        
+        if (!window.THREE) {
+          log('ERROR: window.THREE is still undefined after script load');
+          throw new Error('Three.js script loaded but window.THREE is undefined');
+        }
+        
+        THREE = window.THREE;
+        log('Three.js core assigned successfully');
+        log('THREE object keys:', Object.keys(THREE).slice(0, 10)); // Show first 10 keys
+        
+      } catch (scriptError) {
+        log('Failed to load Three.js script', scriptError);
+        throw new Error(`Three.js script loading failed: ${scriptError.message}`);
+      }
+    } else {
+      log('Three.js already available in window');
+      THREE = window.THREE;
+    }
+    
+    // STEP 2: Verify THREE is working
+    log('Verifying THREE functionality...');
+    try {
+      const testScene = new THREE.Scene();
+      log('THREE.Scene creation successful');
+      const testCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+      log('THREE.PerspectiveCamera creation successful');
+    } catch (threeError) {
+      log('THREE basic functionality test failed', threeError);
+      throw new Error(`THREE basic test failed: ${threeError.message}`);
+    }
+    
+    // STEP 3: Load GLTFLoader with multiple fallbacks
+    if (!THREE.GLTFLoader) {
+      log('GLTF Loader not found, attempting to load...');
+      const gltfSources = [
+        'https://threejs.org/examples/js/loaders/GLTFLoader.js',
+        'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+        'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js'
+      ];
+      
+      let gltfLoaded = false;
+      for (const source of gltfSources) {
+        try {
+          log(`Trying GLTF loader source: ${source}`);
+          await loadScript(source);
+          if (THREE.GLTFLoader) {
+            log('GLTF Loader loaded successfully from:', source);
+            gltfLoaded = true;
+            break;
+          }
+        } catch (gltfError) {
+          log(`GLTF loader failed from ${source}:`, gltfError);
+        }
+      }
+      
+      if (!gltfLoaded) {
+        log('All GLTF loader sources failed, will skip 3D model loading');
       }
     }
     
-    // Skip VRM for now to isolate the issue
-    log('Skipping VRM loader for debugging - will load basic GLTF only');
+    log('=== SETTING UP THREE.JS SCENE ===');
     
-    log('Three.js modules loaded, setting up scene...');
-    
-    // Setup scene
+    // STEP 4: Setup scene
+    log('Creating scene...');
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0e17);
-    log('Scene created');
+    log('Scene created successfully');
     
-    // Setup camera
+    // STEP 5: Setup camera
+    log('Creating camera...');
     camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
     camera.position.set(0, 1.3, 2.5);
     camera.lookAt(0, 1, 0);
-    log('Camera created');
+    log('Camera created successfully');
     
-    // Setup renderer
+    // STEP 6: Setup renderer
+    log('Setting up renderer...');
     const canvas = document.getElementById('vrmCanvas');
     if (!canvas) {
-      throw new Error('Canvas element #vrmCanvas not found');
+      throw new Error('Canvas element #vrmCanvas not found in DOM');
     }
+    log('Canvas element found');
     
+    log('Creating WebGL renderer...');
     renderer = new THREE.WebGLRenderer({ 
       canvas, 
       antialias: true,
       alpha: true 
     });
+    
+    log('Setting renderer size...');
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     
-    // Handle different Three.js versions safely
+    // Handle color space safely
+    log('Setting color space...');
     try {
       if (renderer.outputColorSpace !== undefined) {
         renderer.outputColorSpace = THREE.SRGBColorSpace;
+        log('Color space set to SRGBColorSpace');
       } else if (renderer.outputEncoding !== undefined) {
         renderer.outputEncoding = THREE.sRGBEncoding;
+        log('Output encoding set to sRGBEncoding');
       }
     } catch (colorSpaceError) {
       log('Color space setting failed, continuing anyway', colorSpaceError);
     }
     
-    log('Renderer created');
+    log('Renderer created successfully');
     
-    // Lights
+    // STEP 7: Add lights
+    log('Adding lights...');
     const ambient = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambient);
     
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight.position.set(1, 1, 1);
     scene.add(dirLight);
-    log('Lights added');
+    log('Lights added successfully');
     
-    // Clock for animations
+    // STEP 8: Setup clock
+    log('Creating animation clock...');
     clock = new THREE.Clock();
+    log('Clock created');
     
-    // Create a simple test object first
+    // STEP 9: Create immediate fallback
+    log('Creating fallback avatar...');
     await createFallbackAvatar();
     
-    // Start animation loop
+    // STEP 10: Start animation loop
+    log('Starting animation loop...');
     animate();
     
-    log('Three.js initialized successfully');
+    log('=== THREE.JS INITIALIZATION COMPLETE ===');
     
-    // Try to load VRM after basic setup works
+    // STEP 11: Try VRM loading after basic setup works
     setTimeout(async () => {
       try {
-        log('Attempting VRM load after basic setup...');
+        log('=== ATTEMPTING VRM LOAD ===');
         await loadVRM(VRM_PATH);
       } catch (vrmError) {
         log('VRM loading failed, keeping fallback', vrmError);
       }
-    }, 2000);
+    }, 3000);
     
   } catch (err) {
-    log('Three.js init failed', err);
+    log('=== THREE.JS INITIALIZATION FAILED ===', err);
+    log('Error name:', err.name);
+    log('Error message:', err.message);
+    log('Error stack:', err.stack);
+    
     // Create a simple fallback display
     createSimpleFallback();
+    throw err; // Re-throw so calling code knows it failed
   }
 }
 
-// ===== UTILITY: LOAD SCRIPT =====
+// ===== UTILITY: LOAD SCRIPT WITH DETAILED DEBUGGING =====
 function loadScript(src) {
   return new Promise((resolve, reject) => {
+    log(`Attempting to load script: ${src}`);
+    
     // Check if script already exists
-    if (document.querySelector(`script[src="${src}"]`)) {
+    const existingScript = document.querySelector(`script[src="${src}"]`);
+    if (existingScript) {
+      log(`Script already exists: ${src}`);
       resolve();
       return;
     }
     
     const script = document.createElement('script');
     script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
+    
+    script.onload = () => {
+      log(`Script loaded successfully: ${src}`);
+      resolve();
+    };
+    
+    script.onerror = (error) => {
+      log(`Script failed to load: ${src}`, error);
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+    
     document.head.appendChild(script);
+    log(`Script element added to head: ${src}`);
   });
 }
 
