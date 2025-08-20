@@ -2,6 +2,7 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Solmate</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/logo/solmatelogo.png">
@@ -52,6 +53,13 @@
     </ul>
     <div id="overlayLogs"></div>
   </div>
-  <script type="module" src="/script.js"></script>
+  
+  <!-- Loading indicator -->
+  <div id="loadingStatus" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: Arial, sans-serif; z-index: 1000;">
+    Initializing Solmate...
+  </div>
+  
+  <!-- FIXED: Remove type="module" since we're using regular script loading -->
+  <script src="/script.js"></script>
 </body>
 </html>
