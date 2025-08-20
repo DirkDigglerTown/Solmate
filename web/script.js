@@ -1,5 +1,5 @@
 // web/script.js
-// Complete implementation with Three.js, VRM, Chat, TTS, WebSocket, and UI
+// Complete implementation with Enhanced VRM Loading, Three.js, Chat, TTS, WebSocket, and UI
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
@@ -71,769 +71,674 @@ function loadScript(src) {
   });
 }
 
-// ===== THREE.JS SETUP (NOW WITH VRM LOADING) =====
-async function initThree() {
+// ===== ENHANCED THREE.JS SETUP WITH RELIABLE GLTF LOADING =====
+async function initThreeEnhanced() {
   try {
-    log('=== STARTING THREE.JS INITIALIZATION ===');
-    log('Loading Three.js modules...');
+    log('=== ENHANCED THREE.JS INITIALIZATION ===');
     
-    // STEP 1: Load Three.js core with multiple CDN fallbacks
-    if (!window.THREE) {
-      log('Three.js not found in window, trying multiple CDN sources...');
-      
-      const threeSources = [
-        'https://unpkg.com/three@0.158.0/build/three.min.js',
-        'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js'
-      ];
-      
-      let threeLoaded = false;
-      for (const source of threeSources) {
-        try {
-          log(`Trying Three.js source: ${source}`);
-          await loadScript(source);
-          
-          if (window.THREE) {
-            THREE = window.THREE;
-            log('Three.js core loaded successfully from:', source);
-            log('THREE object keys:', Object.keys(THREE).slice(0, 10));
-            threeLoaded = true;
-            break;
-          } else {
-            log(`Script loaded but window.THREE is undefined for: ${source}`);
-          }
-        } catch (scriptError) {
-          log(`Three.js failed from ${source}:`, scriptError);
-        }
-      }
-      
-      if (!threeLoaded) {
-        throw new Error('All Three.js CDN sources failed to load');
-      }
-    } else {
-      log('Three.js already available in window');
-      THREE = window.THREE;
-    }
+    // STEP 1: Load Three.js with better error handling
+    await loadThreeJSReliably();
     
-    // STEP 2: Verify THREE is working
-    log('Verifying THREE functionality...');
-    try {
-      const testScene = new THREE.Scene();
-      log('THREE.Scene creation successful');
-      const testCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-      log('THREE.PerspectiveCamera creation successful');
-    } catch (threeError) {
-      log('THREE basic functionality test failed', threeError);
-      throw new Error(`THREE basic test failed: ${threeError.message}`);
-    }
+    // STEP 2: Load GLTF Loader with multiple strategies
+    await loadGLTFLoaderReliably();
     
-    // STEP 3: Load GLTFLoader for VRM support (EMBEDDED APPROACH)
-    if (!THREE.GLTFLoader) {
-      log('Loading GLTF Loader for VRM support...');
-      
-      // Since all external CDN sources are failing, let's try embedding a minimal GLTF loader
-      try {
-        log('Creating embedded GLTF loader...');
-        await createEmbeddedGLTFLoader();
-        if (THREE.GLTFLoader) {
-          log('✅ Embedded GLTF Loader created successfully');
-        } else {
-          log('Embedded GLTF loader creation failed');
-        }
-      } catch (embeddedError) {
-        log('Embedded GLTF loader failed:', embeddedError);
-        
-        // Last resort: try the external CDNs one more time with different approach
-        log('Trying external CDNs as final fallback...');
-        const gltfSources = [
-          'https://threejs.org/examples/js/loaders/GLTFLoader.js',
-          'https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js'
-        ];
-        
-        for (const source of gltfSources) {
-          try {
-            log(`Final attempt: ${source}`);
-            await loadScript(source);
-            if (THREE.GLTFLoader) {
-              log('✅ External GLTF Loader loaded successfully from:', source);
-              break;
-            }
-          } catch (finalError) {
-            log(`Final attempt failed from ${source}:`, finalError);
-          }
-        }
-      }
-    }
+    // STEP 3: Setup scene
+    setupThreeJSScene();
     
-    log('=== SETTING UP THREE.JS SCENE ===');
-    
-    // STEP 4: Setup scene
-    log('Creating scene...');
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0e17);
-    log('Scene created successfully');
-    
-    // STEP 5: Setup camera
-    log('Creating camera...');
-    camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
-    camera.position.set(0, 1.3, 2.5);
-    camera.lookAt(0, 1, 0);
-    log('Camera created successfully');
-    
-    // STEP 6: Setup renderer
-    log('Setting up renderer...');
-    const canvas = document.getElementById('vrmCanvas');
-    if (!canvas) {
-      throw new Error('Canvas element #vrmCanvas not found in DOM');
-    }
-    log('Canvas element found');
-    
-    log('Creating WebGL renderer...');
-    renderer = new THREE.WebGLRenderer({ 
-      canvas, 
-      antialias: true,
-      alpha: true 
-    });
-    
-    log('Setting renderer size...');
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    
-    // Handle color space safely
-    log('Setting color space...');
-    try {
-      if (renderer.outputColorSpace !== undefined) {
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        log('Color space set to SRGBColorSpace');
-      } else if (renderer.outputEncoding !== undefined) {
-        renderer.outputEncoding = THREE.sRGBEncoding;
-        log('Output encoding set to sRGBEncoding');
-      }
-    } catch (colorSpaceError) {
-      log('Color space setting failed, continuing anyway', colorSpaceError);
-    }
-    
-    log('Renderer created successfully');
-    
-    // STEP 7: Add lights
-    log('Adding lights...');
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambient);
-    
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(1, 1, 1);
-    scene.add(dirLight);
-    log('Lights added successfully');
-    
-    // STEP 8: Setup clock
-    log('Creating animation clock...');
-    clock = new THREE.Clock();
-    log('Clock created');
-    
-    // STEP 9: Create immediate fallback (but try VRM first)
-    log('Creating fallback avatar...');
-    await createFallbackAvatar();
-    
-    // STEP 10: Start animation loop
-    log('Starting animation loop...');
+    // STEP 4: Start animation loop
     animate();
     
-    log('=== THREE.JS INITIALIZATION COMPLETE ===');
+    // STEP 5: Create immediate fallback
+    await createFallbackAvatar();
     
-    // STEP 11: Try to load VRM file after scene is ready
+    // STEP 6: Try to load VRM after scene is ready
     setTimeout(async () => {
       try {
-        log('=== ATTEMPTING VRM LOAD ===');
-        if (THREE.GLTFLoader) {
-          await loadVRMFile(VRM_PATH);
-        } else {
-          log('No GLTF loader available, trying alternative VRM loading...');
-          await loadVRMAlternative(VRM_PATH);
-        }
+        await loadVRMWithReliableLoader(VRM_PATH);
       } catch (vrmError) {
-        log('VRM loading failed, keeping fallback avatar', vrmError);
+        log('VRM loading failed, keeping fallback', vrmError);
+        handleVRMLoadingError(vrmError);
       }
-    }, 2000);
+    }, 1000);
+    
+    log('=== ENHANCED THREE.JS INITIALIZATION COMPLETE ===');
     
   } catch (err) {
-    log('=== THREE.JS INITIALIZATION FAILED ===', err);
-    log('Error name:', err.name);
-    log('Error message:', err.message);
-    log('Error stack:', err.stack);
-    
-    // Create a simple fallback display
+    log('=== ENHANCED INITIALIZATION FAILED ===', err);
+    handleVRMLoadingError(err);
     createSimpleFallback();
-    throw err; // Re-throw so calling code knows it failed
+    throw err;
   }
 }
 
-// ===== CREATE EMBEDDED GLTF LOADER =====
-async function createEmbeddedGLTFLoader() {
-  const GLTFLoaderCode = `
-    THREE.GLTFLoader = function(manager) {
-      this.manager = (manager !== undefined) ? manager : THREE.DefaultLoadingManager;
-      this.path = '';
-    };
+// ===== RELIABLE THREE.JS LOADING =====
+async function loadThreeJSReliably() {
+  if (window.THREE) {
+    THREE = window.THREE;
+    log('Three.js already available');
+    return;
+  }
+  
+  const threeSources = [
+    // Try different versions and CDNs
+    'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js',
+    'https://unpkg.com/three@0.158.0/build/three.min.js', 
+    'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js',
+    'https://unpkg.com/three@0.150.0/build/three.min.js'
+  ];
+  
+  for (let i = 0; i < threeSources.length; i++) {
+    const source = threeSources[i];
+    try {
+      log(`Loading Three.js from: ${source}`);
+      
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = source;
+        script.onload = resolve;
+        script.onerror = reject;
+        
+        // Remove any existing Three.js scripts first
+        const existingScripts = document.querySelectorAll('script[src*="three"]');
+        existingScripts.forEach(s => s.remove());
+        
+        document.head.appendChild(script);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => reject(new Error('Timeout')), 10000);
+      });
+      
+      // Verify it loaded
+      if (window.THREE) {
+        THREE = window.THREE;
+        log(`✅ Three.js loaded successfully from: ${source}`);
+        
+        // Test basic functionality
+        const testScene = new THREE.Scene();
+        const testCamera = new THREE.PerspectiveCamera();
+        log('Three.js functionality verified');
+        return;
+      }
+      
+    } catch (err) {
+      log(`Three.js failed from ${source}:`, err.message);
+      continue;
+    }
+  }
+  
+  throw new Error('All Three.js sources failed to load');
+}
+
+// ===== RELIABLE GLTF LOADER =====
+async function loadGLTFLoaderReliably() {
+  // Strategy 1: Try external GLTF loaders
+  const gltfSources = [
+    'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/loaders/GLTFLoader.js',
+    'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+    'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+    'https://threejs.org/examples/js/loaders/GLTFLoader.js'
+  ];
+  
+  for (const source of gltfSources) {
+    try {
+      log(`Trying GLTF loader: ${source}`);
+      
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = source;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+        setTimeout(() => reject(new Error('Timeout')), 8000);
+      });
+      
+      if (THREE.GLTFLoader || window.GLTFLoader) {
+        if (window.GLTFLoader && !THREE.GLTFLoader) {
+          THREE.GLTFLoader = window.GLTFLoader;
+        }
+        log(`✅ External GLTF loader loaded from: ${source}`);
+        return;
+      }
+      
+    } catch (err) {
+      log(`GLTF loader failed from ${source}:`, err.message);
+    }
+  }
+  
+  // Strategy 2: Use module imports
+  try {
+    log('Trying ES6 module import for GLTF loader...');
+    const { GLTFLoader } = await import('https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js');
+    THREE.GLTFLoader = GLTFLoader;
+    log('✅ GLTF loader loaded via ES6 import');
+    return;
+  } catch (err) {
+    log('ES6 import failed:', err.message);
+  }
+  
+  // Strategy 3: Create production-ready embedded loader
+  log('Creating production-ready embedded GLTF loader...');
+  createProductionGLTFLoader();
+  
+  if (THREE.GLTFLoader) {
+    log('✅ Production embedded GLTF loader created');
+  } else {
+    throw new Error('All GLTF loader strategies failed');
+  }
+}
+
+// ===== PRODUCTION-READY EMBEDDED GLTF LOADER =====
+function createProductionGLTFLoader() {
+  THREE.GLTFLoader = function(manager) {
+    this.manager = manager || THREE.DefaultLoadingManager;
+    this.path = '';
+    this.resourcePath = '';
+    this.requestHeader = {};
+  };
+  
+  THREE.GLTFLoader.prototype = {
+    constructor: THREE.GLTFLoader,
     
-    THREE.GLTFLoader.prototype = {
-      constructor: THREE.GLTFLoader,
+    load: function(url, onLoad, onProgress, onError) {
+      const scope = this;
+      const loader = new THREE.FileLoader(scope.manager);
+      loader.setPath(scope.path);
+      loader.setResponseType('arraybuffer');
+      loader.setRequestHeader(scope.requestHeader);
       
-      load: function(url, onLoad, onProgress, onError) {
-        const scope = this;
-        const loader = new THREE.FileLoader(scope.manager);
-        loader.setPath(scope.path);
-        loader.setResponseType('arraybuffer');
-        
-        loader.load(url, function(data) {
-          try {
-            scope.parse(data, '', function(gltf) {
-              onLoad(gltf);
-            }, onError);
-          } catch (e) {
-            if (onError) onError(e);
-            else console.error(e);
-          }
-        }, onProgress, onError);
-      },
-      
-      setPath: function(path) {
-        this.path = path;
-        return this;
-      },
-      
-      parse: function(data, path, onLoad, onError) {
+      loader.load(url, function(data) {
         try {
-          console.log('=== PARSING GLB DATA ===');
-          const gltf = this.parseGLB(data);
-          console.log('GLB parsed, building scene...');
-          const result = this.buildRealScene(gltf);
-          console.log('Scene built successfully');
-          onLoad(result);
-        } catch (error) {
-          console.error('GLTF parse error:', error);
-          if (onError) onError(error);
+          scope.parse(data, scope.resourcePath || scope.path, onLoad, onError);
+        } catch (e) {
+          if (onError) onError(e);
+          else console.error('GLTFLoader: Error parsing', e);
         }
-      },
-      
-      parseGLB: function(data) {
-        const view = new DataView(data);
-        const magic = view.getUint32(0, true);
-        
-        if (magic !== 0x46546C67) {
-          throw new Error('Invalid GLB file');
-        }
-        
-        const version = view.getUint32(4, true);
-        const length = view.getUint32(8, true);
-        
-        console.log('GLB Header:', { magic: magic.toString(16), version, length });
-        
-        let chunkIndex = 12;
-        let jsonChunk = null;
-        let binaryChunk = null;
-        
-        while (chunkIndex < length) {
-          const chunkLength = view.getUint32(chunkIndex, true);
-          const chunkType = view.getUint32(chunkIndex + 4, true);
-          
-          if (chunkType === 0x4E4F534A) { // JSON chunk
-            const jsonData = new Uint8Array(data, chunkIndex + 8, chunkLength);
-            const jsonText = new TextDecoder().decode(jsonData);
-            jsonChunk = JSON.parse(jsonText);
-            console.log('JSON chunk parsed, size:', chunkLength);
-          } else if (chunkType === 0x004E4942) { // Binary chunk
-            binaryChunk = new Uint8Array(data, chunkIndex + 8, chunkLength);
-            console.log('Binary chunk found, size:', chunkLength);
-          }
-          
-          chunkIndex += 8 + chunkLength;
-        }
-        
-        return { json: jsonChunk, binary: binaryChunk };
-      },
-      
-      buildRealScene: function(gltf) {
-        const { json, binary } = gltf;
-        
-        if (!json) {
-          throw new Error('No JSON data found in GLB');
-        }
-        
-        console.log('GLTF JSON structure:', {
-          scenes: json.scenes?.length || 0,
-          nodes: json.nodes?.length || 0,
-          meshes: json.meshes?.length || 0,
-          materials: json.materials?.length || 0,
-          textures: json.textures?.length || 0,
-          bufferViews: json.bufferViews?.length || 0,
-          accessors: json.accessors?.length || 0
+      }, onProgress, onError);
+    },
+    
+    setPath: function(path) {
+      this.path = path;
+      return this;
+    },
+    
+    setResourcePath: function(resourcePath) {
+      this.resourcePath = resourcePath;
+      return this;
+    },
+    
+    parse: function(data, path, onLoad, onError) {
+      try {
+        const parser = new GLTFParser(data, {
+          path: path || '',
+          manager: this.manager
         });
         
-        // Create main scene
-        const scene = new THREE.Group();
-        scene.name = 'VRM_Scene';
+        parser.parse().then(onLoad).catch(onError || console.error);
         
-        // Try to parse actual meshes
-        if (json.meshes && json.bufferViews && json.accessors && binary) {
-          console.log('Attempting to parse real mesh data...');
-          try {
-            this.parseRealMeshes(json, binary, scene);
-            console.log('✅ Real meshes parsed successfully!');
-          } catch (meshError) {
-            console.warn('Real mesh parsing failed:', meshError);
-            console.log('Creating enhanced fallback...');
-            this.createEnhancedFallback(scene, json);
+      } catch (error) {
+        console.error('GLTFLoader parse error:', error);
+        if (onError) onError(error);
+      }
+    }
+  };
+  
+  // ===== FULL GLTF PARSER =====
+  function GLTFParser(data, options) {
+    this.json = {};
+    this.extensions = {};
+    this.plugins = {};
+    this.options = options || {};
+    this.cache = new Map();
+    this.associations = new Map();
+    this.primitiveCache = {};
+    this.textureLoader = new THREE.TextureLoader(this.options.manager);
+    this.textureLoader.setCrossOrigin('anonymous');
+    
+    if (data instanceof ArrayBuffer) {
+      this.data = data;
+    } else {
+      this.json = data;
+    }
+  }
+  
+  GLTFParser.prototype = {
+    parse: function() {
+      const parser = this;
+      
+      return Promise.resolve().then(function() {
+        if (parser.data) {
+          // Parse GLB
+          const headerView = new DataView(parser.data, 0, 12);
+          const magic = headerView.getUint32(0, true);
+          
+          if (magic !== 0x46546C67) {
+            throw new Error('Invalid GLB magic number');
           }
-        } else {
-          console.log('Missing mesh data, creating enhanced fallback...');
-          this.createEnhancedFallback(scene, json);
+          
+          const version = headerView.getUint32(4, true);
+          if (version < 2) {
+            throw new Error('Unsupported GLB version: ' + version);
+          }
+          
+          const length = headerView.getUint32(8, true);
+          let chunkIndex = 12;
+          
+          while (chunkIndex < length) {
+            const chunkHeaderView = new DataView(parser.data, chunkIndex, 8);
+            const chunkLength = chunkHeaderView.getUint32(0, true);
+            const chunkType = chunkHeaderView.getUint32(4, true);
+            
+            if (chunkType === 0x4E4F534A) {
+              // JSON chunk
+              const jsonChunk = new Uint8Array(parser.data, chunkIndex + 8, chunkLength);
+              parser.json = JSON.parse(new TextDecoder().decode(jsonChunk));
+            } else if (chunkType === 0x004E4942) {
+              // Binary chunk
+              parser.body = parser.data.slice(chunkIndex + 8, chunkIndex + 8 + chunkLength);
+            }
+            
+            chunkIndex += 8 + chunkLength;
+          }
         }
         
-        // Check for VRM extensions
-        const isVRM = json.extensions && (json.extensions.VRM || json.extensions.VRMC_vrm);
+        if (!parser.json) {
+          throw new Error('No JSON found in GLTF data');
+        }
         
-        const result = {
+        // Start parsing process
+        return parser.loadScene();
+      });
+    },
+    
+    loadScene: function() {
+      const parser = this;
+      const json = this.json;
+      
+      // Load all resources
+      const promises = [];
+      
+      // Load textures
+      if (json.textures) {
+        promises.push(parser.loadTextures());
+      }
+      
+      // Load materials
+      if (json.materials) {
+        promises.push(parser.loadMaterials());
+      }
+      
+      // Load meshes
+      if (json.meshes) {
+        promises.push(parser.loadMeshes());
+      }
+      
+      // Load nodes
+      if (json.nodes) {
+        promises.push(parser.loadNodes());
+      }
+      
+      return Promise.all(promises).then(function() {
+        // Build scene
+        const scene = parser.buildScene();
+        
+        return {
           scene: scene,
           scenes: [scene],
           animations: json.animations || [],
           cameras: [],
           userData: {
             gltfLoader: true,
-            isVRM: isVRM,
-            originalJson: json,
-            meshCount: json.meshes?.length || 0,
-            nodeCount: json.nodes?.length || 0
+            json: json
           }
         };
-        
-        return result;
-      },
+      });
+    },
+    
+    loadTextures: function() {
+      const parser = this;
+      const json = this.json;
+      const textures = [];
       
-      parseRealMeshes: function(json, binary, scene) {
-        console.log('=== PARSING REAL MESH DATA ===');
-        
-        if (!json.meshes || !json.bufferViews || !json.accessors) {
-          throw new Error('Missing required mesh data');
-        }
-        
-        const meshGroup = new THREE.Group();
-        meshGroup.name = 'VRM_Meshes';
-        
-        // Parse each mesh
-        for (let i = 0; i < Math.min(json.meshes.length, 10); i++) { // Limit to first 10 meshes
-          const meshDef = json.meshes[i];
-          console.log(\`Parsing mesh \${i}:\`, meshDef.name || 'unnamed');
-          
-          if (meshDef.primitives && meshDef.primitives.length > 0) {
-            const primitive = meshDef.primitives[0]; // Use first primitive
-            
-            try {
-              const geometry = this.createGeometryFromPrimitive(primitive, json, binary);
-              const material = this.createMaterialFromPrimitive(primitive, json);
-              
-              const mesh = new THREE.Mesh(geometry, material);
-              mesh.name = meshDef.name || \`Mesh_\${i}\`;
-              meshGroup.add(mesh);
-              
-              console.log(\`✅ Mesh \${i} created successfully\`);
-            } catch (primitiveError) {
-              console.warn(\`Failed to create mesh \${i}:\`, primitiveError);
-            }
-          }
-        }
-        
-        if (meshGroup.children.length > 0) {
-          scene.add(meshGroup);
-          console.log(\`Added \${meshGroup.children.length} real meshes to scene\`);
-        } else {
-          throw new Error('No meshes could be created');
-        }
-      },
+      if (!json.textures) return Promise.resolve(textures);
       
-      createGeometryFromPrimitive: function(primitive, json, binary) {
-        const geometry = new THREE.BufferGeometry();
-        
-        // Get position data
-        if (primitive.attributes.POSITION !== undefined) {
-          const positionData = this.getAccessorData(primitive.attributes.POSITION, json, binary);
-          if (positionData) {
-            geometry.setAttribute('position', new THREE.BufferAttribute(positionData, 3));
-          }
-        }
-        
-        // Get normal data
-        if (primitive.attributes.NORMAL !== undefined) {
-          const normalData = this.getAccessorData(primitive.attributes.NORMAL, json, binary);
-          if (normalData) {
-            geometry.setAttribute('normal', new THREE.BufferAttribute(normalData, 3));
-          }
-        }
-        
-        // Get UV data
-        if (primitive.attributes.TEXCOORD_0 !== undefined) {
-          const uvData = this.getAccessorData(primitive.attributes.TEXCOORD_0, json, binary);
-          if (uvData) {
-            geometry.setAttribute('uv', new THREE.BufferAttribute(uvData, 2));
-          }
-        }
-        
-        // Get indices
-        if (primitive.indices !== undefined) {
-          const indexData = this.getAccessorData(primitive.indices, json, binary);
-          if (indexData) {
-            geometry.setIndex(new THREE.BufferAttribute(indexData, 1));
-          }
-        }
-        
-        // Compute normals if missing
-        if (!geometry.attributes.normal) {
-          geometry.computeVertexNormals();
-        }
-        
-        return geometry;
-      },
-      
-      getAccessorData: function(accessorIndex, json, binary) {
-        try {
-          const accessor = json.accessors[accessorIndex];
-          const bufferView = json.bufferViews[accessor.bufferView];
-          
-          const byteOffset = (accessor.byteOffset || 0) + (bufferView.byteOffset || 0);
-          const count = accessor.count;
-          const componentType = accessor.componentType;
-          
-          // Determine component size
-          let componentSize;
-          switch (componentType) {
-            case 5120: componentSize = 1; break; // BYTE
-            case 5121: componentSize = 1; break; // UNSIGNED_BYTE
-            case 5122: componentSize = 2; break; // SHORT
-            case 5123: componentSize = 2; break; // UNSIGNED_SHORT
-            case 5125: componentSize = 4; break; // UNSIGNED_INT
-            case 5126: componentSize = 4; break; // FLOAT
-            default: componentSize = 4;
-          }
-          
-          // Determine element count
-          let elementCount;
-          switch (accessor.type) {
-            case 'SCALAR': elementCount = 1; break;
-            case 'VEC2': elementCount = 2; break;
-            case 'VEC3': elementCount = 3; break;
-            case 'VEC4': elementCount = 4; break;
-            default: elementCount = 1;
-          }
-          
-          const byteLength = count * elementCount * componentSize;
-          const arrayBuffer = binary.slice(byteOffset, byteOffset + byteLength);
-          
-          // Create appropriate typed array
-          switch (componentType) {
-            case 5120: return new Int8Array(arrayBuffer);
-            case 5121: return new Uint8Array(arrayBuffer);
-            case 5122: return new Int16Array(arrayBuffer);
-            case 5123: return new Uint16Array(arrayBuffer);
-            case 5125: return new Uint32Array(arrayBuffer);
-            case 5126: return new Float32Array(arrayBuffer);
-            default: return new Float32Array(arrayBuffer);
-          }
-        } catch (error) {
-          console.warn('Failed to get accessor data:', error);
-          return null;
-        }
-      },
-      
-      createMaterialFromPrimitive: function(primitive, json) {
-        // Create basic material
-        let material = new THREE.MeshLambertMaterial({
-          color: 0xcccccc,
-          side: THREE.DoubleSide
+      const promises = json.textures.map((textureDef, index) => {
+        return parser.loadTexture(index).then(texture => {
+          textures[index] = texture;
         });
+      });
+      
+      return Promise.all(promises).then(() => {
+        parser.textures = textures;
+        return textures;
+      });
+    },
+    
+    loadTexture: function(textureIndex) {
+      const parser = this;
+      const json = this.json;
+      const textureDef = json.textures[textureIndex];
+      
+      if (!textureDef || textureDef.source === undefined) {
+        return Promise.resolve(null);
+      }
+      
+      const imageDef = json.images[textureDef.source];
+      if (!imageDef) {
+        return Promise.resolve(null);
+      }
+      
+      return new Promise((resolve, reject) => {
+        if (imageDef.uri) {
+          // External image
+          const texture = parser.textureLoader.load(imageDef.uri, resolve, undefined, reject);
+        } else if (imageDef.bufferView !== undefined) {
+          // Embedded image
+          const bufferView = json.bufferViews[imageDef.bufferView];
+          const imageData = parser.body.slice(bufferView.byteOffset, bufferView.byteOffset + bufferView.byteLength);
+          
+          const blob = new Blob([imageData], { type: imageDef.mimeType });
+          const url = URL.createObjectURL(blob);
+          
+          const texture = parser.textureLoader.load(url, 
+            (tex) => {
+              URL.revokeObjectURL(url);
+              resolve(tex);
+            },
+            undefined,
+            (err) => {
+              URL.revokeObjectURL(url);
+              reject(err);
+            }
+          );
+        } else {
+          resolve(null);
+        }
+      });
+    },
+    
+    loadMaterials: function() {
+      const parser = this;
+      const json = this.json;
+      const materials = [];
+      
+      if (!json.materials) return Promise.resolve(materials);
+      
+      json.materials.forEach((materialDef, index) => {
+        materials[index] = parser.createMaterial(materialDef, index);
+      });
+      
+      parser.materials = materials;
+      return Promise.resolve(materials);
+    },
+    
+    createMaterial: function(materialDef, materialIndex) {
+      const parser = this;
+      
+      let material;
+      
+      if (materialDef.pbrMetallicRoughness) {
+        // PBR material
+        material = new THREE.MeshStandardMaterial();
         
-        // Try to get material data
-        if (primitive.material !== undefined && json.materials) {
-          const materialDef = json.materials[primitive.material];
-          if (materialDef) {
-            if (materialDef.pbrMetallicRoughness && materialDef.pbrMetallicRoughness.baseColorFactor) {
-              const color = materialDef.pbrMetallicRoughness.baseColorFactor;
-              material.color.setRGB(color[0], color[1], color[2]);
-            }
-            if (materialDef.name && materialDef.name.toLowerCase().includes('hair')) {
-              material.color.setHex(0x8B4513); // Brown for hair
-            } else if (materialDef.name && materialDef.name.toLowerCase().includes('skin')) {
-              material.color.setHex(0xffdbac); // Skin tone
-            }
+        const pbr = materialDef.pbrMetallicRoughness;
+        
+        if (pbr.baseColorFactor) {
+          material.color.fromArray(pbr.baseColorFactor.slice(0, 3));
+          if (pbr.baseColorFactor[3] < 1.0) {
+            material.transparent = true;
+            material.opacity = pbr.baseColorFactor[3];
           }
         }
         
-        return material;
-      },
-      
-      createEnhancedFallback: function(scene, json) {
-        console.log('Creating enhanced VRM-like character...');
+        if (pbr.baseColorTexture && parser.textures) {
+          material.map = parser.textures[pbr.baseColorTexture.index];
+        }
         
-        const character = new THREE.Group();
-        character.name = 'VRM_Character_Fallback';
+        if (pbr.metallicFactor !== undefined) {
+          material.metalness = pbr.metallicFactor;
+        }
         
-        // Scale based on VRM typical size
-        const scale = 0.8;
+        if (pbr.roughnessFactor !== undefined) {
+          material.roughness = pbr.roughnessFactor;
+        }
         
-        // More realistic proportions
-        const headGeo = new THREE.SphereGeometry(0.12 * scale, 20, 20);
-        const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-        const head = new THREE.Mesh(headGeo, headMat);
-        head.position.y = 1.6 * scale;
-        head.scale.set(1, 1.1, 0.9);
-        character.add(head);
+      } else {
+        // Basic material
+        material = new THREE.MeshLambertMaterial();
         
-        // Anime-style hair
-        const hairGeo = new THREE.SphereGeometry(0.15 * scale, 16, 16);
-        const hairMat = new THREE.MeshLambertMaterial({ color: 0x654321 });
-        const hair = new THREE.Mesh(hairGeo, hairMat);
-        hair.position.y = 1.65 * scale;
-        hair.scale.set(1.3, 0.8, 1.2);
-        character.add(hair);
-        
-        // Body
-        const bodyGeo = new THREE.CapsuleGeometry ? 
-          new THREE.CapsuleGeometry(0.15 * scale, 0.4 * scale, 4, 8) :
-          new THREE.CylinderGeometry(0.15 * scale, 0.18 * scale, 0.5 * scale, 12);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 1.1 * scale;
-        character.add(body);
-        
-        // Arms
-        const armGeo = new THREE.CylinderGeometry(0.04 * scale, 0.05 * scale, 0.4 * scale, 8);
-        const armMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-        
-        const leftArm = new THREE.Mesh(armGeo, armMat);
-        leftArm.position.set(-0.22 * scale, 1.15 * scale, 0);
-        leftArm.rotation.z = 0.3;
-        character.add(leftArm);
-        
-        const rightArm = new THREE.Mesh(armGeo, armMat);
-        rightArm.position.set(0.22 * scale, 1.15 * scale, 0);
-        rightArm.rotation.z = -0.3;
-        character.add(rightArm);
-        
-        // Skirt/dress
-        const skirtGeo = new THREE.CylinderGeometry(0.18 * scale, 0.22 * scale, 0.3 * scale, 12);
-        const skirtMat = new THREE.MeshLambertMaterial({ color: 0x2F4F4F });
-        const skirt = new THREE.Mesh(skirtGeo, skirtMat);
-        skirt.position.y = 0.75 * scale;
-        character.add(skirt);
-        
-        // Legs
-        const legGeo = new THREE.CylinderGeometry(0.05 * scale, 0.06 * scale, 0.4 * scale, 8);
-        const legMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-        
-        const leftLeg = new THREE.Mesh(legGeo, legMat);
-        leftLeg.position.set(-0.08 * scale, 0.4 * scale, 0);
-        character.add(leftLeg);
-        
-        const rightLeg = new THREE.Mesh(legGeo, legMat);
-        rightLeg.position.set(0.08 * scale, 0.4 * scale, 0);
-        character.add(rightLeg);
-        
-        // Eyes
-        const eyeGeo = new THREE.SphereGeometry(0.02 * scale, 8, 8);
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-        
-        const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-        leftEye.position.set(-0.04 * scale, 1.62 * scale, 0.1 * scale);
-        character.add(leftEye);
-        
-        const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-        rightEye.position.set(0.04 * scale, 1.62 * scale, 0.1 * scale);
-        character.add(rightEye);
-        
-        character.position.y = -0.1;
-        scene.add(character);
-        
-        // Add animation
-        this.addCharacterAnimation(character);
-        
-        console.log('Enhanced VRM-like character created');
-      },
-      
-      addCharacterAnimation: function(character) {
-        let time = 0;
-        const animate = () => {
-          if (!scene.getObjectByName(character.name)) return;
+        if (materialDef.name) {
+          material.name = materialDef.name;
           
-          time += 0.016;
-          
-          // Breathing
-          character.scale.y = 1 + Math.sin(time * 2) * 0.015;
-          
-          // Gentle swaying
-          character.rotation.y = Math.sin(time * 0.5) * 0.03;
-          
-          // Head movement
-          const head = character.children.find(child => child.position.y > 1.5);
-          if (head) {
-            head.rotation.y = Math.sin(time * 0.8) * 0.08;
-            head.rotation.x = Math.sin(time * 0.6) * 0.02;
+          // Apply heuristic colors based on material names for VRM
+          if (materialDef.name.toLowerCase().includes('hair')) {
+            material.color.setHex(0xff69b4); // Pink for hair
+          } else if (materialDef.name.toLowerCase().includes('skin')) {
+            material.color.setHex(0xffdbac); // Skin tone
+          } else if (materialDef.name.toLowerCase().includes('cloth') || materialDef.name.toLowerCase().includes('top')) {
+            material.color.setHex(0xffffff); // White for clothing
+          } else if (materialDef.name.toLowerCase().includes('skirt') || materialDef.name.toLowerCase().includes('bottom')) {
+            material.color.setHex(0x333333); // Dark for skirt
           }
-          
-          requestAnimationFrame(animate);
-        };
-        animate();
+        }
       }
-    };
-  `;
+      
+      // Common properties
+      if (materialDef.doubleSided) {
+        material.side = THREE.DoubleSide;
+      }
+      
+      if (materialDef.alphaMode === 'BLEND') {
+        material.transparent = true;
+      }
+      
+      return material;
+    },
+    
+    loadMeshes: function() {
+      const parser = this;
+      const json = this.json;
+      const meshes = [];
+      
+      if (!json.meshes) return Promise.resolve(meshes);
+      
+      json.meshes.forEach((meshDef, index) => {
+        meshes[index] = parser.createMesh(meshDef, index);
+      });
+      
+      parser.meshes = meshes;
+      return Promise.resolve(meshes);
+    },
+    
+    createMesh: function(meshDef, meshIndex) {
+      const parser = this;
+      const group = new THREE.Group();
+      group.name = meshDef.name || `Mesh_${meshIndex}`;
+      
+      meshDef.primitives.forEach((primitive, primitiveIndex) => {
+        const geometry = parser.createGeometry(primitive);
+        const material = parser.materials && primitive.material !== undefined ? 
+          parser.materials[primitive.material] : 
+          new THREE.MeshLambertMaterial({ color: 0xcccccc });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = `${group.name}_${primitiveIndex}`;
+        group.add(mesh);
+      });
+      
+      return group;
+    },
+    
+    createGeometry: function(primitive) {
+      const parser = this;
+      const geometry = new THREE.BufferGeometry();
+      
+      // Position
+      if (primitive.attributes.POSITION !== undefined) {
+        const accessor = parser.json.accessors[primitive.attributes.POSITION];
+        const bufferAttribute = parser.createBufferAttribute(accessor);
+        geometry.setAttribute('position', bufferAttribute);
+      }
+      
+      // Normal
+      if (primitive.attributes.NORMAL !== undefined) {
+        const accessor = parser.json.accessors[primitive.attributes.NORMAL];
+        const bufferAttribute = parser.createBufferAttribute(accessor);
+        geometry.setAttribute('normal', bufferAttribute);
+      }
+      
+      // UV
+      if (primitive.attributes.TEXCOORD_0 !== undefined) {
+        const accessor = parser.json.accessors[primitive.attributes.TEXCOORD_0];
+        const bufferAttribute = parser.createBufferAttribute(accessor);
+        geometry.setAttribute('uv', bufferAttribute);
+      }
+      
+      // Indices
+      if (primitive.indices !== undefined) {
+        const accessor = parser.json.accessors[primitive.indices];
+        const bufferAttribute = parser.createBufferAttribute(accessor);
+        geometry.setIndex(bufferAttribute);
+      }
+      
+      // Compute normals if missing
+      if (!primitive.attributes.NORMAL) {
+        geometry.computeVertexNormals();
+      }
+      
+      return geometry;
+    },
+    
+    createBufferAttribute: function(accessor) {
+      const parser = this;
+      const bufferView = parser.json.bufferViews[accessor.bufferView];
+      
+      const byteOffset = (accessor.byteOffset || 0) + (bufferView.byteOffset || 0);
+      const componentType = accessor.componentType;
+      const itemSize = getItemSize(accessor.type);
+      const TypedArray = getTypedArray(componentType);
+      
+      const array = new TypedArray(
+        parser.body,
+        byteOffset,
+        accessor.count * itemSize
+      );
+      
+      return new THREE.BufferAttribute(array, itemSize);
+    },
+    
+    loadNodes: function() {
+      const parser = this;
+      const json = this.json;
+      const nodes = [];
+      
+      if (!json.nodes) return Promise.resolve(nodes);
+      
+      // Create all nodes first
+      json.nodes.forEach((nodeDef, index) => {
+        const node = new THREE.Object3D();
+        node.name = nodeDef.name || `Node_${index}`;
+        
+        // Transform
+        if (nodeDef.matrix) {
+          node.matrix.fromArray(nodeDef.matrix);
+          node.matrix.decompose(node.position, node.quaternion, node.scale);
+        } else {
+          if (nodeDef.translation) node.position.fromArray(nodeDef.translation);
+          if (nodeDef.rotation) node.quaternion.fromArray(nodeDef.rotation);
+          if (nodeDef.scale) node.scale.fromArray(nodeDef.scale);
+        }
+        
+        // Mesh
+        if (nodeDef.mesh !== undefined && parser.meshes) {
+          const mesh = parser.meshes[nodeDef.mesh];
+          if (mesh) {
+            node.add(mesh);
+          }
+        }
+        
+        nodes[index] = node;
+      });
+      
+      // Set up hierarchy
+      json.nodes.forEach((nodeDef, index) => {
+        if (nodeDef.children) {
+          nodeDef.children.forEach(childIndex => {
+            nodes[index].add(nodes[childIndex]);
+          });
+        }
+      });
+      
+      parser.nodes = nodes;
+      return Promise.resolve(nodes);
+    },
+    
+    buildScene: function() {
+      const parser = this;
+      const json = this.json;
+      const scene = new THREE.Group();
+      scene.name = 'VRM_Scene';
+      
+      if (json.scenes && json.scenes.length > 0) {
+        const sceneDef = json.scenes[json.scene || 0];
+        
+        if (sceneDef.nodes && parser.nodes) {
+          sceneDef.nodes.forEach(nodeIndex => {
+            scene.add(parser.nodes[nodeIndex]);
+          });
+        }
+      } else if (parser.nodes) {
+        // Add all root nodes
+        parser.nodes.forEach(node => {
+          if (!node.parent) {
+            scene.add(node);
+          }
+        });
+      }
+      
+      return scene;
+    }
+  };
   
-  eval(GLTFLoaderCode);
+  // Helper functions
+  function getItemSize(type) {
+    switch (type) {
+      case 'SCALAR': return 1;
+      case 'VEC2': return 2;
+      case 'VEC3': return 3;
+      case 'VEC4': return 4;
+      case 'MAT2': return 4;
+      case 'MAT3': return 9;
+      case 'MAT4': return 16;
+      default: return 1;
+    }
+  }
   
-  if (THREE.GLTFLoader) {
-    log('✅ Enhanced VRM-parsing GLTF loader created');
-    return true;
-  } else {
-    throw new Error('Failed to create enhanced GLTF loader');
+  function getTypedArray(componentType) {
+    switch (componentType) {
+      case 5120: return Int8Array;
+      case 5121: return Uint8Array;
+      case 5122: return Int16Array;
+      case 5123: return Uint16Array;
+      case 5125: return Uint32Array;
+      case 5126: return Float32Array;
+      default: return Float32Array;
+    }
   }
 }
 
-// ===== ALTERNATIVE VRM LOADING (WITHOUT GLTF LOADER) =====
-async function loadVRMAlternative(url) {
+// ===== ENHANCED VRM LOADING =====
+async function loadVRMWithReliableLoader(url, retryCount = 0) {
   try {
-    log('=== ALTERNATIVE VRM LOADING ===');
-    log('Attempting to load VRM without GLTF loader...');
-    
-    // Check if file exists
-    const checkResponse = await fetch(url, { method: 'HEAD' });
-    if (!checkResponse.ok) {
-      throw new Error(`VRM file not accessible: ${checkResponse.status}`);
-    }
-    
-    const fileSizeMB = Math.round((checkResponse.headers.get('content-length') || 0) / 1024 / 1024);
-    log(`VRM file found: ${fileSizeMB}MB`);
-    
-    // Since we can't parse VRM without GLTF loader, create a better placeholder
-    // Remove the basic fallback sphere
-    const fallbackAvatar = scene.getObjectByName('fallbackAvatar');
-    if (fallbackAvatar) {
-      log('Removing basic fallback avatar');
-      scene.remove(fallbackAvatar);
-    }
-    
-    // Create a more sophisticated avatar placeholder
-    log('Creating sophisticated avatar placeholder...');
-    
-    // Create a human-like figure using basic Three.js geometry
-    const avatarGroup = new THREE.Group();
-    avatarGroup.name = 'alternativeAvatar';
-    
-    // Head
-    const headGeometry = new THREE.SphereGeometry(0.15, 16, 16);
-    const headMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Skin tone
-    const head = new THREE.Mesh(headGeometry, headMaterial);
-    head.position.y = 1.6;
-    avatarGroup.add(head);
-    
-    // Body
-    const bodyGeometry = new THREE.CylinderGeometry(0.2, 0.25, 0.8, 8);
-    const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x4a90e2 }); // Blue outfit
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = 0.8;
-    avatarGroup.add(body);
-    
-    // Arms
-    const armGeometry = new THREE.CylinderGeometry(0.05, 0.08, 0.6, 6);
-    const armMaterial = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-    
-    const leftArm = new THREE.Mesh(armGeometry, armMaterial);
-    leftArm.position.set(-0.35, 0.9, 0);
-    leftArm.rotation.z = 0.3;
-    avatarGroup.add(leftArm);
-    
-    const rightArm = new THREE.Mesh(armGeometry, armMaterial);
-    rightArm.position.set(0.35, 0.9, 0);
-    rightArm.rotation.z = -0.3;
-    avatarGroup.add(rightArm);
-    
-    // Legs
-    const legGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.8, 6);
-    const legMaterial = new THREE.MeshLambertMaterial({ color: 0x2c5aa0 }); // Darker blue
-    
-    const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-    leftLeg.position.set(-0.12, 0.0, 0);
-    avatarGroup.add(leftLeg);
-    
-    const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
-    rightLeg.position.set(0.12, 0.0, 0);
-    avatarGroup.add(rightLeg);
-    
-    // Hair (anime-style)
-    const hairGeometry = new THREE.SphereGeometry(0.18, 16, 16);
-    const hairMaterial = new THREE.MeshLambertMaterial({ color: 0xff6b35 }); // Orange hair
-    const hair = new THREE.Mesh(hairGeometry, hairMaterial);
-    hair.position.y = 1.7;
-    hair.scale.set(1, 0.8, 1);
-    avatarGroup.add(hair);
-    
-    // Position the avatar
-    avatarGroup.position.y = -1;
-    
-    // Add to scene
-    scene.add(avatarGroup);
-    
-    // Add simple animation
-    let time = 0;
-    function animateAvatar() {
-      time += 0.02;
-      
-      // Gentle swaying
-      avatarGroup.rotation.y = Math.sin(time * 0.5) * 0.1;
-      
-      // Head movement
-      if (head) {
-        head.rotation.y = Math.sin(time) * 0.1;
-        head.rotation.x = Math.sin(time * 0.7) * 0.05;
-      }
-      
-      // Arm movement
-      if (leftArm) {
-        leftArm.rotation.z = 0.3 + Math.sin(time * 1.2) * 0.1;
-      }
-      if (rightArm) {
-        rightArm.rotation.z = -0.3 + Math.sin(time * 1.5) * 0.1;
-      }
-      
-      requestAnimationFrame(animateAvatar);
-    }
-    animateAvatar();
-    
-    log('✅ Alternative avatar created successfully!');
-    log('This is a placeholder until we can load the actual VRM file');
-    
-    // Hide loading status
-    const statusEl = document.getElementById('loadingStatus');
-    if (statusEl) statusEl.style.display = 'none';
-    
-  } catch (err) {
-    log('❌ Alternative VRM loading failed', err);
-    throw err;
-  }
-}
-
-// ===== LOAD VRM FILE (FIXED CAMERA AND SCALING) =====
-async function loadVRMFile(url, retryCount = 0) {
-  try {
-    log(`=== LOADING VRM FILE (attempt ${retryCount + 1}) ===`);
-    log('VRM URL:', url);
+    log(`=== LOADING VRM WITH RELIABLE LOADER (attempt ${retryCount + 1}) ===`);
+    updateLoadingProgress('vrm', 0);
     
     if (!THREE.GLTFLoader) {
-      throw new Error('GLTFLoader not available');
+      throw new Error('No GLTF loader available');
     }
     
-    log('GLTFLoader is available, proceeding with VRM loading...');
-    
-    // Check if VRM file exists first
-    log('Checking VRM file availability...');
+    // Check file availability
     const checkResponse = await fetch(url, { method: 'HEAD' });
-    log(`VRM file check: ${checkResponse.status} ${checkResponse.statusText}`);
-    
     if (!checkResponse.ok) {
       throw new Error(`VRM file not accessible: ${checkResponse.status}`);
     }
@@ -842,205 +747,537 @@ async function loadVRMFile(url, retryCount = 0) {
     const fileSizeMB = contentLength ? Math.round(contentLength / 1024 / 1024) : 'unknown';
     log(`VRM file size: ${fileSizeMB}MB`);
     
-    // Create GLTF loader
-    log('Creating GLTF loader instance...');
+    // Load VRM
     const loader = new THREE.GLTFLoader();
-    
-    log('Starting VRM file loading...');
     
     const gltf = await new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error('VRM loading timeout after 30 seconds'));
+        reject(new Error('VRM loading timeout'));
       }, ASSET_LOAD_TIMEOUT);
       
       loader.load(
         url,
         (loadedGltf) => {
           clearTimeout(timeoutId);
-          log('✅ GLTF file loaded successfully!');
-          log('GLTF info:', {
-            scenes: loadedGltf.scenes.length,
-            animations: loadedGltf.animations.length,
-            cameras: loadedGltf.cameras.length,
-            userData: Object.keys(loadedGltf.userData || {}),
-            sceneChildren: loadedGltf.scene ? loadedGltf.scene.children.length : 0
-          });
+          log('✅ VRM GLTF loaded successfully!');
           resolve(loadedGltf);
         },
         (progress) => {
           if (progress.total > 0) {
             const percent = Math.round((progress.loaded / progress.total) * 100);
-            log(`Loading progress: ${percent}%`);
-            const statusEl = document.getElementById('loadingStatus');
-            if (statusEl) statusEl.textContent = `Loading avatar: ${percent}%`;
+            updateLoadingProgress('vrm', percent);
           }
         },
         (error) => {
           clearTimeout(timeoutId);
-          log('❌ GLTF loading error:', error);
           reject(error);
         }
       );
     });
     
-    // Remove the fallback avatars
-    const fallbackAvatar = scene.getObjectByName('fallbackAvatar');
-    if (fallbackAvatar) {
-      log('Removing basic fallback avatar');
-      scene.remove(fallbackAvatar);
-    }
+    // Remove fallback avatars
+    ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+      const existing = scene.getObjectByName(name);
+      if (existing) {
+        scene.remove(existing);
+        log(`Removed existing ${name}`);
+      }
+    });
     
-    const alternativeAvatar = scene.getObjectByName('alternativeAvatar');
-    if (alternativeAvatar) {
-      log('Removing alternative avatar');
-      scene.remove(alternativeAvatar);
-    }
-    
-    // Add the loaded model to the scene
+    // Process and add VRM to scene
     if (gltf.scene) {
-      log('Adding VRM scene to Three.js scene');
-      
-      // Calculate the bounding box to properly scale and position
-      const box = new THREE.Box3().setFromObject(gltf.scene);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      
-      log('Model bounding box:', { 
-        size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
-        center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) },
-        boundingBox: {
-          min: { x: box.min.x.toFixed(2), y: box.min.y.toFixed(2), z: box.min.z.toFixed(2) },
-          max: { x: box.max.x.toFixed(2), y: box.max.y.toFixed(2), z: box.max.z.toFixed(2) }
-        }
-      });
-      
-      // FIXED SCALING: Check if model needs scaling (VRM models are usually properly sized)
-      let scale = 1.0;
-      if (size.y > 10 || size.y < 0.5) {
-        // Only scale if model is unusually large or small
-        const targetHeight = 1.8;
-        scale = targetHeight / size.y;
-        gltf.scene.scale.setScalar(scale);
-        log('Applied scaling due to unusual size:', scale);
-      } else {
-        log('Using original VRM scale (model is properly sized)');
-      }
-      
-      // FIXED POSITIONING: Center the character and put feet on ground
-      gltf.scene.position.x = -center.x * scale;
-      gltf.scene.position.y = -box.min.y * scale; // This puts the bottom at y=0
-      gltf.scene.position.z = -center.z * scale;
-      
-      gltf.scene.name = 'VRM_Model';
-      
-      // Add to scene
-      scene.add(gltf.scene);
-      
-      // FIXED CAMERA: Position camera to look at character properly (using actual scaled values)
-      const actualHeight = size.y * scale;
-      const actualWidth = Math.max(size.x, size.z) * scale;
-      
-      // Position camera based on actual model size
-      const cameraDistance = Math.max(actualHeight * 1.2, actualWidth * 1.5, 2.5);
-      const lookAtHeight = actualHeight * 0.5; // Look at center of character
-      
-      // Set camera position
-      camera.position.set(0, lookAtHeight, cameraDistance);
-      camera.lookAt(0, lookAtHeight, 0);
-      
-      // Update camera controls if they exist
-      if (window.controls && controls.target) {
-        controls.target.set(0, lookAtHeight, 0);
-        controls.update();
-      }
-      
-      log('FIXED Camera positioning:', {
-        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-        lookAt: `(0, ${lookAtHeight.toFixed(2)}, 0)`,
-        actualHeight: actualHeight.toFixed(2),
-        cameraDistance: cameraDistance.toFixed(2),
-        originalSize: `${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`,
-        appliedScale: scale.toFixed(3)
-      });
-      
-      // Setup animations if available
-      if (gltf.animations && gltf.animations.length > 0) {
-        log(`Setting up ${gltf.animations.length} animations`);
-        mixer = new THREE.AnimationMixer(gltf.scene);
-        
-        // Play the first animation (usually idle)
-        const action = mixer.clipAction(gltf.animations[0]);
-        action.play();
-        
-        log('Animation setup complete');
-      } else {
-        log('No animations found in VRM file');
-      }
-      
-      // Log model details for debugging
-      log('VRM model details:', {
-        finalPosition: gltf.scene.position,
-        finalScale: gltf.scene.scale,
-        boundingBox: box,
-        children: gltf.scene.children.length
-      });
-      
-      log('🎉 VRM model loaded and positioned successfully!');
-      
-      // Hide loading status
-      const statusEl = document.getElementById('loadingStatus');
-      if (statusEl) statusEl.style.display = 'none';
-      
-      // Set currentVRM for expressions if this is a real VRM
-      if (gltf.userData && gltf.userData.vrm) {
-        currentVRM = gltf.userData.vrm;
-        log('VRM expressions available');
-      } else {
-        log('No VRM expression data found (loaded as regular GLTF)');
-      }
-      
+      updateLoadingProgress('positioning');
+      await processAndAddVRM(gltf);
+      updateLoadingProgress('complete');
+      log('🎉 VRM loaded and positioned successfully!');
     } else {
-      throw new Error('No scene found in GLTF file');
+      throw new Error('No scene found in VRM file');
     }
     
   } catch (err) {
     if (retryCount < VRM_MAX_RETRIES) {
-      log(`VRM load retry ${retryCount + 1} in 3 seconds...`, err);
-      setTimeout(() => loadVRMFile(url, retryCount + 1), 3000);
+      log(`VRM load retry ${retryCount + 1} in 3 seconds...`, err.message);
+      setTimeout(() => loadVRMWithReliableLoader(url, retryCount + 1), 3000);
     } else {
-      log('❌ VRM loading failed completely after all retries', err);
+      log('❌ VRM loading failed completely', err);
+      handleVRMLoadingError(err);
       throw err;
     }
   }
 }
 
-// ===== CAMERA RESET FUNCTION =====
-function resetCamera() {
-  // Find the VRM model in the scene
-  const vrmModel = scene.getObjectByName('VRM_Model');
+// ===== PROCESS AND ADD VRM TO SCENE =====
+async function processAndAddVRM(gltf) {
+  log('Processing VRM for proper display...');
   
-  if (vrmModel) {
-    // Recalculate bounding box
-    const box = new THREE.Box3().setFromObject(vrmModel);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    
-    const characterHeight = size.y;
-    const characterWidth = Math.max(size.x, size.z);
-    const cameraDistance = Math.max(characterHeight * 1.2, characterWidth * 1.5, 2.5);
-    const lookAtHeight = characterHeight * 0.5;
-    
-    // Smoothly move camera to proper position
-    camera.position.set(0, lookAtHeight, cameraDistance);
-    camera.lookAt(0, lookAtHeight, 0);
-    
-    log('Camera reset to proper VRM viewing position');
-  } else {
-    // Default camera position if no VRM
-    camera.position.set(0, 1.3, 2.5);
-    camera.lookAt(0, 1, 0);
-    log('Camera reset to default position');
+  // Calculate bounding box
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  
+  log('Original VRM dimensions:', {
+    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+    center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
+  });
+  
+  // Fix scaling - VRoid models are often 255 units tall
+  let scale = 1.0;
+  if (size.y > 50) {
+    // Large model, scale down
+    scale = 1.8 / size.y; // Target height of 1.8 units
+    gltf.scene.scale.setScalar(scale);
+    log(`Applied scaling: ${scale.toFixed(4)} (${size.y.toFixed(1)}u → 1.8u)`);
+  } else if (size.y < 0.5) {
+    // Tiny model, scale up  
+    scale = 1.8 / size.y;
+    gltf.scene.scale.setScalar(scale);
+    log(`Applied upscaling: ${scale.toFixed(4)}`);
   }
+  
+  // Recalculate after scaling
+  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
+  const scaledSize = scaledBox.getSize(new THREE.Vector3());
+  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  
+  // Center the character at origin and put feet on ground
+  gltf.scene.position.x = -scaledCenter.x;
+  gltf.scene.position.y = -scaledBox.min.y; // Feet on ground (y=0)
+  gltf.scene.position.z = -scaledCenter.z;
+  
+  gltf.scene.name = 'VRM_Model';
+  scene.add(gltf.scene);
+  
+  // Position camera optimally
+  const finalHeight = scaledSize.y;
+  const finalWidth = Math.max(scaledSize.x, scaledSize.z);
+  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
+  const lookAtHeight = finalHeight * 0.6; // Look slightly above center
+  
+  camera.position.set(0, lookAtHeight, cameraDistance);
+  camera.lookAt(0, lookAtHeight, 0);
+  
+  log('Final VRM positioning:', {
+    position: gltf.scene.position,
+    scale: scale.toFixed(4),
+    finalSize: `${scaledSize.x.toFixed(1)} x ${scaledSize.y.toFixed(1)} x ${scaledSize.z.toFixed(1)}`,
+    camera: `pos(0, ${lookAtHeight.toFixed(1)}, ${cameraDistance.toFixed(1)}) lookAt(0, ${lookAtHeight.toFixed(1)}, 0)`
+  });
+  
+  // Setup animations
+  if (gltf.animations && gltf.animations.length > 0) {
+    log(`Setting up ${gltf.animations.length} animations`);
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    const action = mixer.clipAction(gltf.animations[0]);
+    action.play();
+  }
+  
+  // Store VRM reference for expressions
+  if (gltf.userData && gltf.userData.vrm) {
+    currentVRM = gltf.userData.vrm;
+    log('VRM expressions available');
+  }
+}
+
+// ===== SETUP BASIC THREE.JS SCENE =====
+function setupThreeJSScene() {
+  log('Setting up Three.js scene...');
+  
+  // Scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0e17);
+  
+  // Camera  
+  camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
+  camera.position.set(0, 1.3, 2.5);
+  camera.lookAt(0, 1, 0);
+  
+  // Renderer
+  const canvas = document.getElementById('vrmCanvas');
+  if (!canvas) {
+    throw new Error('Canvas element #vrmCanvas not found');
+  }
+  
+  renderer = new THREE.WebGLRenderer({ 
+    canvas, 
+    antialias: true,
+    alpha: true 
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  
+  // Set color space safely
+  try {
+    if (renderer.outputColorSpace !== undefined) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    } else if (renderer.outputEncoding !== undefined) {
+      renderer.outputEncoding = THREE.sRGBEncoding;
+    }
+  } catch (colorSpaceError) {
+    log('Color space setting failed, continuing anyway', colorSpaceError);
+  }
+  
+  // Lighting
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambient);
+  
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  dirLight.position.set(1, 1, 1);
+  scene.add(dirLight);
+  
+  // Clock for animations
+  clock = new THREE.Clock();
+  
+  log('Three.js scene setup complete');
+}
+
+// ===== ENHANCED ERROR HANDLING =====
+function handleVRMLoadingError(error) {
+  log('VRM loading error occurred:', error);
+  
+  const errorTypes = {
+    'GLTFLoader': 'GLTF loader failed to initialize',
+    'NetworkError': 'Network connection issue',
+    'timeout': 'Loading took too long',
+    'parse': 'VRM file format issue',
+    'memory': 'Insufficient memory for large VRM'
+  };
+  
+  let errorType = 'unknown';
+  let solution = 'Try refreshing the page';
+  
+  const errorMsg = error.message.toLowerCase();
+  
+  if (errorMsg.includes('gltf') || errorMsg.includes('loader')) {
+    errorType = 'GLTFLoader';
+    solution = 'Using emergency fallback avatar';
+    createEmergencyFallback();
+  } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+    errorType = 'NetworkError';
+    solution = 'Check internet connection and try again';
+  } else if (errorMsg.includes('timeout')) {
+    errorType = 'timeout';
+    solution = 'VRM file is large, please wait or try again';
+  } else if (errorMsg.includes('parse') || errorMsg.includes('json')) {
+    errorType = 'parse';
+    solution = 'VRM file may be corrupted, using fallback';
+    createEmergencyFallback();
+  }
+  
+  // Show user-friendly error
+  const errorDiv = document.createElement('div');
+  errorDiv.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(255, 107, 107, 0.9);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    max-width: 300px;
+    z-index: 1000;
+    cursor: pointer;
+  `;
+  
+  errorDiv.innerHTML = `
+    <strong>Avatar Loading Issue</strong><br>
+    ${errorTypes[errorType] || 'Unknown error'}<br>
+    <em>${solution}</em><br>
+    <small>Click to dismiss</small>
+  `;
+  
+  errorDiv.onclick = () => errorDiv.remove();
+  document.body.appendChild(errorDiv);
+  
+  // Auto-remove after 10 seconds
+  setTimeout(() => {
+    if (errorDiv.parentNode) errorDiv.remove();
+  }, 10000);
+}
+
+// ===== LOADING PROGRESS INDICATOR =====
+function updateLoadingProgress(stage, percent = null) {
+  const statusEl = document.getElementById('loadingStatus');
+  if (!statusEl) return;
+  
+  const stages = {
+    'three': '🔧 Loading 3D Engine',
+    'gltf': '📦 Loading GLTF Loader', 
+    'vrm': '👤 Loading Avatar',
+    'textures': '🎨 Loading Textures',
+    'positioning': '📐 Positioning Avatar',
+    'complete': '✅ Ready!'
+  };
+  
+  const message = stages[stage] || stage;
+  const percentText = percent !== null ? ` ${percent}%` : '';
+  
+  statusEl.textContent = `${message}${percentText}`;
+  statusEl.style.color = stage === 'complete' ? '#00ff88' : '#ffffff';
+  
+  if (stage === 'complete') {
+    setTimeout(() => {
+      statusEl.style.display = 'none';
+    }, 2000);
+  }
+}
+
+// ===== EMERGENCY FALLBACK SYSTEM =====
+function createEmergencyFallback() {
+  log('Creating emergency anime-style fallback...');
+  
+  const character = new THREE.Group();
+  character.name = 'EmergencyFallback';
+  
+  // More detailed anime character
+  const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
+  const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Skin
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.y = 1.6;
+  head.scale.set(1, 1.1, 0.9); // Slightly elongated
+  character.add(head);
+  
+  // Pink hair (VRoid style)
+  const hairGeo = new THREE.SphereGeometry(0.15, 24, 24);
+  const hairMat = new THREE.MeshLambertMaterial({ color: 0xff69b4 }); // Pink
+  const hair = new THREE.Mesh(hairGeo, hairMat);
+  hair.position.y = 1.7;
+  hair.scale.set(1.4, 0.9, 1.3); // Voluminous anime hair
+  character.add(hair);
+  
+  // Hair accessories (twin tails)
+  const twinTailGeo = new THREE.SphereGeometry(0.08, 16, 16);
+  const leftTwinTail = new THREE.Mesh(twinTailGeo, hairMat);
+  leftTwinTail.position.set(-0.2, 1.65, -0.1);
+  leftTwinTail.scale.set(0.8, 1.5, 0.8);
+  character.add(leftTwinTail);
+  
+  const rightTwinTail = new THREE.Mesh(twinTailGeo, hairMat);
+  rightTwinTail.position.set(0.2, 1.65, -0.1);
+  rightTwinTail.scale.set(0.8, 1.5, 0.8);
+  character.add(rightTwinTail);
+  
+  // Eyes (larger anime style)
+  const eyeGeo = new THREE.SphereGeometry(0.025, 12, 12);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x4169E1 }); // Blue eyes
+  
+  const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+  leftEye.position.set(-0.045, 1.62, 0.11);
+  character.add(leftEye);
+  
+  const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+  rightEye.position.set(0.045, 1.62, 0.11);
+  character.add(rightEye);
+  
+  // Body (white top)
+  const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // White
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 1.1;
+  character.add(body);
+  
+  // Arms
+  const armGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.4, 8);
+  const armMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Skin
+  
+  const leftArm = new THREE.Mesh(armGeo, armMat);
+  leftArm.position.set(-0.22, 1.15, 0);
+  leftArm.rotation.z = 0.3;
+  character.add(leftArm);
+  
+  const rightArm = new THREE.Mesh(armGeo, armMat);
+  rightArm.position.set(0.22, 1.15, 0);
+  rightArm.rotation.z = -0.3;
+  character.add(rightArm);
+  
+  // Skirt (black)
+  const skirtGeo = new THREE.CylinderGeometry(0.18, 0.25, 0.3, 12);
+  const skirtMat = new THREE.MeshLambertMaterial({ color: 0x333333 }); // Dark
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.position.y = 0.75;
+  character.add(skirt);
+  
+  // Legs
+  const legGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.4, 8);
+  const legMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Skin
+  
+  const leftLeg = new THREE.Mesh(legGeo, legMat);
+  leftLeg.position.set(-0.08, 0.4, 0);
+  character.add(leftLeg);
+  
+  const rightLeg = new THREE.Mesh(legGeo, legMat);
+  rightLeg.position.set(0.08, 0.4, 0);
+  character.add(rightLeg);
+  
+  // Position character
+  character.position.y = -0.1;
+  scene.add(character);
+  
+  // Advanced animation
+  let time = 0;
+  let blinkTimer = 0;
+  
+  function animateEmergencyFallback() {
+    if (!scene.getObjectByName('EmergencyFallback')) return;
+    
+    time += 0.016;
+    blinkTimer += 0.016;
+    
+    // Breathing animation
+    character.scale.y = 1 + Math.sin(time * 3) * 0.01;
+    
+    // Gentle swaying
+    character.rotation.y = Math.sin(time * 0.8) * 0.05;
+    
+    // Head movement
+    head.rotation.y = Math.sin(time * 1.2) * 0.1;
+    head.rotation.x = Math.sin(time * 0.9) * 0.03;
+    
+    // Hair movement
+    hair.rotation.z = Math.sin(time * 1.5) * 0.02;
+    leftTwinTail.rotation.z = Math.sin(time * 2) * 0.1;
+    rightTwinTail.rotation.z = Math.sin(time * 2.2) * -0.1;
+    
+    // Arm movement
+    leftArm.rotation.z = 0.3 + Math.sin(time * 1.8) * 0.1;
+    rightArm.rotation.z = -0.3 + Math.sin(time * 2.1) * 0.1;
+    
+    // Blinking animation
+    if (blinkTimer > 3) {
+      leftEye.scale.y = 0.1;
+      rightEye.scale.y = 0.1;
+      setTimeout(() => {
+        leftEye.scale.y = 1;
+        rightEye.scale.y = 1;
+      }, 150);
+      blinkTimer = 0;
+    }
+    
+    requestAnimationFrame(animateEmergencyFallback);
+  }
+  
+  animateEmergencyFallback();
+  log('Emergency anime fallback created with animations');
+}
+
+// ===== BASIC THREE.JS FALLBACK =====
+async function initBasicThreeJS() {
+  log('Attempting basic Three.js setup...');
+  
+  // Load only Three.js core
+  if (!window.THREE) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
+    THREE = window.THREE;
+  }
+  
+  if (!THREE) {
+    throw new Error('Could not load Three.js');
+  }
+  
+  // Setup basic scene
+  setupThreeJSScene();
+  animate(); // Start animation loop
+  
+  log('Basic Three.js setup complete');
+}
+
+// ===== VRM HEALTH CHECK =====
+function checkVRMHealth() {
+  return {
+    threeJS: !!window.THREE,
+    gltfLoader: !!(THREE && THREE.GLTFLoader),
+    scene: !!scene,
+    camera: !!camera,
+    renderer: !!renderer,
+    vrmLoaded: !!scene?.getObjectByName('VRM_Model'),
+    fallbackActive: !!(scene?.getObjectByName('fallbackAvatar') || scene?.getObjectByName('EmergencyFallback')),
+    canvasExists: !!document.getElementById('vrmCanvas'),
+    vrmFileAccessible: null // Will be checked async
+  };
+}
+
+// ===== ASYNC VRM FILE CHECK =====
+async function checkVRMFileAccess() {
+  try {
+    const response = await fetch(VRM_PATH, { method: 'HEAD' });
+    return {
+      accessible: response.ok,
+      status: response.status,
+      size: response.headers.get('content-length'),
+      type: response.headers.get('content-type')
+    };
+  } catch (err) {
+    return {
+      accessible: false,
+      error: err.message
+    };
+  }
+}
+
+// ===== COMPREHENSIVE HEALTH CHECK =====
+async function fullHealthCheck() {
+  const basic = checkVRMHealth();
+  const vrmFile = await checkVRMFileAccess();
+  
+  return {
+    ...basic,
+    vrmFile: vrmFile,
+    timestamp: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio
+    }
+  };
+}
+
+// ===== DEBUGGING UTILITIES =====
+function debugVRMLoading() {
+  console.log('=== VRM LOADING DEBUG INFO ===');
+  console.log('THREE available:', !!window.THREE);
+  console.log('GLTFLoader available:', !!(THREE && THREE.GLTFLoader));
+  console.log('Scene objects:', scene ? scene.children.map(c => c.name) : 'No scene');
+  console.log('Camera position:', camera ? camera.position : 'No camera');
+  console.log('Current VRM:', currentVRM ? 'Loaded' : 'Not loaded');
+  console.log('Mixer:', mixer ? 'Available' : 'Not available');
+  
+  // Test VRM file accessibility
+  fetch(VRM_PATH, { method: 'HEAD' })
+    .then(res => console.log('VRM file accessible:', res.ok, res.status))
+    .catch(err => console.log('VRM file check failed:', err.message));
+}
+
+// ===== MANUAL VRM RELOAD FUNCTION =====
+function forceReloadVRM() {
+  log('=== FORCING VRM RELOAD ===');
+  
+  // Clear existing VRM
+  ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+    const existing = scene.getObjectByName(name);
+    if (existing) {
+      scene.remove(existing);
+      log(`Removed ${name}`);
+    }
+  });
+  
+  // Reset camera
+  camera.position.set(0, 1.3, 2.5);
+  camera.lookAt(0, 1, 0);
+  
+  // Create temporary fallback
+  createFallbackAvatar();
+  
+  // Attempt reload
+  setTimeout(async () => {
+    try {
+      await loadVRMWithReliableLoader(VRM_PATH);
+    } catch (err) {
+      log('Manual reload failed:', err);
+      alert('VRM reload failed: ' + err.message);
+    }
+  }, 1000);
 }
 
 // ===== CREATE SIMPLE FALLBACK =====
@@ -1090,10 +1327,6 @@ async function createFallbackAvatar() {
       }
     }
     animateFallback();
-    
-    // Hide loading status since we have something to show
-    const statusEl = document.getElementById('loadingStatus');
-    if (statusEl) statusEl.style.display = 'none';
     
     log('Fallback avatar created');
   } catch (err) {
@@ -1200,43 +1433,15 @@ async function fetchPrice() {
     
     const res = await fetch(url);
     log('Price API response status:', res.status);
-    log('Price API response headers:', Object.fromEntries(res.headers.entries()));
     
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     
-    // Get raw text first to debug
-    const text = await res.text();
-    log('Raw response text:', text.substring(0, 500)); // First 500 chars
-    
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (parseError) {
-      log('JSON parse failed:', parseError);
-      throw new Error('Invalid JSON response');
-    }
-    
-    log('Parsed data type:', typeof data);
-    log('Parsed data keys:', Object.keys(data));
-    
-    // Force detailed logging to console
-    console.log('=== COMPLETE PRICE RESPONSE DEBUG ===');
-    console.log('Status:', res.status);
-    console.log('Raw text length:', text.length);
-    console.log('Raw text sample:', text.substring(0, 200));
-    console.log('Parsed data:', data);
-    console.log('Data structure:');
-    console.log(JSON.stringify(data, null, 2));
-    console.log('=== END PRICE DEBUG ===');
-    
+    const data = await res.json();
     const solPrice = document.getElementById('solPrice');
     if (!solPrice) {
       log('ERROR: solPrice element not found in DOM');
       return;
     }
-    
-    // Based on Jupiter Lite API v3, the response should be:
-    // { "data": { "So11111111111111111111111111111111111111112": { "id": "...", "type": "...", "price": number } } }
     
     let price = null;
     let priceSource = '';
@@ -1244,33 +1449,20 @@ async function fetchPrice() {
     // Method 1: Jupiter Lite API v3 format - data.data[mint].price
     if (data.data && typeof data.data === 'object' && data.data[SOL_MINT]) {
       const solData = data.data[SOL_MINT];
-      log('Found SOL data object:', solData);
       if (typeof solData.price === 'number') {
         price = solData.price;
         priceSource = 'Jupiter API v3: data.data[SOL_MINT].price';
       }
     }
-    // Method 2: Direct in data object
-    else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'object' && typeof data[SOL_MINT].price === 'number') {
-      price = data[SOL_MINT].price;
-      priceSource = 'Direct mint object: data[SOL_MINT].price';
-    }
-    // Method 3: Direct price field
+    // Method 2: Direct price field
     else if (typeof data.price === 'number') {
       price = data.price;
       priceSource = 'Direct price field';
     }
-    // Method 4: SOL mint key as number
-    else if (data[SOL_MINT] && typeof data[SOL_MINT] === 'number') {
-      price = data[SOL_MINT];
-      priceSource = 'Direct mint key as number';
-    }
-    // Method 5: Search for ANY reasonable price value
+    // Method 3: Search for ANY reasonable price value
     else {
-      log('No standard format found, searching entire response...');
       function searchForPrice(obj, path = '') {
         if (typeof obj === 'number' && obj > 1 && obj < 10000) {
-          log(`Found potential price: ${obj} at ${path || 'root'}`);
           if (!price) {
             price = obj;
             priceSource = `Auto-detected number at ${path || 'root'}`;
@@ -1285,23 +1477,14 @@ async function fetchPrice() {
       searchForPrice(data);
     }
     
-    log('Final price extraction result:', { price, priceSource });
-    
     if (price !== null && !isNaN(price) && price > 0) {
       solPrice.textContent = `SOL — ${price.toFixed(2)}`;
-      solPrice.style.color = '#00ff88'; // Success color
+      solPrice.style.color = '#00ff88';
       log(`✅ SUCCESS: Price updated to ${price.toFixed(2)} (${priceSource})`);
     } else {
       solPrice.textContent = 'SOL — Data parsing error';
-      solPrice.style.color = '#ff6b6b'; // Error color
+      solPrice.style.color = '#ff6b6b';
       log('❌ FAILED: Could not extract price from response');
-      log('Available data:', Object.keys(data));
-      
-      // Show what we actually got
-      if (data.data && data.data[SOL_MINT]) {
-        log('SOL mint data keys:', Object.keys(data.data[SOL_MINT]));
-        log('SOL mint data values:', data.data[SOL_MINT]);
-      }
     }
     
   } catch (err) {
@@ -1482,17 +1665,44 @@ function setupUI() {
     });
   }
   
-  // Health button
+  // Enhanced Health button
   const healthBtn = document.getElementById('healthBtn');
   if (healthBtn) {
     healthBtn.addEventListener('click', async () => {
       try {
-        const res = await fetch('/api/health');
-        alert(`Health Check:\n` +
-              `Status: ${data.ok ? 'OK' : 'Failed'}\n` +
-              `OpenAI: ${data.env ? 'Connected' : 'Missing API Key'}\n` +
-              `VRM Avatar: ${currentVRM ? 'Loaded' : 'Failed'}\n` +
-              `Three.js: ${THREE ? 'Loaded' : 'Failed'}`);
+        const health = await fullHealthCheck();
+        
+        const report = `
+🔍 SOLMATE HEALTH REPORT
+
+🔧 3D Engine:
+• Three.js: ${health.threeJS ? '✅ Loaded' : '❌ Missing'}
+• GLTF Loader: ${health.gltfLoader ? '✅ Available' : '❌ Missing'} 
+• Scene: ${health.scene ? '✅ Created' : '❌ Missing'}
+• Renderer: ${health.renderer ? '✅ Active' : '❌ Missing'}
+
+👤 Avatar Status:
+• VRM Model: ${health.vrmLoaded ? '✅ Loaded' : '❌ Not loaded'}
+• Fallback: ${health.fallbackActive ? '⚠️ Active' : '✅ Not needed'}
+• VRM File: ${health.vrmFile.accessible ? '✅ Accessible' : `❌ ${health.vrmFile.error || 'Not accessible'}`}
+
+💻 Environment:
+• Canvas: ${health.canvasExists ? '✅ Found' : '❌ Missing'}
+• Viewport: ${health.viewport.width}x${health.viewport.height}
+• Device Ratio: ${health.viewport.devicePixelRatio}
+
+🛠️ Debug Commands:
+• debugVRM() - Show detailed debug info
+• reloadVRM() - Force reload avatar
+• createEmergency() - Create fallback avatar
+        `.trim();
+        
+        alert(report);
+        
+        // Also log detailed info to console
+        console.log('=== DETAILED HEALTH CHECK ===');
+        console.table(health);
+        
       } catch (err) {
         alert('Health check failed: ' + err.message);
       }
@@ -1569,9 +1779,9 @@ function enableAudio() {
   log('Audio context enabled');
 }
 
-// ===== MAIN INIT =====
+// ===== MAIN INIT FUNCTION (ENHANCED) =====
 async function init() {
-  log('=== INITIALIZING SOLMATE ===');
+  log('=== INITIALIZING SOLMATE WITH ENHANCED VRM LOADER ===');
   
   try {
     // STEP 1: Setup UI first
@@ -1593,10 +1803,10 @@ async function init() {
     priceUpdateTimer = setInterval(fetchPrice, 30000); // Every 30s
     tpsUpdateTimer = setInterval(fetchTPS, 60000); // Every 60s
     
-    // STEP 3: Try to initialize Three.js (but don't let it block everything)
+    // STEP 3: Try enhanced Three.js initialization
     try {
-      log('Attempting Three.js initialization...');
-      await initThree();
+      log('Attempting enhanced Three.js initialization...');
+      await initThreeEnhanced(); // Use the new enhanced loader
       
       // Start animations if Three.js worked
       setTimeout(() => {
@@ -1604,8 +1814,15 @@ async function init() {
       }, 2000);
       
     } catch (threeError) {
-      log('Three.js failed, continuing with audio-only mode', threeError);
-      // Continue without 3D - the app is still functional
+      log('Enhanced Three.js failed, trying emergency fallback', threeError);
+      try {
+        // Try one more time with emergency systems
+        await initBasicThreeJS();
+        createEmergencyFallback();
+      } catch (emergencyError) {
+        log('All 3D systems failed, continuing audio-only', emergencyError);
+        createSimpleFallback();
+      }
     }
     
     // STEP 4: Connect WebSocket (independent of Three.js)
@@ -1614,9 +1831,9 @@ async function init() {
     
     log('=== SOLMATE INITIALIZATION COMPLETE ===');
     
-    // STEP 5: Welcome message (delay to allow user interaction)
+    // STEP 5: Welcome message
     setTimeout(() => {
-      queueTTS("Hello, I'm your Solana Solmate. How can I help you today?", 'nova');
+      queueTTS("Hello, I'm your enhanced Solana Solmate. How can I help you today?", 'nova');
     }, 2000);
     
   } catch (err) {
@@ -1663,6 +1880,20 @@ window.addEventListener('beforeunload', () => {
     }
   }
 });
+
+// ===== CONSOLE COMMANDS FOR DEBUGGING =====
+// Add these to global scope for debugging
+window.debugVRM = debugVRMLoading;
+window.reloadVRM = forceReloadVRM;
+window.createEmergency = createEmergencyFallback;
+
+// Usage in console:
+// debugVRM() - Shows debug info
+// reloadVRM() - Force reload VRM
+// createEmergency() - Create detailed anime fallback
+
+console.log('🚀 Enhanced VRM loader ready!');
+console.log('📋 Debug commands: debugVRM(), reloadVRM(), createEmergency()');
 
 // ===== START =====
 if (document.readyState === 'loading') {
