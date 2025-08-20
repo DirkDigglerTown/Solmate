@@ -11,121 +11,13 @@
 </head>
 <body>
   <header class="hud">
-    <div class="left">
-      <!-- Removed theme toggle, WS status, and TPS -->
+      </div>
     </div>
     <div class="pill sol" id="solPrice">
-      SOL —
+      SOL â€”
     </div>
-    <!-- Removed TPS display -->
   </header>
   <canvas id="vrmCanvas"></canvas>
-  
-  <!-- VRM Test Controls -->
-  <div id="vrmTestControls" style="
-    position: fixed;
-    top: 80px;
-    left: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    padding: 15px;
-    border-radius: 8px;
-    color: white;
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    z-index: 1000;
-    max-width: 200px;
-    display: none;
-  ">
-    <h3 style="margin: 0 0 10px 0; color: #4a90e2;">🎭 VRM Controls</h3>
-    
-    <div style="margin-bottom: 10px;">
-      <button onclick="testTTS()" style="
-        background: #00ff88;
-        color: black;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">🎤 Test Voice</button>
-      
-      <button onclick="fixTPose()" style="
-        background: #ff6b6b;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">🔧 Fix T-Pose</button>
-      
-      <button onclick="testAnimations()" style="
-        background: #4a90e2;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">😊 Test Expressions</button>
-      
-      <button onclick="startTalking()" style="
-        background: #ffa500;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">🗣️ Test Talking</button>
-      
-      <button onclick="patchReloadVRMTextures()" style="
-        background: #9b59b6;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">🎨 Fix Textures</button>
-      
-      <button onclick="patchDiagnoseVRM()" style="
-        background: #34495e;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 5px;
-      ">🔍 Diagnose</button>
-    </div>
-    
-    <div style="font-size: 10px; color: #888;">
-      Click any button to test Solmate's features
-    </div>
-  </div>
-
-  <!-- Toggle button for VRM controls -->
-  <button id="vrmToggleControls" onclick="toggleVRMControls()" style="
-    position: fixed;
-    top: 80px;
-    left: 20px;
-    background: #4a90e2;
-    color: white;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 50%;
-    cursor: pointer;
-    z-index: 1001;
-    font-size: 16px;
-  ">🎭</button>
-  
   <div id="chatContainer" class="dock">
     <form id="chatForm">
       <input id="promptInput" type="text" class="ask" placeholder="Ask anything about Solana, crypto, or just vibe...">
@@ -139,11 +31,10 @@
         <option value="nova">Nova</option>
         <option value="shimmer">Shimmer</option>
       </select>
-      <button id="sendBtn" class="send icon-btn">▶</button>
-      <button id="clearBtn" class="send icon-btn">🔇</button>
+      <button id="sendBtn" class="send icon-btn">â–¶</button>
+      <button id="clearBtn" class="send icon-btn">ðŸ”‡</button>
     </form>
   </div>
-  
   <div id="debugOverlay" class="overlay hidden">
     <h3>Debug</h3>
     <ul>
@@ -161,39 +52,7 @@
     Initializing Solmate...
   </div>
   
-  <script>
-    // VRM Controls JavaScript
-    function toggleVRMControls() {
-      const controls = document.getElementById('vrmTestControls');
-      const toggle = document.getElementById('vrmToggleControls');
-      
-      if (controls.style.display === 'none') {
-        controls.style.display = 'block';
-        toggle.textContent = '❌';
-      } else {
-        controls.style.display = 'none';
-        toggle.textContent = '🎭';
-      }
-    }
-
-    // Auto-show controls when VRM loads
-    setTimeout(() => {
-      if (typeof scene !== 'undefined' && scene?.getObjectByName?.('VRM_Model')) {
-        document.getElementById('vrmTestControls').style.display = 'block';
-        document.getElementById('vrmToggleControls').textContent = '❌';
-      }
-    }, 5000);
-    
-    // Check periodically for VRM model
-    const checkForVRM = setInterval(() => {
-      if (typeof scene !== 'undefined' && scene?.getObjectByName?.('VRM_Model')) {
-        document.getElementById('vrmTestControls').style.display = 'block';
-        document.getElementById('vrmToggleControls').textContent = '❌';
-        clearInterval(checkForVRM);
-      }
-    }, 2000);
-  </script>
-  
+  <!-- FIXED: Remove type="module" since we're using regular script loading -->
   <script src="/script.js"></script>
 </body>
 </html>
