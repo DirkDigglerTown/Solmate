@@ -127,56 +127,46 @@ async function initThree() {
       throw new Error(`THREE basic test failed: ${threeError.message}`);
     }
     
-    // STEP 3: Load GLTFLoader for VRM support (IMPROVED)
+    // STEP 3: Load GLTFLoader for VRM support (FIXED FOR R158)
     if (!THREE.GLTFLoader) {
       log('Loading GLTF Loader for VRM support...');
       
-      // Try the module-based approach first (more reliable for r158+)
-      try {
-        log('Attempting ES module import for GLTF loader...');
-        
-        // For Three.js r158+, we need to use ES modules
-        const gltfModule = await import('https://cdn.skypack.dev/three@0.158.0/examples/jsm/loaders/GLTFLoader.js');
-        THREE.GLTFLoader = gltfModule.GLTFLoader;
-        log('GLTF Loader loaded via ES module import');
-        
-      } catch (moduleError) {
-        log('ES module import failed, trying script tags...', moduleError);
-        
-        // Fallback to script tag approach with correct URLs
-        const gltfSources = [
-          // Fixed URLs for Three.js r158 (JSM instead of JS)
-          'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
-          'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
-          // Alternative CDN
-          'https://cdn.skypack.dev/three@0.158.0/examples/jsm/loaders/GLTFLoader.js',
-          // Last resort - try older version that might work
-          'https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/loaders/GLTFLoader.js'
-        ];
-        
-        let gltfLoaded = false;
-        for (const source of gltfSources) {
-          try {
-            log(`Trying GLTF loader from: ${source}`);
-            await loadScript(source);
-            
-            // Check multiple possible locations where GLTFLoader might be
-            if (THREE.GLTFLoader || window.GLTFLoader) {
-              THREE.GLTFLoader = THREE.GLTFLoader || window.GLTFLoader;
-              log('GLTF Loader loaded successfully from:', source);
-              gltfLoaded = true;
-              break;
-            } else {
-              log(`Script loaded but GLTFLoader not found from: ${source}`);
-            }
-          } catch (gltfError) {
-            log(`GLTF loader failed from ${source}:`, gltfError);
+      // The issue: r158 JSM files are ES modules, but we need script-compatible versions
+      // Let's use older versions that work with script tags
+      const gltfSources = [
+        // Use r150 which still has the old script-compatible files
+        'https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js',
+        'https://unpkg.com/three@0.150.1/examples/js/loaders/GLTFLoader.js',
+        // Try r149 as well
+        'https://cdn.jsdelivr.net/npm/three@0.149.0/examples/js/loaders/GLTFLoader.js',
+        // Direct from threejs.org (older stable)
+        'https://threejs.org/examples/js/loaders/GLTFLoader.js',
+        // Raw GitHub version (r150 branch)
+        'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/js/loaders/GLTFLoader.js'
+      ];
+      
+      let gltfLoaded = false;
+      for (const source of gltfSources) {
+        try {
+          log(`Trying GLTF loader from: ${source}`);
+          await loadScript(source);
+          
+          // Check multiple possible locations where GLTFLoader might be
+          if (THREE.GLTFLoader || window.GLTFLoader) {
+            THREE.GLTFLoader = THREE.GLTFLoader || window.GLTFLoader;
+            log('✅ GLTF Loader loaded successfully from:', source);
+            gltfLoaded = true;
+            break;
+          } else {
+            log(`Script loaded but GLTFLoader not found from: ${source}`);
           }
+        } catch (gltfError) {
+          log(`GLTF loader failed from ${source}:`, gltfError);
         }
-        
-        if (!gltfLoaded) {
-          log('All GLTF sources failed, will try to load VRM as basic mesh');
-        }
+      }
+      
+      if (!gltfLoaded) {
+        log('All GLTF sources failed, will try to load VRM as basic mesh');
       }
     }
     
@@ -415,6 +405,8 @@ async function loadVRMFile(url, retryCount = 0) {
       throw new Error('GLTFLoader not available');
     }
     
+    log('GLTFLoader is available, proceeding with VRM loading...');
+    
     // Check if VRM file exists first
     log('Checking VRM file availability...');
     const checkResponse = await fetch(url, { method: 'HEAD' });
@@ -428,25 +420,28 @@ async function loadVRMFile(url, retryCount = 0) {
     const fileSizeMB = contentLength ? Math.round(contentLength / 1024 / 1024) : 'unknown';
     log(`VRM file size: ${fileSizeMB}MB`);
     
-    // Load as regular GLTF first (simpler than VRM)
-    log('Loading VRM file as GLTF...');
+    // Create GLTF loader
+    log('Creating GLTF loader instance...');
     const loader = new THREE.GLTFLoader();
+    
+    log('Starting VRM file loading...');
     
     const gltf = await new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error('VRM loading timeout'));
+        reject(new Error('VRM loading timeout after 30 seconds'));
       }, ASSET_LOAD_TIMEOUT);
       
       loader.load(
         url,
         (loadedGltf) => {
           clearTimeout(timeoutId);
-          log('GLTF loaded successfully');
+          log('✅ GLTF file loaded successfully!');
           log('GLTF info:', {
             scenes: loadedGltf.scenes.length,
             animations: loadedGltf.animations.length,
             cameras: loadedGltf.cameras.length,
-            userData: Object.keys(loadedGltf.userData || {})
+            userData: Object.keys(loadedGltf.userData || {}),
+            sceneChildren: loadedGltf.scene ? loadedGltf.scene.children.length : 0
           });
           resolve(loadedGltf);
         },
@@ -460,39 +455,72 @@ async function loadVRMFile(url, retryCount = 0) {
         },
         (error) => {
           clearTimeout(timeoutId);
-          log('GLTF loading error:', error);
+          log('❌ GLTF loading error:', error);
           reject(error);
         }
       );
     });
     
-    // Remove the fallback sphere
+    // Remove the fallback avatars
     const fallbackAvatar = scene.getObjectByName('fallbackAvatar');
     if (fallbackAvatar) {
-      log('Removing fallback avatar');
+      log('Removing basic fallback avatar');
       scene.remove(fallbackAvatar);
+    }
+    
+    const alternativeAvatar = scene.getObjectByName('alternativeAvatar');
+    if (alternativeAvatar) {
+      log('Removing alternative avatar');
+      scene.remove(alternativeAvatar);
     }
     
     // Add the loaded model to the scene
     if (gltf.scene) {
-      log('Adding GLTF scene to Three.js scene');
+      log('Adding VRM scene to Three.js scene');
+      
+      // Scale and position the model appropriately
+      gltf.scene.scale.setScalar(1); // Adjust scale if needed
       gltf.scene.position.y = -1; // Adjust position
       gltf.scene.name = 'vrmModel';
+      
+      // Add to scene
       scene.add(gltf.scene);
       
       // Setup animations if available
-      if (gltf.animations.length > 0) {
+      if (gltf.animations && gltf.animations.length > 0) {
         log(`Setting up ${gltf.animations.length} animations`);
         mixer = new THREE.AnimationMixer(gltf.scene);
+        
+        // Play the first animation (usually idle)
         const action = mixer.clipAction(gltf.animations[0]);
         action.play();
+        
+        log('Animation setup complete');
+      } else {
+        log('No animations found in VRM file');
       }
       
-      log('✅ VRM model loaded and added to scene successfully');
+      // Log model details for debugging
+      log('VRM model details:', {
+        children: gltf.scene.children.length,
+        position: gltf.scene.position,
+        scale: gltf.scene.scale,
+        boundingBox: new THREE.Box3().setFromObject(gltf.scene)
+      });
+      
+      log('🎉 VRM model loaded and added to scene successfully!');
       
       // Hide loading status
       const statusEl = document.getElementById('loadingStatus');
       if (statusEl) statusEl.style.display = 'none';
+      
+      // Set currentVRM for expressions if this is a real VRM
+      if (gltf.userData && gltf.userData.vrm) {
+        currentVRM = gltf.userData.vrm;
+        log('VRM expressions available');
+      } else {
+        log('No VRM expression data found (loaded as regular GLTF)');
+      }
       
     } else {
       throw new Error('No scene found in GLTF file');
@@ -503,7 +531,7 @@ async function loadVRMFile(url, retryCount = 0) {
       log(`VRM load retry ${retryCount + 1} in 3 seconds...`, err);
       setTimeout(() => loadVRMFile(url, retryCount + 1), 3000);
     } else {
-      log('❌ VRM loading failed completely', err);
+      log('❌ VRM loading failed completely after all retries', err);
       throw err;
     }
   }
