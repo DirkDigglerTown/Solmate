@@ -1,4 +1,4 @@
-// web/script.js - Complete Solmate Implementation
+// web/script.js - Complete Solmate Implementation with Enhanced VRM Support
 // Enhanced VRM Loading, Three.js, Chat, TTS, WebSocket, and UI
 
 // ===== CONSTANTS =====
@@ -23,6 +23,343 @@ let wsReconnectTimer = null;
 let priceUpdateTimer = null;
 let tpsUpdateTimer = null;
 let conversation = [];
+
+// Animation state tracking
+let animationState = {
+  isWaving: false,
+  isIdle: true,
+  isTalking: false,
+  headTarget: { x: 0, y: 0 },
+  breathingPhase: 0,
+  blinkTimer: 0,
+  gestureTimer: 0,
+  expressionTimer: 0
+};
+
+// Animation targets for smooth interpolation
+let animationTargets = {
+  headRotation: { x: 0, y: 0, z: 0 },
+  bodyPosition: { x: 0, y: 0, z: 0 },
+  armRotations: {
+    leftArm: { x: 0, y: 0, z: 0 },
+    rightArm: { x: 0, y: 0, z: 0 }
+  }
+};
+
+// ===== ENHANCED VRM LOADING WITH PROPER PLUGIN SUPPORT =====
+function loadVRMWithProperSupport(url, retryCount = 0) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      log(`=== ENHANCED VRM LOADING (attempt ${retryCount + 1}) ===`);
+      updateLoadingProgress('vrm', 0);
+      
+      // Check file accessibility
+      const checkResponse = await fetch(url, { method: 'HEAD' });
+      if (!checkResponse.ok) {
+        throw new Error(`VRM file not accessible: ${checkResponse.status}`);
+      }
+      
+      // Try to load VRM plugin from CDN first
+      let VRMLoaderPlugin = null;
+      try {
+        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@latest/lib/three-vrm.js');
+        if (window.VRM && window.VRM.VRMLoaderPlugin) {
+          VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
+          log('✅ VRM plugin loaded from CDN');
+        }
+      } catch (e) {
+        log('VRM plugin CDN failed, using fallback', e);
+      }
+      
+      const loader = new THREE.GLTFLoader();
+      
+      // Register VRM plugin if available
+      if (VRMLoaderPlugin) {
+        loader.register((parser) => {
+          return new VRMLoaderPlugin(parser);
+        });
+        log('✅ VRM plugin registered');
+      } else {
+        log('⚠️ Loading as standard GLTF (VRM features may be limited)');
+      }
+      
+      // Load with progress tracking
+      const gltf = await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('VRM loading timeout'));
+        }, ASSET_LOAD_TIMEOUT);
+        
+        loader.load(
+          url,
+          (loadedGltf) => {
+            clearTimeout(timeoutId);
+            log('✅ VRM file loaded successfully!');
+            
+            // Check if VRM data is present
+            if (loadedGltf.userData && loadedGltf.userData.vrm) {
+              currentVRM = loadedGltf.userData.vrm;
+              log('✅ VRM data found and stored');
+              log('VRM Capabilities:', {
+                hasHumanoid: !!(currentVRM.humanoid),
+                hasExpressions: !!(currentVRM.expressionManager),
+                hasMaterials: !!(currentVRM.materials && currentVRM.materials.length > 0),
+                hasLookAt: !!(currentVRM.lookAt)
+              });
+            } else {
+              log('⚠️ No VRM data found, treating as standard GLTF');
+            }
+            
+            resolve(loadedGltf);
+          },
+          (progress) => {
+            if (progress.total > 0) {
+              const percent = Math.round((progress.loaded / progress.total) * 100);
+              updateLoadingProgress('vrm', percent);
+              log(`Loading progress: ${percent}%`);
+            }
+          },
+          (error) => {
+            clearTimeout(timeoutId);
+            log('❌ VRM loading error:', error);
+            reject(error);
+          }
+        );
+      });
+      
+      // Remove existing models
+      ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+        const existing = scene.getObjectByName(name);
+        if (existing) {
+          scene.remove(existing);
+          log(`Removed existing ${name}`);
+        }
+      });
+      
+      if (gltf.scene) {
+        updateLoadingProgress('positioning');
+        processAndAddVRMEnhanced(gltf);
+        updateLoadingProgress('complete');
+        log('🎉 VRM loaded and positioned successfully!');
+        resolve();
+      } else {
+        throw new Error('No scene found in VRM file');
+      }
+      
+    } catch (err) {
+      if (retryCount < VRM_MAX_RETRIES) {
+        log(`VRM retry ${retryCount + 1} in 3s...`, err.message);
+        setTimeout(() => {
+          loadVRMWithProperSupport(url, retryCount + 1).then(resolve).catch(reject);
+        }, 3000);
+      } else {
+        log('❌ VRM loading failed completely', err);
+        handleVRMLoadingError(err);
+        reject(err);
+      }
+    }
+  });
+}
+
+// ===== ENHANCED VRM PROCESSING =====
+function processAndAddVRMEnhanced(gltf) {
+  log('🎭 Processing VRM with enhanced support...');
+  
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  
+  log('VRM dimensions:', {
+    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+    center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
+  });
+  
+  // Smart scaling based on VRM size
+  let scale = 1.0;
+  if (size.y > 10) {
+    scale = 1.8 / size.y;
+    gltf.scene.scale.setScalar(scale);
+    log(`Applied scaling: ${scale.toFixed(4)}`);
+  }
+  
+  // Position the model
+  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
+  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  
+  gltf.scene.position.x = -scaledCenter.x;
+  gltf.scene.position.y = -scaledBox.min.y;
+  gltf.scene.position.z = -scaledCenter.z;
+  
+  gltf.scene.name = 'VRM_Model';
+  scene.add(gltf.scene);
+  
+  // Setup camera for optimal viewing
+  const finalSize = scaledBox.getSize(new THREE.Vector3());
+  const finalHeight = finalSize.y;
+  const finalWidth = Math.max(finalSize.x, finalSize.z);
+  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
+  const lookAtHeight = finalHeight * 0.6;
+  
+  camera.position.set(0, lookAtHeight, cameraDistance);
+  camera.lookAt(0, lookAtHeight, 0);
+  
+  log('✅ VRM positioned successfully');
+  
+  // Setup VRM-specific features
+  setupVRMFeatures(gltf);
+  
+  // Preserve original textures
+  preserveVRMTextures(gltf.scene);
+  
+  // Setup animations after a short delay
+  setTimeout(() => {
+    setupVRMAnimationSystem();
+  }, 1000);
+}
+
+// ===== VRM FEATURE SETUP =====
+function setupVRMFeatures(gltf) {
+  log('🚀 Setting up VRM features...');
+  
+  // Handle animations
+  if (gltf.animations && gltf.animations.length > 0) {
+    log(`Found ${gltf.animations.length} animations`);
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    
+    // Play the first animation if available
+    const action = mixer.clipAction(gltf.animations[0]);
+    action.play();
+  }
+  
+  // VRM-specific setup
+  if (currentVRM) {
+    log('🎭 Configuring VRM-specific features...');
+    
+    // Humanoid setup
+    if (currentVRM.humanoid) {
+      log('🤖 VRM Humanoid system available');
+      
+      // List available humanoid bones
+      const humanoidBones = [];
+      const humanoidBoneNames = [
+        'head', 'neck', 'chest', 'spine', 'hips',
+        'leftShoulder', 'rightShoulder',
+        'leftUpperArm', 'rightUpperArm',
+        'leftLowerArm', 'rightLowerArm',
+        'leftHand', 'rightHand'
+      ];
+      
+      humanoidBoneNames.forEach(boneName => {
+        try {
+          const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
+          if (bone) {
+            humanoidBones.push(boneName);
+          }
+        } catch (e) {
+          // Bone not available
+        }
+      });
+      
+      log('Available humanoid bones:', humanoidBones);
+    }
+    
+    // Expression setup
+    if (currentVRM.expressionManager) {
+      log('😊 VRM Expression system available');
+      
+      // Get available expressions
+      const availableExpressions = [];
+      const commonExpressions = [
+        'happy', 'angry', 'sad', 'surprised', 'relaxed',
+        'neutral', 'blink', 'blinkLeft', 'blinkRight',
+        'fun', 'joy', 'sorrow'
+      ];
+      
+      commonExpressions.forEach(expr => {
+        try {
+          // Test if expression exists by trying to set it to 0
+          currentVRM.expressionManager.setValue(expr, 0);
+          availableExpressions.push(expr);
+        } catch (e) {
+          // Expression not available
+        }
+      });
+      
+      log('Available expressions:', availableExpressions);
+    }
+    
+    // LookAt setup
+    if (currentVRM.lookAt) {
+      log('👀 VRM LookAt system available');
+      currentVRM.lookAt.target = camera;
+    }
+  }
+}
+
+// ===== PRESERVE VRM TEXTURES =====
+function preserveVRMTextures(vrmScene) {
+  log('🎨 Preserving VRM textures and materials...');
+  
+  let preservedCount = 0;
+  let enhancedCount = 0;
+  
+  vrmScene.traverse((child) => {
+    if (child.isMesh && child.material) {
+      // Check if material has existing textures
+      const hasTextures = !!(
+        child.material.map ||
+        child.material.baseColorTexture ||
+        child.material.diffuseTexture ||
+        child.material.emissiveMap ||
+        child.material.normalMap
+      );
+      
+      if (hasTextures) {
+        log(`✅ Preserving textures on: ${child.name}`);
+        preservedCount++;
+        
+        // Ensure proper texture settings
+        if (child.material.map) {
+          child.material.map.flipY = false; // VRM standard
+          child.material.map.colorSpace = THREE.SRGBColorSpace;
+        }
+        
+        // Keep original material properties
+        return;
+      }
+      
+      // Only enhance materials that appear to need help
+      const materialColor = child.material.color;
+      if (materialColor && (
+        materialColor.r < 0.1 && materialColor.g < 0.1 && materialColor.b < 0.1 || // Very dark
+        materialColor.r === materialColor.g && materialColor.g === materialColor.b // Grayscale
+      )) {
+        log(`🎨 Enhancing material on: ${child.name}`);
+        enhancedCount++;
+        
+        // Apply subtle enhancements based on mesh name
+        const name = child.name.toLowerCase();
+        if (name.includes('hair')) {
+          child.material.color.setHex(0x8B4513);
+        } else if (name.includes('skin') || name.includes('face') || name.includes('body')) {
+          child.material.color.setHex(0xFFCDB2);
+        } else if (name.includes('eye')) {
+          child.material.color.setHex(0x4169E1);
+        } else if (name.includes('cloth') || name.includes('dress') || name.includes('shirt')) {
+          child.material.color.setHex(0xFF6B6B);
+        } else {
+          // Brighten existing color slightly
+          child.material.color.multiplyScalar(1.3);
+        }
+        
+        // Improve material properties
+        child.material.roughness = 0.7;
+        child.material.metalness = 0.1;
+      }
+    }
+  });
+  
+  log(`🎨 Texture preservation complete: ${preservedCount} preserved, ${enhancedCount} enhanced`);
+}
 
 // ===== LOGGING =====
 function log(msg, data = null) {
@@ -80,7 +417,7 @@ function initThreeEnhanced() {
       
       setTimeout(async () => {
         try {
-          await loadVRMWithReliableLoader(VRM_PATH);
+          await loadVRMWithProperSupport(VRM_PATH);
         } catch (vrmError) {
           log('VRM loading failed, keeping fallback', vrmError);
           handleVRMLoadingError(vrmError);
@@ -471,137 +808,330 @@ function createProductionGLTFLoader() {
   };
 }
 
-// ===== VRM LOADING =====
-function loadVRMWithReliableLoader(url, retryCount = 0) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      log(`=== LOADING VRM (attempt ${retryCount + 1}) ===`);
-      updateLoadingProgress('vrm', 0);
+// ===== ANIMATION SYSTEM SETUP =====
+function setupVRMAnimationSystem() {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (!vrmModel) {
+    log('❌ No VRM model found for animation setup');
+    return;
+  }
+  
+  log('🎭 Setting up comprehensive VRM animation system...');
+  
+  // Initialize animation data
+  const animationData = {
+    model: vrmModel,
+    bones: {},
+    hasVRMHumanoid: false,
+    hasExpressions: false,
+    isAnimating: false
+  };
+  
+  // Detect VRM capabilities
+  if (currentVRM) {
+    if (currentVRM.humanoid) {
+      animationData.hasVRMHumanoid = true;
+      log('🤖 VRM Humanoid detected');
       
-      if (!THREE.GLTFLoader) {
-        throw new Error('No GLTF loader available');
-      }
+      // Get humanoid bones
+      const humanoidBoneNames = [
+        'head', 'neck', 'chest', 'spine', 'hips',
+        'leftShoulder', 'rightShoulder',
+        'leftUpperArm', 'rightUpperArm',
+        'leftLowerArm', 'rightLowerArm',
+        'leftHand', 'rightHand'
+      ];
       
-      const checkResponse = await fetch(url, { method: 'HEAD' });
-      if (!checkResponse.ok) {
-        throw new Error(`VRM file not accessible: ${checkResponse.status}`);
-      }
-      
-      const contentLength = checkResponse.headers.get('content-length');
-      const fileSizeMB = contentLength ? Math.round(contentLength / 1024 / 1024) : 'unknown';
-      log(`VRM file size: ${fileSizeMB}MB`);
-      
-      const loader = new THREE.GLTFLoader();
-      
-      const gltf = await new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('VRM loading timeout'));
-        }, ASSET_LOAD_TIMEOUT);
-        
-        loader.load(
-          url,
-          (loadedGltf) => {
-            clearTimeout(timeoutId);
-            log('✅ VRM GLTF loaded successfully!');
-            resolve(loadedGltf);
-          },
-          (progress) => {
-            if (progress.total > 0) {
-              const percent = Math.round((progress.loaded / progress.total) * 100);
-              updateLoadingProgress('vrm', percent);
-            }
-          },
-          (error) => {
-            clearTimeout(timeoutId);
-            reject(error);
+      humanoidBoneNames.forEach(boneName => {
+        try {
+          const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
+          if (bone) {
+            animationData.bones[boneName] = bone;
           }
-        );
-      });
-      
-      ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
-        const existing = scene.getObjectByName(name);
-        if (existing) {
-          scene.remove(existing);
-          log(`Removed existing ${name}`);
+        } catch (e) {
+          // Bone not available
         }
       });
-      
-      if (gltf.scene) {
-        updateLoadingProgress('positioning');
-        processAndAddVRM(gltf);
-        updateLoadingProgress('complete');
-        log('🎉 VRM loaded and positioned successfully!');
-        resolve();
-      } else {
-        throw new Error('No scene found in VRM file');
-      }
-      
-    } catch (err) {
-      if (retryCount < VRM_MAX_RETRIES) {
-        log(`VRM retry ${retryCount + 1} in 3s...`, err.message);
-        setTimeout(() => {
-          loadVRMWithReliableLoader(url, retryCount + 1).then(resolve).catch(reject);
-        }, 3000);
-      } else {
-        log('❌ VRM loading failed completely', err);
-        handleVRMLoadingError(err);
-        reject(err);
-      }
     }
-  });
+    
+    if (currentVRM.expressionManager) {
+      animationData.hasExpressions = true;
+      log('😊 VRM Expressions detected');
+    }
+  }
+  
+  // Start appropriate animation system
+  if (Object.keys(animationData.bones).length > 0) {
+    startVRMBoneAnimations(animationData);
+  } else {
+    startFallbackAnimations(animationData);
+  }
+  
+  // Start expression system
+  if (animationData.hasExpressions) {
+    startVRMExpressions();
+  }
+  
+  // Global animation functions
+  window.vrmAnimationData = animationData;
+  
+  log(`🎭 Animation system started with ${Object.keys(animationData.bones).length} bones`);
 }
 
-// ===== PROCESS VRM =====
-function processAndAddVRM(gltf) {
-  log('Processing VRM for display...');
+// ===== VRM BONE ANIMATIONS =====
+function startVRMBoneAnimations(animationData) {
+  log('🦴 Starting VRM bone animations...');
   
-  const box = new THREE.Box3().setFromObject(gltf.scene);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
+  let time = 0;
+  let breathingPhase = 0;
+  let blinkTimer = 0;
   
-  log('VRM dimensions:', {
-    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
-    center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
-  });
-  
-  let scale = 1.0;
-  if (size.y > 50) {
-    scale = 1.8 / size.y;
-    gltf.scene.scale.setScalar(scale);
-    log(`Applied scaling: ${scale.toFixed(4)}`);
+  function animateVRMBones() {
+    if (!scene?.getObjectByName('VRM_Model') || !animationData.model) return;
+    
+    time += 0.016;
+    breathingPhase += 0.016;
+    blinkTimer += 0.016;
+    
+    const bones = animationData.bones;
+    
+    // Breathing animation
+    if (bones.chest || bones.spine) {
+      const target = bones.chest || bones.spine;
+      const breathe = 1 + Math.sin(breathingPhase * 2.5) * 0.012;
+      target.scale.y = breathe;
+    }
+    
+    // Head movement (if not talking)
+    if (bones.head && !animationState.isTalking) {
+      bones.head.rotation.y = Math.sin(time * 0.8) * 0.04 + (animationTargets.headRotation.y * 0.3);
+      bones.head.rotation.x = Math.sin(time * 0.6) * 0.02 + (animationTargets.headRotation.x * 0.3);
+      bones.head.rotation.z = Math.sin(time * 0.4) * 0.008;
+    }
+    
+    // Neck support
+    if (bones.neck && !animationState.isTalking) {
+      bones.neck.rotation.y = Math.sin(time * 0.5) * 0.01;
+    }
+    
+    // Shoulder movement
+    if (bones.leftShoulder) {
+      bones.leftShoulder.rotation.z = Math.sin(time * 1.2) * 0.025;
+    }
+    if (bones.rightShoulder) {
+      bones.rightShoulder.rotation.z = Math.sin(time * 1.4) * -0.025;
+    }
+    
+    // Arm movement (if not waving)
+    if (bones.leftUpperArm && !animationState.isWaving) {
+      bones.leftUpperArm.rotation.z = Math.sin(time * 1.1) * 0.06;
+      bones.leftUpperArm.rotation.x = Math.sin(time * 0.9) * 0.02;
+    }
+    
+    if (bones.rightUpperArm && !animationState.isWaving) {
+      bones.rightUpperArm.rotation.z = Math.sin(time * 1.3) * -0.06;
+      bones.rightUpperArm.rotation.x = Math.sin(time * 1.1) * 0.02;
+    }
+    
+    // Lower arm movement
+    if (bones.leftLowerArm && !animationState.isWaving) {
+      bones.leftLowerArm.rotation.y = Math.sin(time * 1.5) * 0.03;
+    }
+    
+    if (bones.rightLowerArm && !animationState.isWaving) {
+      bones.rightLowerArm.rotation.y = Math.sin(time * 1.7) * 0.03;
+    }
+    
+    // Hand movement
+    if (bones.leftHand) {
+      bones.leftHand.rotation.z = Math.sin(time * 2.1) * 0.015;
+    }
+    if (bones.rightHand) {
+      bones.rightHand.rotation.z = Math.sin(time * 2.3) * 0.015;
+    }
+    
+    // Hip movement
+    if (bones.hips) {
+      bones.hips.rotation.y = Math.sin(time * 0.7) * 0.008;
+      bones.hips.position.y += Math.sin(time * 2.8) * 0.001;
+    }
+    
+    // Blinking
+    if (blinkTimer > 3 + Math.random() * 4) {
+      performVRMBlink();
+      blinkTimer = 0;
+    }
+    
+    requestAnimationFrame(animateVRMBones);
   }
   
-  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
-  const scaledSize = scaledBox.getSize(new THREE.Vector3());
-  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+  animateVRMBones();
+  log('✅ VRM bone animations started');
+}
+
+// ===== FALLBACK ANIMATIONS =====
+function startFallbackAnimations(animationData) {
+  log('🎪 Starting fallback model animations...');
   
-  gltf.scene.position.x = -scaledCenter.x;
-  gltf.scene.position.y = -scaledBox.min.y;
-  gltf.scene.position.z = -scaledCenter.z;
+  let time = 0;
   
-  gltf.scene.name = 'VRM_Model';
-  scene.add(gltf.scene);
-  
-  const finalHeight = scaledSize.y;
-  const finalWidth = Math.max(scaledSize.x, scaledSize.z);
-  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
-  const lookAtHeight = finalHeight * 0.6;
-  
-  camera.position.set(0, lookAtHeight, cameraDistance);
-  camera.lookAt(0, lookAtHeight, 0);
-  
-  log('VRM positioned successfully');
-  
-  if (gltf.animations && gltf.animations.length > 0) {
-    log(`Setting up ${gltf.animations.length} animations`);
-    mixer = new THREE.AnimationMixer(gltf.scene);
-    const action = mixer.clipAction(gltf.animations[0]);
-    action.play();
+  function animateFallback() {
+    if (!animationData.model) return;
+    
+    time += 0.016;
+    
+    // Model-level animations
+    animationData.model.position.y += Math.sin(time * 2.0) * 0.001;
+    animationData.model.rotation.y = Math.sin(time * 0.6) * 0.012;
+    animationData.model.rotation.z = Math.sin(time * 0.4) * 0.004;
+    
+    // Breathing effect
+    const breathe = 1 + Math.sin(time * 2.2) * 0.006;
+    animationData.model.scale.y = breathe;
+    
+    requestAnimationFrame(animateFallback);
   }
   
-  if (gltf.userData && gltf.userData.vrm) {
-    currentVRM = gltf.userData.vrm;
-    log('VRM expressions available');
+  animateFallback();
+  log('✅ Fallback animations started');
+}
+
+// ===== VRM EXPRESSIONS =====
+function startVRMExpressions() {
+  if (!currentVRM || !currentVRM.expressionManager) return;
+  
+  log('😊 Starting VRM expression cycles...');
+  
+  const expressions = ['happy', 'relaxed', 'surprised', 'neutral', 'fun'];
+  
+  function cycleExpression() {
+    const randomExpression = expressions[Math.floor(Math.random() * expressions.length)];
+    const intensity = 0.3 + Math.random() * 0.4;
+    
+    try {
+      currentVRM.expressionManager.setValue(randomExpression, intensity);
+      
+      setTimeout(() => {
+        if (currentVRM && currentVRM.expressionManager) {
+          currentVRM.expressionManager.setValue(randomExpression, 0);
+        }
+      }, 2000 + Math.random() * 2000);
+      
+    } catch (e) {
+      // Expression not available
+    }
+    
+    // Next expression
+    setTimeout(cycleExpression, 4000 + Math.random() * 6000);
+  }
+  
+  setTimeout(cycleExpression, 3000);
+  log('✅ VRM expressions started');
+}
+
+// ===== ENHANCED WAVE ANIMATION =====
+function playEnhancedVRMWave() {
+  const animationData = window.vrmAnimationData;
+  if (!animationData || !animationData.bones.rightUpperArm) {
+    log('⚠️ No right arm bone available for waving');
+    return;
+  }
+  
+  log('👋 Playing enhanced VRM wave...');
+  animationState.isWaving = true;
+  
+  const rightArm = animationData.bones.rightUpperArm;
+  const rightLowerArm = animationData.bones.rightLowerArm;
+  const rightHand = animationData.bones.rightHand;
+  
+  // Save original positions
+  const originalRotations = {
+    upperArm: rightArm.rotation.clone(),
+    lowerArm: rightLowerArm ? rightLowerArm.rotation.clone() : null,
+    hand: rightHand ? rightHand.rotation.clone() : null
+  };
+  
+  // Enhanced wave sequence
+  const waveFrames = [
+    { time: 0, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0}, hand: {x: 0, y: 0, z: 0} },
+    { time: 0.4, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
+    { time: 0.7, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5}, hand: {x: 0, y: 0, z: -0.4} },
+    { time: 1.0, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
+    { time: 1.3, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5}, hand: {x: 0, y: 0, z: -0.4} },
+    { time: 1.6, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
+    { time: 2.2, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0}, hand: {x: 0, y: 0, z: 0} }
+  ];
+  
+  let frameIndex = 0;
+  const startTime = Date.now();
+  
+  function animateWave() {
+    const elapsed = (Date.now() - startTime) / 1000;
+    
+    if (elapsed >= 2.2 || frameIndex >= waveFrames.length - 1) {
+      // Return to original positions
+      rightArm.rotation.copy(originalRotations.upperArm);
+      if (rightLowerArm && originalRotations.lowerArm) {
+        rightLowerArm.rotation.copy(originalRotations.lowerArm);
+      }
+      if (rightHand && originalRotations.hand) {
+        rightHand.rotation.copy(originalRotations.hand);
+      }
+      
+      animationState.isWaving = false;
+      log('👋 Enhanced wave complete');
+      return;
+    }
+    
+    // Find current frame
+    while (frameIndex < waveFrames.length - 1 && elapsed >= waveFrames[frameIndex + 1].time) {
+      frameIndex++;
+    }
+    
+    const currentFrame = waveFrames[frameIndex];
+    const nextFrame = waveFrames[frameIndex + 1] || currentFrame;
+    
+    const frameProgress = (elapsed - currentFrame.time) / (nextFrame.time - currentFrame.time);
+    const smoothProgress = Math.sin(frameProgress * Math.PI * 0.5);
+    
+    // Animate upper arm
+    rightArm.rotation.x = THREE.MathUtils.lerp(currentFrame.upper.x, nextFrame.upper.x, smoothProgress);
+    rightArm.rotation.y = THREE.MathUtils.lerp(currentFrame.upper.y, nextFrame.upper.y, smoothProgress);
+    rightArm.rotation.z = THREE.MathUtils.lerp(currentFrame.upper.z, nextFrame.upper.z, smoothProgress);
+    
+    // Animate lower arm
+    if (rightLowerArm) {
+      rightLowerArm.rotation.x = THREE.MathUtils.lerp(currentFrame.lower.x, nextFrame.lower.x, smoothProgress);
+      rightLowerArm.rotation.y = THREE.MathUtils.lerp(currentFrame.lower.y, nextFrame.lower.y, smoothProgress);
+      rightLowerArm.rotation.z = THREE.MathUtils.lerp(currentFrame.lower.z, nextFrame.lower.z, smoothProgress);
+    }
+    
+    // Animate hand
+    if (rightHand) {
+      rightHand.rotation.x = THREE.MathUtils.lerp(currentFrame.hand.x, nextFrame.hand.x, smoothProgress);
+      rightHand.rotation.y = THREE.MathUtils.lerp(currentFrame.hand.y, nextFrame.hand.y, smoothProgress);
+      rightHand.rotation.z = THREE.MathUtils.lerp(currentFrame.hand.z, nextFrame.hand.z, smoothProgress);
+    }
+    
+    requestAnimationFrame(animateWave);
+  }
+  
+  animateWave();
+}
+
+// ===== VRM BLINKING =====
+function performVRMBlink() {
+  if (currentVRM && currentVRM.expressionManager) {
+    try {
+      currentVRM.expressionManager.setValue('blink', 1.0);
+      setTimeout(() => {
+        if (currentVRM && currentVRM.expressionManager) {
+          currentVRM.expressionManager.setValue('blink', 0);
+        }
+      }, 150);
+    } catch (e) {
+      // Blink expression not available
+    }
   }
 }
 
@@ -929,13 +1459,15 @@ function updateTPS(tps) {
 function fetchPrice() {
   return new Promise(async (resolve, reject) => {
     try {
-      log('Fetching price data...');
+      log('=== FETCHING PRICE DATA (ENHANCED) ===');
       const url = `/api/price?ids=${SOL_MINT}`;
       
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       
       const data = await res.json();
+      log('Raw price data received:', data);
+      
       const solPrice = document.getElementById('solPrice');
       if (!solPrice) {
         resolve();
@@ -944,22 +1476,34 @@ function fetchPrice() {
       
       let price = null;
       
-      if (data.data && typeof data.data === 'object' && data.data[SOL_MINT]) {
-        const solData = data.data[SOL_MINT];
-        if (typeof solData.price === 'number') {
-          price = solData.price;
-        }
-      } else if (typeof data.price === 'number') {
+      // Enhanced price extraction
+      if (data.data && data.data[SOL_MINT]?.price) {
+        price = data.data[SOL_MINT].price;
+      } else if (data.price) {
         price = data.price;
+      } else {
+        // Search all values for a reasonable price
+        function findPrice(obj) {
+          if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
+          if (typeof obj === 'object' && obj !== null) {
+            for (const value of Object.values(obj)) {
+              const found = findPrice(value);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        price = findPrice(data);
       }
       
-      if (price !== null && !isNaN(price) && price > 0) {
+      if (price && price > 0) {
         solPrice.textContent = `SOL — ${price.toFixed(2)}`;
         solPrice.style.color = '#00ff88';
-        log(`Price updated: ${price.toFixed(2)}`);
+        log(`✅ Price updated: ${price.toFixed(2)}`);
       } else {
         solPrice.textContent = 'SOL — Error';
         solPrice.style.color = '#ff6b6b';
+        log('❌ Could not find price in:', data);
       }
       
       resolve();
@@ -1039,10 +1583,57 @@ function sendMessage(text) {
   });
 }
 
-// ===== TTS SYSTEM =====
+// ===== ENHANCED TTS SYSTEM WITH SPEECH ANIMATIONS =====
 function queueTTS(text, voice = 'nova') {
   audioQueue.push({ text, voice });
   if (!isPlaying) playNextAudio();
+  
+  // Start speech animation
+  startSpeechAnimation(text);
+}
+
+function startSpeechAnimation(text) {
+  log('🗣️ Starting speech animation');
+  animationState.isTalking = true;
+  
+  const animationData = window.vrmAnimationData;
+  if (animationData && animationData.bones.head) {
+    const speechDuration = text.length * 50; // Rough estimate
+    let speechTime = 0;
+    
+    function animateSpeech() {
+      if (!animationState.isTalking) return;
+      
+      speechTime += 16;
+      
+      // Natural head movement during speech
+      const intensity = 0.05;
+      animationData.bones.head.rotation.y = Math.sin(speechTime * 0.005) * intensity;
+      animationData.bones.head.rotation.x = Math.sin(speechTime * 0.003) * intensity * 0.5;
+      
+      // Slight body animation
+      const vrmModel = scene.getObjectByName('VRM_Model');
+      if (vrmModel) {
+        vrmModel.rotation.y = Math.sin(speechTime * 0.002) * 0.01;
+      }
+      
+      if (speechTime < speechDuration) {
+        requestAnimationFrame(animateSpeech);
+      } else {
+        stopSpeechAnimation();
+      }
+    }
+    
+    animateSpeech();
+  }
+}
+
+function stopSpeechAnimation() {
+  log('🔇 Stopping speech animation');
+  animationState.isTalking = false;
+  
+  // Reset head position smoothly
+  animationTargets.headRotation = { x: 0, y: 0, z: 0 };
 }
 
 function fallbackTTS(text, voice) {
@@ -1060,11 +1651,13 @@ function fallbackTTS(text, voice) {
     
     utterance.onend = () => {
       isPlaying = false;
+      stopSpeechAnimation();
       playNextAudio();
     };
     
     utterance.onerror = () => {
       isPlaying = false;
+      stopSpeechAnimation();
       playNextAudio();
     };
     
@@ -1074,6 +1667,7 @@ function fallbackTTS(text, voice) {
   } catch (err) {
     log('Fallback TTS failed:', err);
     isPlaying = false;
+    stopSpeechAnimation();
     playNextAudio();
   }
 }
@@ -1086,6 +1680,7 @@ function playAudio(blob) {
       
       audio.onended = () => {
         isPlaying = false;
+        stopSpeechAnimation();
         playNextAudio();
         resolve();
       };
@@ -1093,6 +1688,7 @@ function playAudio(blob) {
       audio.onerror = (err) => {
         log('Audio playback failed:', err);
         isPlaying = false;
+        stopSpeechAnimation();
         reject(err);
       };
       
@@ -1100,6 +1696,7 @@ function playAudio(blob) {
     } catch (err) {
       log('Audio play error:', err);
       isPlaying = false;
+      stopSpeechAnimation();
       reject(err);
     }
   });
@@ -1109,6 +1706,7 @@ function playNextAudio() {
   return new Promise(async (resolve) => {
     if (audioQueue.length === 0) {
       isPlaying = false;
+      stopSpeechAnimation();
       resolve();
       return;
     }
@@ -1147,6 +1745,7 @@ function clearAudioQueue() {
   audioQueue = [];
   speechSynthesis.cancel();
   isPlaying = false;
+  stopSpeechAnimation();
   log('Audio queue cleared');
 }
 
@@ -1219,6 +1818,23 @@ function setupUI() {
   document.addEventListener('click', enableAudio, { once: true });
   document.addEventListener('keydown', enableAudio, { once: true });
   
+  // Interaction system for head tracking
+  document.addEventListener('mousemove', (event) => {
+    if (animationState.isTalking) return;
+    
+    const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+    const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+    
+    animationTargets.headRotation.y = mouseX * 0.2;
+    animationTargets.headRotation.x = mouseY * 0.1;
+  });
+  
+  document.addEventListener('mouseleave', () => {
+    if (!animationState.isTalking) {
+      animationTargets.headRotation = { x: 0, y: 0, z: 0 };
+    }
+  });
+  
   log('UI setup complete');
 }
 
@@ -1230,6 +1846,32 @@ function enableAudio() {
   } catch (e) {
     log('Audio enable failed:', e);
   }
+}
+
+// ===== BASIC THREE.JS FALLBACK =====
+function initBasicThreeJS() {
+  return new Promise(async (resolve, reject) => {
+    try {
+      log('Initializing basic Three.js...');
+      
+      if (!window.THREE) {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
+        THREE = window.THREE;
+      }
+      
+      if (!THREE) {
+        throw new Error('Could not load Three.js');
+      }
+      
+      setupThreeJSScene();
+      animate();
+      
+      log('Basic Three.js setup complete');
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 // ===== MAIN INITIALIZATION =====
@@ -1284,7 +1926,7 @@ function init() {
       
       // Welcome message
       setTimeout(() => {
-        queueTTS("Hello! I'm your Solana companion, Solmate. How can I help you today?", 'nova');
+        queueTTS("Hello! I'm your enhanced Solana companion, Solmate. I have proper animations and preserved textures now!", 'nova');
       }, 2000);
       
       resolve();
@@ -1300,7 +1942,7 @@ function init() {
           fetchPrice().catch(e => log('Price error:', e));
         }, 30000);
         tpsUpdateTimer = setInterval(() => {
-          fetchTTS().catch(e => log('TPS error:', e));
+          fetchTPS().catch(e => log('TPS error:', e));
         }, 60000);
       } catch (apiError) {
         log('API initialization failed:', apiError);
@@ -1308,31 +1950,6 @@ function init() {
       
       createSimpleFallback();
       resolve();
-    }
-  });
-}
-
-function initBasicThreeJS() {
-  return new Promise(async (resolve, reject) => {
-    try {
-      log('Initializing basic Three.js...');
-      
-      if (!window.THREE) {
-        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
-        THREE = window.THREE;
-      }
-      
-      if (!THREE) {
-        throw new Error('Could not load Three.js');
-      }
-      
-      setupThreeJSScene();
-      animate();
-      
-      log('Basic Three.js setup complete');
-      resolve();
-    } catch (err) {
-      reject(err);
     }
   });
 }
@@ -1355,7 +1972,7 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-// ===== DEBUG COMMANDS =====
+// ===== ENHANCED DEBUG COMMANDS =====
 window.debugVRM = function() {
   console.log('=== VRM DEBUG REPORT ===');
   console.log('Three.js loaded:', !!window.THREE);
@@ -1364,12 +1981,36 @@ window.debugVRM = function() {
   console.log('Camera:', !!camera);
   console.log('Renderer:', !!renderer);
   console.log('VRM loaded:', !!scene?.getObjectByName('VRM_Model'));
-  console.log('Fallback active:', !!(scene?.getObjectByName('fallbackAvatar') || scene?.getObjectByName('EmergencyFallback')));
-  console.log('Canvas exists:', !!document.getElementById('vrmCanvas'));
+  console.log('Current VRM:', !!currentVRM);
+  console.log('VRM Humanoid:', !!(currentVRM && currentVRM.humanoid));
+  console.log('VRM Expressions:', !!(currentVRM && currentVRM.expressionManager));
+  console.log('Animation Data:', !!window.vrmAnimationData);
+  
+  if (window.vrmAnimationData) {
+    console.log('Available bones:', Object.keys(window.vrmAnimationData.bones));
+  }
   
   if (scene) {
     console.log('Scene objects:', scene.children.map(c => c.name));
   }
+};
+
+window.debugVRMBones = function() {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (vrmModel && window.vrmAnimationData) {
+    const data = window.vrmAnimationData;
+    console.log('🦴 VRM Bone Debug:', {
+      totalBones: Object.keys(data.bones).length,
+      hasVRMHumanoid: data.hasVRMHumanoid,
+      hasExpressions: data.hasExpressions,
+      bones: Object.keys(data.bones),
+      hasVRM: !!currentVRM,
+      hasHumanoid: !!(currentVRM && currentVRM.humanoid),
+      hasExpressionsManager: !!(currentVRM && currentVRM.expressionManager)
+    });
+    return data;
+  }
+  return null;
 };
 
 window.reloadVRM = function() {
@@ -1393,7 +2034,7 @@ window.reloadVRM = function() {
     
     setTimeout(async () => {
       try {
-        await loadVRMWithReliableLoader(VRM_PATH);
+        await loadVRMWithProperSupport(VRM_PATH);
         log('✅ VRM reload successful!');
         resolve('VRM reloaded successfully');
       } catch (err) {
@@ -1413,164 +2054,50 @@ window.testChat = function() {
 };
 
 window.testTTS = function() {
-  queueTTS("Hello! I'm testing the text to speech system. How does this sound?", 'nova');
+  queueTTS("Hello! I'm testing the enhanced text to speech system with animations. How does this look and sound?", 'nova');
 };
 
-console.log('🚀 Solmate VRM Companion loaded!');
-console.log('📋 Debug commands: debugVRM(), reloadVRM(), createEmergency(), testChat(), testTTS()');
+window.playEnhancedWave = playEnhancedVRMWave;
 
-// ===== START APPLICATION =====
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
-// ===== OVERRIDE FIXES FOR TEXTURES AND PRICE =====
-
-// Override the existing fetchPrice function
-window.originalFetchPrice = fetchPrice;
-fetchPrice = function() {
-  return new Promise(async (resolve, reject) => {
-    try {
-      log('=== FETCHING PRICE DATA (ENHANCED) ===');
-      const url = `/api/price?ids=${SOL_MINT}`;
-      
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      
-      const data = await res.json();
-      log('Raw price data received:', data);
-      
-      const solPrice = document.getElementById('solPrice');
-      if (!solPrice) {
-        resolve();
-        return;
-      }
-      
-      let price = null;
-      
-      // Enhanced price extraction
-      if (data.data && data.data[SOL_MINT]?.price) {
-        price = data.data[SOL_MINT].price;
-      } else if (data.price) {
-        price = data.price;
-      } else {
-        // Search all values for a reasonable price
-        function findPrice(obj) {
-          if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
-          if (typeof obj === 'object' && obj !== null) {
-            for (const value of Object.values(obj)) {
-              const found = findPrice(value);
-              if (found) return found;
-            }
-          }
-          return null;
-        }
-        price = findPrice(data);
-      }
-      
-      if (price && price > 0) {
-        solPrice.textContent = `SOL — $${price.toFixed(2)}`;
-        solPrice.style.color = '#00ff88';
-        log(`✅ Price updated: $${price.toFixed(2)}`);
-      } else {
-        solPrice.textContent = 'SOL — Error';
-        solPrice.style.color = '#ff6b6b';
-        log('❌ Could not find price in:', data);
-      }
-      
-      resolve();
-    } catch (err) {
-      log('Price fetch failed:', err);
-      const solPrice = document.getElementById('solPrice');
-      if (solPrice) {
-        solPrice.textContent = 'SOL — Error';
-        solPrice.style.color = '#ff6b6b';
-      }
-      reject(err);
-    }
-  });
-};
-
-// Add texture enhancement after VRM loads
-setTimeout(() => {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (vrmModel) {
-    log('🎨 Applying enhanced textures...');
-    
-    // Apply VRoid character colors
-    const colors = [
-      { keywords: ['hair'], color: 0x8B4513 },
-      { keywords: ['skin', 'face', 'body'], color: 0xFFCDB2 },
-      { keywords: ['top', 'shirt', 'cloth'], color: 0xFF6B6B },
-      { keywords: ['skirt', 'bottom'], color: 0x4169E1 },
-      { keywords: ['sock', 'leg'], color: 0xFF4444 },
-      { keywords: ['shoe', 'foot'], color: 0x2C3E50 }
-    ];
-    
-    let meshIndex = 0;
-    vrmModel.traverse((child) => {
-      if (child.isMesh && child.material) {
-        const meshName = child.name.toLowerCase();
-        let assignedColor = null;
-        
-        // Find matching color
-        for (const colorConfig of colors) {
-          if (colorConfig.keywords.some(keyword => meshName.includes(keyword))) {
-            assignedColor = colorConfig.color;
-            break;
-          }
-        }
-        
-        // Fallback colors
-        if (!assignedColor) {
-          const fallbackColors = [0x8B4513, 0xFFCDB2, 0xFF6B6B, 0x4169E1, 0xFF4444, 0x2C3E50];
-          assignedColor = fallbackColors[meshIndex % fallbackColors.length];
-        }
-        
-        // Apply color
-        const material = new THREE.MeshStandardMaterial({
-          color: assignedColor,
-          roughness: 0.7,
-          metalness: 0.1,
-          toneMapped: false
-        });
-        
-        child.material = material;
-        child.castShadow = true;
-        child.receiveShadow = true;
-        
-        log(`Applied color ${assignedColor.toString(16)} to: ${child.name}`);
-        meshIndex++;
-      }
+window.testVRMSystem = function() {
+  console.log('🧪 Testing enhanced VRM system...');
+  
+  if (window.vrmAnimationData) {
+    console.log('Animation data:', window.vrmAnimationData);
+    console.log('Available bones:', Object.keys(window.vrmAnimationData.bones));
+    console.log('VRM capabilities:', {
+      hasVRM: !!currentVRM,
+      hasHumanoid: !!(currentVRM && currentVRM.humanoid),
+      hasExpressions: !!(currentVRM && currentVRM.expressionManager),
+      hasLookAt: !!(currentVRM && currentVRM.lookAt)
     });
-    
-    // Enhance lighting
-    const lights = [];
-    scene.traverse(child => { if (child.isLight) lights.push(child); });
-    lights.forEach(light => scene.remove(light));
-    
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    mainLight.position.set(2, 3, 2);
-    scene.add(mainLight);
-    
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    fillLight.position.set(-1, 1, -1);
-    scene.add(fillLight);
-    
-    log('✅ Enhanced textures and lighting applied');
   }
-}, 5000); // Apply after 5 seconds
+  
+  // Test wave
+  setTimeout(() => {
+    playEnhancedVRMWave();
+  }, 1000);
+  
+  // Test expression
+  if (currentVRM && currentVRM.expressionManager) {
+    setTimeout(() => {
+      try {
+        currentVRM.expressionManager.setValue('happy', 0.8);
+        setTimeout(() => {
+          currentVRM.expressionManager.setValue('happy', 0);
+        }, 2000);
+      } catch (e) {
+        console.log('Happy expression not available');
+      }
+    }, 3000);
+  }
+};
 
-// Manual fix functions
-window.fixTextures = function() {
+window.fixVRMTextures = function() {
   const vrmModel = scene?.getObjectByName('VRM_Model');
   if (vrmModel) {
-    console.log('🎨 Fixing textures...');
-    // Trigger the enhancement logic above
-    setTimeout(() => window.location.reload(), 100);
+    console.log('🎨 Fixing VRM textures...');
+    preserveVRMTextures(vrmModel);
   }
 };
 
@@ -1579,594 +2106,34 @@ window.fixPrice = function() {
   fetchPrice();
 };
 
-console.log('🔧 Fixes loaded! Commands: fixTextures(), fixPrice()');
-// ===== ADVANCED VRM ANIMATION SYSTEM =====
-// Add this to the end of your script.js file
+// ===== CONSOLE MESSAGES =====
+console.log('🚀 Enhanced Solmate VRM Companion loaded!');
+console.log('📋 Debug commands: debugVRM(), debugVRMBones(), reloadVRM(), testVRMSystem()');
+console.log('🎭 Animation commands: playEnhancedWave(), testTTS(), testChat()');
+console.log('🔧 Fixes: fixVRMTextures(), fixPrice()');
+console.log('👀 Move your mouse around to see head tracking!');
 
-// Animation state tracking
-let animationState = {
-  isWaving: false,
-  isIdle: true,
-  isTalking: false,
-  headTarget: { x: 0, y: 0 },
-  breathingPhase: 0,
-  blinkTimer: 0,
-  gestureTimer: 0,
-  expressionTimer: 0
-};
-
-// Animation targets for smooth interpolation
-let animationTargets = {
-  headRotation: { x: 0, y: 0, z: 0 },
-  bodyPosition: { x: 0, y: 0, z: 0 },
-  armRotations: {
-    leftArm: { x: 0, y: 0, z: 0 },
-    rightArm: { x: 0, y: 0, z: 0 }
-  }
-};
-
-// ===== ENHANCED VRM ANIMATION SETUP =====
-function setupAdvancedVRMAnimations() {
-  log('🎭 Setting up advanced VRM animations...');
-  
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (!vrmModel) {
-    log('No VRM model found for animations');
-    return;
-  }
-  
-  // Find key bones for animation
-  const bones = findVRMBones(vrmModel);
-  log('Found VRM bones:', Object.keys(bones));
-  
-  // Start animation loops
-  startIdleAnimations(bones);
-  startGestureSystem(bones);
-  startExpressionSystem();
-  
-  // Auto-wave on load
-  setTimeout(() => {
-    playWaveAnimation(bones);
-    queueTTS("Hi there! I'm Solmate, your Solana companion. Great to meet you!", 'nova');
-  }, 3000);
-  
-  log('🎭 Advanced animations initialized');
+// ===== START APPLICATION =====
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
 }
 
-// ===== FIND VRM BONES =====
-function findVRMBones(vrmModel) {
-  const bones = {};
-  
-  const boneMap = {
-    head: ['head', 'Head', 'neck', 'Neck'],
-    spine: ['spine', 'Spine', 'chest', 'Chest'],
-    leftArm: ['leftarm', 'LeftArm', 'left_arm', 'L_arm', 'arm_L'],
-    rightArm: ['rightarm', 'RightArm', 'right_arm', 'R_arm', 'arm_R'],
-    leftHand: ['lefthand', 'LeftHand', 'left_hand', 'L_hand', 'hand_L'],
-    rightHand: ['righthand', 'RightHand', 'right_hand', 'R_hand', 'hand_R'],
-    leftShoulder: ['leftshoulder', 'LeftShoulder', 'left_shoulder'],
-    rightShoulder: ['rightshoulder', 'RightShoulder', 'right_shoulder'],
-    hips: ['hips', 'Hips', 'pelvis', 'Pelvis']
-  };
-  
-  vrmModel.traverse((child) => {
-    if (child.isBone || child.type === 'Bone' || child.name.toLowerCase().includes('bone')) {
-      const childName = child.name.toLowerCase();
-      
-      for (const [boneType, keywords] of Object.entries(boneMap)) {
-        if (!bones[boneType]) {
-          for (const keyword of keywords) {
-            if (childName.includes(keyword.toLowerCase())) {
-              bones[boneType] = child;
-              log(`Found ${boneType}: ${child.name}`);
-              break;
-            }
-          }
-        }
-      }
-    }
-  });
-  
-  return bones;
-}
-
-// ===== IDLE ANIMATIONS =====
-function startIdleAnimations(bones) {
-  let time = 0;
-  
-  function animateIdle() {
-    if (!scene?.getObjectByName('VRM_Model') || !animationState.isIdle) return;
-    
-    time += 0.016; // ~60fps
-    animationState.breathingPhase += 0.016;
-    animationState.blinkTimer += 0.016;
-    
-    // Breathing animation (chest/spine)
-    if (bones.spine) {
-      const breathScale = 1 + Math.sin(animationState.breathingPhase * 2.5) * 0.008;
-      bones.spine.scale.y = breathScale;
-    }
-    
-    // Gentle body sway
-    const vrmModel = scene.getObjectByName('VRM_Model');
-    if (vrmModel) {
-      vrmModel.rotation.y = Math.sin(time * 0.7) * 0.02;
-      vrmModel.rotation.z = Math.sin(time * 0.5) * 0.008;
-      
-      // Subtle vertical movement
-      vrmModel.position.y += Math.sin(time * 2.8) * 0.001;
-    }
-    
-    // Natural head movement
-    if (bones.head) {
-      // Smooth head turning
-      const headTarget = animationTargets.headRotation;
-      bones.head.rotation.y = THREE.MathUtils.lerp(bones.head.rotation.y, headTarget.y + Math.sin(time * 0.8) * 0.03, 0.02);
-      bones.head.rotation.x = THREE.MathUtils.lerp(bones.head.rotation.x, headTarget.x + Math.sin(time * 0.6) * 0.01, 0.02);
-      bones.head.rotation.z = THREE.MathUtils.lerp(bones.head.rotation.z, Math.sin(time * 0.4) * 0.01, 0.02);
-    }
-    
-    // Arm idle movement
-    if (bones.leftArm && !animationState.isWaving) {
-      bones.leftArm.rotation.z = Math.sin(time * 1.2) * 0.05;
-      bones.leftArm.rotation.x = Math.sin(time * 0.9) * 0.02;
-    }
-    
-    if (bones.rightArm && !animationState.isWaving) {
-      bones.rightArm.rotation.z = Math.sin(time * 1.4) * -0.05;
-      bones.rightArm.rotation.x = Math.sin(time * 1.1) * 0.02;
-    }
-    
-    // Blinking
-    if (animationState.blinkTimer > 2 + Math.random() * 3) {
-      performBlink();
-      animationState.blinkTimer = 0;
-    }
-    
-    requestAnimationFrame(animateIdle);
-  }
-  
-  animateIdle();
-  log('🌊 Idle animations started');
-}
-
-// ===== GESTURE SYSTEM =====
-function startGestureSystem(bones) {
-  function randomGesture() {
-    if (!animationState.isIdle) return;
-    
-    const gestures = [
-      () => playWaveAnimation(bones),
-      () => playNodAnimation(bones),
-      () => playShyGesture(bones),
-      () => playThinkingGesture(bones)
-    ];
-    
-    // Random gesture every 30-60 seconds
-    const randomTime = 30000 + Math.random() * 30000;
-    
-    setTimeout(() => {
-      if (Math.random() < 0.3) { // 30% chance
-        const randomGestureFunc = gestures[Math.floor(Math.random() * gestures.length)];
-        randomGestureFunc();
-      }
-      randomGesture(); // Schedule next
-    }, randomTime);
-  }
-  
-  randomGesture();
-  log('👋 Gesture system started');
-}
-
-// ===== SPECIFIC ANIMATIONS =====
-
-// Wave animation
-function playWaveAnimation(bones, duration = 3000) {
-  if (animationState.isWaving || !bones.rightArm) return;
-  
-  log('👋 Playing wave animation');
-  animationState.isWaving = true;
-  
-  // Save original rotations
-  const originalRotation = {
-    rightArm: bones.rightArm.rotation.clone(),
-    rightHand: bones.rightHand ? bones.rightHand.rotation.clone() : null
-  };
-  
-  // Wave sequence
-  const waveFrames = [
-    { time: 0, armZ: -0.3, armX: 0.5, handZ: 0 },
-    { time: 0.3, armZ: -0.8, armX: 0.8, handZ: 0.3 },
-    { time: 0.6, armZ: -0.6, armX: 0.6, handZ: -0.3 },
-    { time: 0.9, armZ: -0.8, armX: 0.8, handZ: 0.3 },
-    { time: 1.2, armZ: -0.6, armX: 0.6, handZ: -0.3 },
-    { time: 1.5, armZ: -0.8, armX: 0.8, handZ: 0.3 },
-    { time: 2.0, armZ: -0.3, armX: 0.5, handZ: 0 },
-    { time: 2.5, armZ: 0, armX: 0, handZ: 0 }
-  ];
-  
-  let frameIndex = 0;
-  const startTime = Date.now();
-  
-  function animateWave() {
-    const elapsed = (Date.now() - startTime) / 1000;
-    
-    if (elapsed >= 2.5 || frameIndex >= waveFrames.length - 1) {
-      // Return to original position
-      bones.rightArm.rotation.copy(originalRotation.rightArm);
-      if (bones.rightHand) bones.rightHand.rotation.copy(originalRotation.rightHand);
-      animationState.isWaving = false;
-      log('👋 Wave animation complete');
-      return;
-    }
-    
-    // Interpolate between frames
-    const currentFrame = waveFrames[frameIndex];
-    const nextFrame = waveFrames[frameIndex + 1];
-    
-    if (elapsed >= nextFrame.time) {
-      frameIndex++;
-    }
-    
-    const progress = (elapsed - currentFrame.time) / (nextFrame.time - currentFrame.time);
-    const smoothProgress = Math.sin(progress * Math.PI * 0.5); // Smooth easing
-    
-    // Animate arm
-    bones.rightArm.rotation.z = THREE.MathUtils.lerp(currentFrame.armZ, nextFrame.armZ, smoothProgress);
-    bones.rightArm.rotation.x = THREE.MathUtils.lerp(currentFrame.armX, nextFrame.armX, smoothProgress);
-    
-    // Animate hand if available
-    if (bones.rightHand) {
-      bones.rightHand.rotation.z = THREE.MathUtils.lerp(currentFrame.handZ, nextFrame.handZ, smoothProgress);
-    }
-    
-    requestAnimationFrame(animateWave);
-  }
-  
-  animateWave();
-}
-
-// Nod animation
-function playNodAnimation(bones, intensity = 0.3) {
-  if (!bones.head) return;
-  
-  log('👍 Playing nod animation');
-  const originalX = bones.head.rotation.x;
-  const nodSequence = [
-    { time: 0, x: originalX },
-    { time: 0.2, x: originalX - intensity },
-    { time: 0.4, x: originalX + intensity * 0.3 },
-    { time: 0.6, x: originalX - intensity * 0.7 },
-    { time: 0.8, x: originalX }
-  ];
-  
-  animateSequence(bones.head, nodSequence, 'rotation', 'x');
-}
-
-// Shy gesture
-function playShyGesture(bones) {
-  if (!bones.head || !bones.leftHand) return;
-  
-  log('😊 Playing shy gesture');
-  
-  // Head turn away slightly
-  animationTargets.headRotation.y = -0.2;
-  animationTargets.headRotation.x = -0.1;
-  
-  setTimeout(() => {
-    animationTargets.headRotation.y = 0;
-    animationTargets.headRotation.x = 0;
-  }, 2000);
-}
-
-// Thinking gesture  
-function playThinkingGesture(bones) {
-  if (!bones.head || !bones.rightHand) return;
-  
-  log('🤔 Playing thinking gesture');
-  
-  // Head tilt
-  animationTargets.headRotation.z = 0.15;
-  animationTargets.headRotation.y = 0.1;
-  
-  setTimeout(() => {
-    animationTargets.headRotation.z = 0;
-    animationTargets.headRotation.y = 0;
-  }, 3000);
-}
-
-// ===== SPEECH ANIMATIONS =====
-function startSpeechAnimation(text) {
-  log('🗣️ Starting speech animation');
-  animationState.isTalking = true;
-  
-  const bones = findVRMBones(scene.getObjectByName('VRM_Model'));
-  
-  // Head movement during speech
-  if (bones.head) {
-    const speechDuration = text.length * 50; // Rough estimate
-    let speechTime = 0;
-    
-    function animateSpeech() {
-      if (!animationState.isTalking) return;
-      
-      speechTime += 16;
-      
-      // Natural head movement during speech
-      const intensity = 0.05;
-      bones.head.rotation.y = Math.sin(speechTime * 0.005) * intensity;
-      bones.head.rotation.x = Math.sin(speechTime * 0.003) * intensity * 0.5;
-      
-      // Slight body animation
-      const vrmModel = scene.getObjectByName('VRM_Model');
-      if (vrmModel) {
-        vrmModel.rotation.y = Math.sin(speechTime * 0.002) * 0.01;
-      }
-      
-      if (speechTime < speechDuration) {
-        requestAnimationFrame(animateSpeech);
-      } else {
-        stopSpeechAnimation();
-      }
-    }
-    
-    animateSpeech();
-  }
-  
-  // Random gestures during speech
-  setTimeout(() => {
-    if (animationState.isTalking && Math.random() < 0.4) {
-      const gestures = [
-        () => playHandGesture(bones, 'point'),
-        () => playHandGesture(bones, 'open'),
-        () => playNodAnimation(bones, 0.15)
-      ];
-      
-      const randomGesture = gestures[Math.floor(Math.random() * gestures.length)];
-      randomGesture();
-    }
-  }, 1000);
-}
-
-function stopSpeechAnimation() {
-  log('🔇 Stopping speech animation');
-  animationState.isTalking = false;
-  
-  // Reset head position smoothly
-  animationTargets.headRotation = { x: 0, y: 0, z: 0 };
-}
-
-// Hand gestures during speech
-function playHandGesture(bones, type) {
-  if (!bones.rightArm || animationState.isWaving) return;
-  
-  const gestures = {
-    point: { armX: 0.3, armZ: -0.4, duration: 1000 },
-    open: { armX: 0.2, armZ: -0.2, duration: 800 },
-    emphasis: { armX: 0.4, armZ: -0.3, duration: 600 }
-  };
-  
-  const gesture = gestures[type] || gestures.point;
-  
-  // Animate to gesture position
-  const original = bones.rightArm.rotation.clone();
-  const target = { x: gesture.armX, z: gesture.armZ };
-  
-  animateToPosition(bones.rightArm, target, gesture.duration, () => {
-    // Return to original position
-    setTimeout(() => {
-      animateToPosition(bones.rightArm, original, 500);
-    }, 200);
-  });
-}
-
-// ===== EXPRESSION SYSTEM =====
-function startExpressionSystem() {
-  function cycleExpressions() {
-    if (animationState.isTalking) {
-      // Speech expressions
-      const speechExpressions = ['happy', 'neutral', 'fun'];
-      const expr = speechExpressions[Math.floor(Math.random() * speechExpressions.length)];
-      setVRMExpression(expr, 0.6, 2000);
-    } else {
-      // Idle expressions
-      const idleExpressions = ['neutral', 'happy', 'fun'];
-      const expr = idleExpressions[Math.floor(Math.random() * idleExpressions.length)];
-      setVRMExpression(expr, 0.4, 3000);
-    }
-    
-    // Next expression in 3-8 seconds
-    setTimeout(cycleExpressions, 3000 + Math.random() * 5000);
-  }
-  
-  setTimeout(cycleExpressions, 2000);
-  log('😊 Expression system started');
-}
-
-// ===== UTILITY FUNCTIONS =====
-
-function animateSequence(bone, sequence, property, axis) {
-  let frameIndex = 0;
-  const startTime = Date.now();
-  
-  function animate() {
-    const elapsed = (Date.now() - startTime) / 1000;
-    const currentFrame = sequence[frameIndex];
-    const nextFrame = sequence[frameIndex + 1];
-    
-    if (!nextFrame || elapsed >= sequence[sequence.length - 1].time) {
-      return; // Animation complete
-    }
-    
-    if (elapsed >= nextFrame.time) {
-      frameIndex++;
-    }
-    
-    const progress = (elapsed - currentFrame.time) / (nextFrame.time - currentFrame.time);
-    bone[property][axis] = THREE.MathUtils.lerp(currentFrame[axis], nextFrame[axis], progress);
-    
-    requestAnimationFrame(animate);
-  }
-  
-  animate();
-}
-
-function animateToPosition(bone, target, duration, onComplete) {
-  const start = bone.rotation.clone();
-  const startTime = Date.now();
-  
-  function animate() {
-    const elapsed = Date.now() - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = Math.sin(progress * Math.PI * 0.5); // Smooth easing
-    
-    bone.rotation.x = THREE.MathUtils.lerp(start.x, target.x, eased);
-    bone.rotation.y = THREE.MathUtils.lerp(start.y, target.y, eased);
-    bone.rotation.z = THREE.MathUtils.lerp(start.z, target.z, eased);
-    
-    if (progress < 1) {
-      requestAnimationFrame(animate);
-    } else if (onComplete) {
-      onComplete();
-    }
-  }
-  
-  animate();
-}
-
-function performBlink() {
-  setVRMExpression('blink', 1.0, 150);
-}
-
-function setVRMExpression(expression, value, duration = 0) {
-  if (currentVRM && currentVRM.expressionManager) {
-    try {
-      currentVRM.expressionManager.setValue(expression, value);
-      
-      if (duration > 0) {
-        setTimeout(() => {
-          if (currentVRM && currentVRM.expressionManager) {
-            currentVRM.expressionManager.setValue(expression, 0);
-          }
-        }, duration);
-      }
-    } catch (err) {
-      // Expression not available, silently continue
-    }
-  }
-}
-
-// ===== ENHANCED TTS WITH ANIMATIONS =====
-// Override the existing TTS functions
-const originalQueueTTS = queueTTS;
-queueTTS = function(text, voice = 'nova') {
-  // Start speech animation
-  startSpeechAnimation(text);
-  
-  // Queue the audio
-  originalQueueTTS(text, voice);
-};
-
-const originalPlayNextAudio = playNextAudio;
-playNextAudio = function() {
-  return new Promise(async (resolve) => {
-    if (audioQueue.length === 0) {
-      isPlaying = false;
-      stopSpeechAnimation(); // Stop speech animation when queue is empty
-      resolve();
-      return;
-    }
-    
-    // Call original function
-    await originalPlayNextAudio();
-    resolve();
-  });
-};
-
-// ===== INTERACTION SYSTEM =====
-function startInteractionSystem() {
-  // Look at user's mouse/touch position
-  document.addEventListener('mousemove', (event) => {
-    if (animationState.isTalking) return; // Don't interrupt speech
-    
-    const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-    const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    // Smooth head tracking
-    animationTargets.headRotation.y = mouseX * 0.2;
-    animationTargets.headRotation.x = mouseY * 0.1;
-  });
-  
-  // Reset head position when mouse leaves
-  document.addEventListener('mouseleave', () => {
-    if (!animationState.isTalking) {
-      animationTargets.headRotation = { x: 0, y: 0, z: 0 };
-    }
-  });
-  
-  log('👀 Interaction system started');
-}
-
-// ===== MANUAL ANIMATION CONTROLS =====
-window.playWave = function() {
-  const bones = findVRMBones(scene?.getObjectByName('VRM_Model'));
-  playWaveAnimation(bones);
-  queueTTS("Hello there! 👋", 'nova');
-};
-
-window.playNod = function() {
-  const bones = findVRMBones(scene?.getObjectByName('VRM_Model'));
-  playNodAnimation(bones);
-};
-
-window.sayHello = function() {
-  const greetings = [
-    "Hi there! Great to see you!",
-    "Hello! How's your day going?",
-    "Hey! Ready to talk about Solana?",
-    "Greetings! What can I help you with?",
-    "Hi! I'm excited to chat with you!"
-  ];
-  
-  const greeting = greetings[Math.floor(Math.random() * greetings.length)];
-  
-  const bones = findVRMBones(scene?.getObjectByName('VRM_Model'));
-  playWaveAnimation(bones);
-  queueTTS(greeting, 'nova');
-};
-
-window.makeGesture = function(type = 'wave') {
-  const bones = findVRMBones(scene?.getObjectByName('VRM_Model'));
-  
-  switch(type) {
-    case 'wave':
-      playWaveAnimation(bones);
-      break;
-    case 'nod':
-      playNodAnimation(bones);
-      break;
-    case 'shy':
-      playShyGesture(bones);
-      break;
-    case 'think':
-      playThinkingGesture(bones);
-      break;
-    default:
-      playWaveAnimation(bones);
-  }
-};
-
-// ===== AUTO-START ANIMATIONS =====
-// Start animations after VRM loads
+// ===== AUTO-START ENHANCED VRM SYSTEM =====
 setTimeout(() => {
   const vrmModel = scene?.getObjectByName('VRM_Model');
   if (vrmModel) {
-    log('🎭 Starting advanced VRM animations...');
-    setupAdvancedVRMAnimations();
-    startInteractionSystem();
+    console.log('🚀 Auto-starting enhanced VRM system...');
+    
+    // Test wave after everything is set up
+    setTimeout(() => {
+      if (window.vrmAnimationData && Object.keys(window.vrmAnimationData.bones).length > 0) {
+        playEnhancedVRMWave();
+        queueTTS("Hello! I'm your enhanced VRM assistant with proper bone animations and preserved textures!", 'nova');
+      } else {
+        queueTTS("Hello! I'm your Solana companion Solmate. My animations are loading!", 'nova');
+      }
+    }, 2000);
   }
-}, 6000); // Start 6 seconds after page load
-
-console.log('🎭 VRM Animation System loaded!');
-console.log('🎮 Animation commands: playWave(), playNod(), sayHello(), makeGesture("wave")');
-console.log('👀 Move your mouse around to see head tracking!');
+}, 10000); // Start after VRM is fully loaded and processed
