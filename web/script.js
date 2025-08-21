@@ -1,9 +1,5 @@
 // web/script.js
-// Complete production-ready implementation with proper VRM loading using @pixiv/three-vrm, optimized for Vercel
-
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.module.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.167.0/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMUtils } from 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/dist/three-vrm.module.js';
+// Complete implementation with Enhanced VRM Loading, Three.js, Chat, TTS, WebSocket, and UI
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000; // 30 seconds
@@ -18,6 +14,7 @@ You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsu
 `;
 
 // ===== GLOBAL STATE =====
+let THREE, GLTFLoader, VRMLoaderPlugin, VRM;
 let scene, camera, renderer, mixer, clock;
 let currentVRM = null;
 let audioQueue = [];
@@ -43,24 +40,78 @@ function log(msg, data = null) {
   }
 }
 
+// ===== UTILITY: LOAD SCRIPT WITH DETAILED DEBUGGING =====
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    log(`Attempting to load script: ${src}`);
+    
+    const existingScript = document.querySelector(`script[src="${src}"]`);
+    if (existingScript) {
+      log(`Script already exists: ${src}`);
+      resolve();
+      return;
+    }
+    
+    const script = document.createElement('script');
+    script.src = src;
+    
+    script.onload = () => {
+      log(`Script loaded successfully: ${src}`);
+      resolve();
+    };
+    
+    script.onerror = (error) => {
+      log(`Script failed to load: ${src}`, error);
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+    
+    document.head.appendChild(script);
+    log(`Script element added to head: ${src}`);
+  });
+}
+
+// ===== LOAD THREE.JS AND DEPENDENCIES =====
+async function loadDependencies() {
+  try {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
+    THREE = window.THREE;
+    log('Three.js loaded');
+
+    await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/dist/three-vrm.module.js');
+    VRMLoaderPlugin = window.VRMLoaderPlugin;
+    VRM = window.VRM;
+    VRMUtils = window.VRMUtils;
+    log('VRM plugin loaded');
+
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/loaders/GLTFLoader.js');
+    GLTFLoader = window.GLTFLoader || THREE.GLTFLoader;
+    if (!GLTFLoader) throw new Error('GLTFLoader not available');
+    log('GLTFLoader loaded');
+  } catch (err) {
+    log('Failed to load dependencies', err);
+    throw err;
+  }
+}
+
 // ===== THREE.JS SETUP WITH PROPER VRM SUPPORT =====
 async function initThreeEnhanced() {
   try {
     log('=== THREE.JS INITIALIZATION WITH VRM SUPPORT ===');
     
+    await loadDependencies();
     setupThreeJSScene();
     animate();
-    await createFallbackAvatar(); // Immediate fallback
+    await createFallbackAvatar();
     await loadVRMWithPlugin(VRM_PATH);
     setupVRMAnimationsAndExpressions();
-    checkForTextures(); // Auto-check for gray model
     
+    document.getElementById('loading').style.display = 'none';
     log('=== THREE.JS INITIALIZATION COMPLETE ===');
     
   } catch (err) {
     log('=== INITIALIZATION FAILED ===', err);
     createSimpleFallback();
-    throw err;
+    document.getElementById('loading').textContent = 'Initialization failed. Check console.';
   }
 }
 
@@ -102,7 +153,7 @@ function setupThreeJSScene() {
   });
 }
 
-// ===== LOAD VRM WITH PLUGIN (Updated with Retries) =====
+// ===== LOAD VRM WITH PLUGIN =====
 async function loadVRMWithPlugin(path, retryCount = 0) {
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -148,7 +199,7 @@ async function loadVRMWithPlugin(path, retryCount = 0) {
       log(`Retrying VRM load (${retryCount + 1}/${VRM_MAX_RETRIES})...`);
       await loadVRMWithPlugin(path, retryCount + 1);
     } else {
-      throw error;
+      log('Max retries reached, keeping fallback');
     }
   }
 }
@@ -159,7 +210,6 @@ function setupVRMAnimationsAndExpressions() {
 
   mixer = new THREE.AnimationMixer(currentVRM.scene);
 
-  // Procedural idle for production (expand with loaded animations if available)
   const updateIdle = () => {
     currentVRM.scene.position.y = Math.sin(clock.getElapsedTime()) * 0.01;
     requestAnimationFrame(updateIdle);
@@ -188,7 +238,7 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ===== FALLBACKS (Expanded) =====
+// ===== FALLBACKS =====
 async function createFallbackAvatar() {
   const geometry = new THREE.SphereGeometry(0.5, 32, 32);
   const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
@@ -206,170 +256,7 @@ function createSimpleFallback() {
   log('Simple fallback cube added');
 }
 
-// ===== DIAGNOSTIC (Added from Attached) =====
-window.diagnoseVRM = function() {
-  log('🔍 Diagnosing VRM rendering...');
-  
-  if (!currentVRM) {
-    console.log('❌ No VRM model found in scene');
-    return;
-  }
-  
-  console.log('📊 VRM Diagnostic Report:');
-  console.log('========================');
-  
-  let meshCount = 0;
-  let texturedMeshes = 0;
-  let materialTypes = {};
-  
-  currentVRM.scene.traverse((child) => {
-    if (child.isMesh) {
-      meshCount++;
-      
-      const material = Array.isArray(child.material) ? child.material[0] : child.material;
-      const materialType = material.constructor.name;
-      materialTypes[materialType] = (materialTypes[materialType] || 0) + 1;
-      
-      console.log(`Mesh: ${child.name}`);
-      console.log(`  Material: ${materialType}`);
-      console.log(`  Has Texture: ${!!(material.map && material.map.image)}`);
-      console.log(`  Color: #${material.color.getHexString()}`);
-      console.log(`  ToneMapped: ${material.toneMapped}`);
-      console.log(`  Side: ${material.side}`);
-      
-      if (material.map && material.map.image) {
-        texturedMeshes++;
-        console.log(`  Texture Size: ${material.map.image.width}x${material.map.image.height}`);
-      }
-      console.log('---');
-    }
-  });
-  
-  console.log(`📈 Summary:`);
-  console.log(`  Total Meshes: ${meshCount}`);
-  console.log(`  Textured Meshes: ${texturedMeshes}`);
-  console.log(`  Material Types:`, materialTypes);
-  console.log(`  Renderer ColorSpace: ${renderer.outputColorSpace}`);
-  console.log(`  Renderer ToneMapping: ${renderer.toneMapping}`);
-  
-  if (texturedMeshes === 0) {
-    console.log('⚠️ No textures detected - this is likely why the model appears gray');
-  }
-};
-
-// ===== AUTO TEXTURE CHECK (Inspired by Attached Auto-Reload) =====
-function checkForTextures() {
-  setTimeout(() => {
-    if (currentVRM) {
-      let hasTextures = false;
-      currentVRM.scene.traverse((child) => {
-        if (child.isMesh && child.material && child.material.map && child.material.map.image) {
-          hasTextures = true;
-        }
-      });
-      
-      if (!hasTextures) {
-        log('🔄 No textures detected; model may appear gray. Consider diagnostics.');
-      }
-    }
-  }, 5000);
-}
-
 // ===== WEBSOCKET AND API HANDLERS =====
 function initWebSocket() {
   ws = new WebSocket(HELIUS_WS);
-  ws.onopen = () => log('WS connected');
-  ws.onclose = () => {
-    log('WS closed, reconnecting...');
-    wsReconnectTimer = setTimeout(initWebSocket, 5000);
-  };
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    document.getElementById('tps').textContent = data.tps || '❤️';
-  };
-}
-
-function updatePrice() {
-  fetch('/api/price')
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById('price').textContent = `SOL ${data.price}`;
-    })
-    .catch(err => log('Price update failed', err));
-  priceUpdateTimer = setTimeout(updatePrice, 30000);
-}
-
-// ===== CHAT AND TTS =====
-async function sendChat(message) {
-  conversation.push({ role: 'user', content: message });
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation] })
-  });
-  const data = await response.json();
-  conversation.push({ role: 'assistant', content: data.response });
-  
-  const chatDiv = document.getElementById('chat');
-  chatDiv.innerHTML += `<div>User: ${message}</div><div>Solmate: ${data.response}</div>`;
-
-  if (!document.getElementById('mute').textContent.includes('🔇')) {
-    await playTTS(data.response);
-  }
-}
-
-async function playTTS(text) {
-  const response = await fetch('/api/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
-  });
-  const audioBlob = await response.blob();
-  const audioUrl = URL.createObjectURL(audioBlob);
-  const audio = new Audio(audioUrl);
-  audioQueue.push(audio);
-  if (!isPlaying) playNextAudio();
-}
-
-function playNextAudio() {
-  if (audioQueue.length === 0) {
-    isPlaying = false;
-    return;
-  }
-  isPlaying = true;
-  const audio = audioQueue.shift();
-  audio.play();
-  audio.onended = playNextAudio;
-}
-
-// ===== UI EVENT LISTENERS =====
-document.addEventListener('DOMContentLoaded', () => {
-  initThreeEnhanced();
-  initWebSocket();
-  updatePrice();
-
-  document.getElementById('send').addEventListener('click', () => {
-    const input = document.getElementById('input');
-    sendChat(input.value);
-    input.value = '';
-  });
-
-  document.getElementById('mute').addEventListener('click', (e) => {
-    e.target.textContent = e.target.textContent === '🔇' ? '🔊' : '🔇';
-  });
-
-  document.getElementById('themeToggle').addEventListener('click', () => {
-    document.body.classList.toggle('light-theme'); // Assume CSS class
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'd') {
-      document.getElementById('overlayLogs').style.display = document.getElementById('overlayLogs').style.display === 'none' ? 'block' : 'none';
-    }
-  });
-});
-
-// Service Worker for PWA
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js');
-}
+  ws.onopen = ()
