@@ -6,10 +6,6 @@
       "destination": "/web/api/$1.js"
     },
     {
-      "source": "/manifest.webmanifest",
-      "destination": "/web/manifest.webmanifest"
-    },
-    {
       "source": "/assets/(.*)",
       "destination": "/web/assets/$1"
     },
@@ -46,23 +42,6 @@
         {
           "key": "Access-Control-Allow-Origin",
           "value": "*"
-        }
-      ]
-    },
-    {
-      "source": "/manifest.webmanifest",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/manifest+json"
-        },
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=3600"
         }
       ]
     },
