@@ -2990,12 +2990,13 @@ sendMessage = function(text) {
 
 // Enhanced mouse movement tracking
 document.addEventListener('mousemove', (event) => {
-  enhancedSolmate.onMouseMove(event.clientX, event.clientY);
+  if (enhancedSolmate) {
+    enhancedSolmate.onMouseMove(event.clientX, event.clientY);
+  }
 });
 
-// Enhanced animation loop
-const originalAnimate = animate;
-animate = function() {
+// Enhanced animation loop - REPLACE THE ORIGINAL
+function animate() {
   requestAnimationFrame(animate);
   
   if (!renderer || !scene || !camera) return;
@@ -3003,7 +3004,7 @@ animate = function() {
   const delta = clock.getDelta();
   if (mixer) mixer.update(delta);
   
-  // Safe VRM update with error handling
+  // Safe VRM update with proper error handling
   if (currentVRM && typeof currentVRM.update === 'function') {
     try {
       currentVRM.update(delta);
@@ -3013,10 +3014,12 @@ animate = function() {
   }
   
   // Update enhanced systems
-  enhancedSolmate.update(delta);
+  if (enhancedSolmate) {
+    enhancedSolmate.update(delta);
+  }
   
   renderer.render(scene, camera);
-};
+}
 
 // ===== NEW UI CONTROLS FOR ENHANCED FEATURES =====
 function createEnhancedUI() {
