@@ -1,13 +1,35 @@
 // Enhanced VRM Companion System - Replace your current script.js with this
 // Provides Grok-like companion experience with full VRM support
+// Compatible with Three.js r164+ and @pixiv/three-vrm 2.1+
 
-// ===== IMPORTS AND DEPENDENCIES =====
-// Add these to your HTML head BEFORE script.js:
-/*
-<script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://unpkg.com/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js"></script>
-*/
+// ===== LIBRARY COMPATIBILITY CHECK =====
+function checkLibraryCompatibility() {
+  const errors = [];
+  
+  if (!window.THREE) {
+    errors.push('Three.js not loaded');
+  } else {
+    log(`Three.js version: ${THREE.REVISION}`);
+  }
+  
+  if (!window.VRM && !window.THREE?.VRM) {
+    errors.push('VRM library not loaded');
+  } else {
+    // VRM library might be available as THREE.VRM or window.VRM
+    window.VRM = window.VRM || window.THREE?.VRM;
+    log('VRM library detected');
+  }
+  
+  if (!window.THREE?.GLTFLoader && !window.GLTFLoader) {
+    errors.push('GLTFLoader not loaded');
+  } else {
+    // Ensure GLTFLoader is available
+    window.THREE.GLTFLoader = window.THREE.GLTFLoader || window.GLTFLoader;
+    log('GLTFLoader detected');
+  }
+  
+  return errors;
+}
 
 // ===== CONSTANTS =====
 const VRM_PATH = '/assets/avatar/solmate.vrm';
@@ -55,9 +77,10 @@ async function initVRMSystem() {
   try {
     log('🎭 Initializing Enhanced VRM System...');
     
-    // Ensure Three.js and VRM library are loaded
-    if (!window.THREE || !window.VRM) {
-      throw new Error('Three.js or VRM library not loaded. Please check script imports.');
+    // Check library compatibility
+    const errors = checkLibraryCompatibility();
+    if (errors.length > 0) {
+      throw new Error(`Missing libraries: ${errors.join(', ')}`);
     }
     
     // Setup Three.js scene
@@ -103,7 +126,14 @@ function setupScene() {
   });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  
+  // Handle different Three.js versions for color space
+  if (THREE.SRGBColorSpace !== undefined) {
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+  } else if (THREE.sRGBEncoding !== undefined) {
+    renderer.outputEncoding = THREE.sRGBEncoding;
+  }
+  
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   
@@ -158,10 +188,20 @@ async function loadVRMWithOfficialLoader() {
     // Create GLTF loader
     const loader = new THREE.GLTFLoader();
     
-    // Register VRM loader plugin
-    loader.register((parser) => {
-      return new VRM.VRMLoaderPlugin(parser);
-    });
+    // Register VRM loader plugin - handle different API versions
+    if (VRM.VRMLoaderPlugin) {
+      // v2.1+ API
+      loader.register((parser) => {
+        return new VRM.VRMLoaderPlugin(parser);
+      });
+    } else if (VRM.VRM) {
+      // Legacy API fallback
+      loader.register((parser) => {
+        return new VRM.VRM.VRMLoaderPlugin(parser);
+      });
+    } else {
+      throw new Error('VRM loader plugin not found in library');
+    }
     
     // Load VRM file
     const gltf = await new Promise((resolve, reject) => {
