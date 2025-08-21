@@ -1642,7 +1642,15 @@ function animate() {
   
   const delta = clock.getDelta();
   if (mixer) mixer.update(delta);
-  if (currentVRM) currentVRM.update(delta);
+  
+  // Safe VRM update with proper error handling
+  if (currentVRM && typeof currentVRM.update === 'function') {
+    try {
+      currentVRM.update(delta);
+    } catch (e) {
+      log('VRM update error:', e);
+    }
+  }
   
   renderer.render(scene, camera);
 }
@@ -2427,21 +2435,24 @@ class VRMLookAtController {
   }
   
   update(deltaTime) {
-    if (!this.enabled || !this.vrm || !this.vrm.lookAt) return;
+    if (!this.enabled || !this.vrm) return;
     
-    switch (this.mode) {
-      case 'camera':
-        this.lookAtCamera();
-        break;
-      case 'mouse':
-        this.lookAtMouse();
-        break;
-      case 'idle':
-        this.idleLookAround(deltaTime);
-        break;
-      case 'disabled':
-        this.vrm.lookAt.target = null;
-        break;
+    // Only use lookAt if it exists (proper VRM)
+    if (this.vrm.lookAt) {
+      switch (this.mode) {
+        case 'camera':
+          this.lookAtCamera();
+          break;
+        case 'mouse':
+          this.lookAtMouse();
+          break;
+        case 'idle':
+          this.idleLookAround(deltaTime);
+          break;
+        case 'disabled':
+          this.vrm.lookAt.target = null;
+          break;
+      }
     }
     
     // Auto-blink system
@@ -2449,12 +2460,14 @@ class VRMLookAtController {
   }
   
   lookAtCamera() {
-    if (this.camera) {
+    if (this.camera && this.vrm.lookAt) {
       this.vrm.lookAt.target = this.camera;
     }
   }
   
   lookAtMouse() {
+    if (!this.vrm.lookAt) return;
+    
     // Convert mouse position to 3D world space
     const vector = new THREE.Vector3(this.mousePosition.x, this.mousePosition.y, 0.5);
     vector.unproject(this.camera);
@@ -2466,6 +2479,8 @@ class VRMLookAtController {
   }
   
   idleLookAround(deltaTime) {
+    if (!this.vrm.lookAt) return;
+    
     this.idleTimer += deltaTime;
     
     // Random look-around every 3-8 seconds
@@ -2859,6 +2874,11 @@ class EnhancedSolmateSystem {
       
       log('Enhanced Solmate system initialized');
       this.isInitialized = true;
+    } else if (vrm && vrm.isStandardGLTF) {
+      // Handle standard GLTF models
+      log('⚠️ Standard GLTF detected - limited VRM features available');
+      this.memorySystem.loadFromStorage();
+      this.isInitialized = true;
     }
   }
   
@@ -2982,7 +3002,15 @@ animate = function() {
   
   const delta = clock.getDelta();
   if (mixer) mixer.update(delta);
-  if (currentVRM) currentVRM.update(delta);
+  
+  // Safe VRM update with error handling
+  if (currentVRM && typeof currentVRM.update === 'function') {
+    try {
+      currentVRM.update(delta);
+    } catch (e) {
+      log('VRM update error:', e);
+    }
+  }
   
   // Update enhanced systems
   enhancedSolmate.update(delta);
