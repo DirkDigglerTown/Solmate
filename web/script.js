@@ -14,7 +14,7 @@ You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsu
 `;
 
 // ===== GLOBAL STATE =====
-let THREE, GLTFLoader, VRMLoaderPlugin, VRM;
+let THREE, GLTFLoader, VRMLoaderPlugin, VRMUtils;
 let scene, camera, renderer, mixer, clock;
 let currentVRM = null;
 let audioQueue = [];
@@ -77,39 +77,45 @@ async function loadDependencies() {
     THREE = window.THREE;
     log('Three.js loaded');
 
-    await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/dist/three-vrm.module.js');
-    VRMLoaderPlugin = window.VRMLoaderPlugin;
-    VRM = window.VRM;
-    VRMUtils = window.VRMUtils;
-    log('VRM plugin loaded');
-
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/loaders/GLTFLoader.js');
     GLTFLoader = window.GLTFLoader || THREE.GLTFLoader;
     if (!GLTFLoader) throw new Error('GLTFLoader not available');
     log('GLTFLoader loaded');
+
+    await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/dist/three-vrm.js');
+    VRMLoaderPlugin = window.VRMLoaderPlugin;
+    VRMUtils = window.VRMUtils;
+    log('VRM plugin loaded');
   } catch (err) {
     log('Failed to load dependencies', err);
     throw err;
   }
 }
 
-// ===== THREE.JS SETUP WITH PROPER VRM SUPPORT =====
+// ===== ENHANCED THREE.JS SETUP WITH RELIABLE GLTF LOADING =====
 async function initThreeEnhanced() {
   try {
-    log('=== THREE.JS INITIALIZATION WITH VRM SUPPORT ===');
+    log('=== ENHANCED THREE.JS INITIALIZATION ===');
     
     await loadDependencies();
     setupThreeJSScene();
     animate();
     await createFallbackAvatar();
-    await loadVRMWithPlugin(VRM_PATH);
-    setupVRMAnimationsAndExpressions();
+    
+    setTimeout(async () => {
+      try {
+        await loadVRMWithPlugin(VRM_PATH);
+        setupVRMAnimationsAndExpressions();
+      } catch (vrmError) {
+        log('VRM loading failed, keeping fallback', vrmError);
+      }
+    }, 1000);
     
     document.getElementById('loading').style.display = 'none';
-    log('=== THREE.JS INITIALIZATION COMPLETE ===');
+    log('=== ENHANCED THREE.JS INITIALIZATION COMPLETE ===');
     
   } catch (err) {
-    log('=== INITIALIZATION FAILED ===', err);
+    log('=== ENHANCED INITIALIZATION FAILED ===', err);
     createSimpleFallback();
     document.getElementById('loading').textContent = 'Initialization failed. Check console.';
   }
@@ -154,52 +160,55 @@ function setupThreeJSScene() {
 }
 
 // ===== LOAD VRM WITH PLUGIN =====
-async function loadVRMWithPlugin(path, retryCount = 0) {
+async function loadVRMWithPlugin(path) {
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
 
-  try {
-    const gltf = await new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => reject(new Error('VRM load timeout')), ASSET_LOAD_TIMEOUT);
-      loader.load(path, (gltf) => {
-        clearTimeout(timeoutId);
-        resolve(gltf);
-      }, undefined, (err) => {
-        clearTimeout(timeoutId);
-        reject(err);
+  let retryCount = 0;
+  while (retryCount <= VRM_MAX_RETRIES) {
+    try {
+      const gltf = await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => reject(new Error('VRM load timeout')), ASSET_LOAD_TIMEOUT);
+        loader.load(path, (gltf) => {
+          clearTimeout(timeoutId);
+          resolve(gltf);
+        }, undefined, (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        });
       });
-    });
-    currentVRM = gltf.userData.vrm;
+      currentVRM = gltf.userData.vrm;
 
-    if (!currentVRM) {
-      throw new Error('VRM plugin did not attach userData.vrm');
-    }
-
-    VRMUtils.removeUnnecessaryVertices(currentVRM.scene);
-    VRMUtils.removeUnnecessaryJoints(currentVRM.scene);
-
-    currentVRM.scene.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        child.frustumCulled = true;
-        if (child.material && child.material.map) {
-          child.material.map.colorSpace = THREE.SRGBColorSpace;
-          child.material.map.flipY = false;
-        }
+      if (!currentVRM) {
+        throw new Error('VRM plugin did not attach userData.vrm');
       }
-    });
 
-    scene.add(currentVRM.scene);
-    log('✅ VRM loaded successfully with textures');
+      VRMUtils.removeUnnecessaryVertices(currentVRM.scene);
+      VRMUtils.removeUnnecessaryJoints(currentVRM.scene);
 
-  } catch (error) {
-    log('VRM loading attempt failed', error);
-    if (retryCount < VRM_MAX_RETRIES) {
-      log(`Retrying VRM load (${retryCount + 1}/${VRM_MAX_RETRIES})...`);
-      await loadVRMWithPlugin(path, retryCount + 1);
-    } else {
-      log('Max retries reached, keeping fallback');
+      currentVRM.scene.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.frustumCulled = true;
+          if (child.material && child.material.map) {
+            child.material.map.colorSpace = THREE.SRGBColorSpace;
+            child.material.map.flipY = false;
+            child.material.needsUpdate = true;
+          }
+        }
+      });
+
+      scene.add(currentVRM.scene);
+      log('✅ VRM loaded successfully with textures');
+      return;
+    } catch (error) {
+      log('VRM loading attempt failed', error);
+      retryCount++;
+      if (retryCount > VRM_MAX_RETRIES) {
+        throw error;
+      }
+      log(`Retrying VRM load (${retryCount}/${VRM_MAX_RETRIES})...`);
     }
   }
 }
@@ -239,7 +248,7 @@ function animate() {
 }
 
 // ===== FALLBACKS =====
-async function createFallbackAvatar() {
+function createFallbackAvatar() {
   const geometry = new THREE.SphereGeometry(0.5, 32, 32);
   const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
   const sphere = new THREE.Mesh(geometry, material);
@@ -259,4 +268,106 @@ function createSimpleFallback() {
 // ===== WEBSOCKET AND API HANDLERS =====
 function initWebSocket() {
   ws = new WebSocket(HELIUS_WS);
-  ws.onopen = ()
+  ws.onopen = () => {
+    log('WS connected');
+    document.getElementById('wsStatus').textContent = 'WS ON';
+  };
+  ws.onclose = () => {
+    log('WS closed, reconnecting...');
+    document.getElementById('wsStatus').textContent = 'WS OFF';
+    wsReconnectTimer = setTimeout(initWebSocket, 5000);
+  };
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    document.getElementById('tps').textContent = data.tps || '❤️';
+  };
+}
+
+function updatePrice() {
+  fetch('/api/price')
+    .then(res => res.json())
+    .then(data => {
+      document.getElementById('price').textContent = `SOL ${data.price}`;
+    })
+    .catch(err => log('Price update failed', err));
+  priceUpdateTimer = setTimeout(updatePrice, 30000);
+}
+
+// ===== CHAT AND TTS =====
+async function sendChat(message) {
+  conversation.push({ role: 'user', content: message });
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation] })
+  });
+  const data = await response.json();
+  conversation.push({ role: 'assistant', content: data.response });
+  
+  const chatDiv = document.getElementById('chat');
+  chatDiv.innerHTML += `<div>User: ${message}</div><div>Solmate: ${data.response}</div>`;
+  chatDiv.scrollTop = chatDiv.scrollHeight;
+
+  if (document.getElementById('mute').textContent !== '🔇') {
+    await playTTS(data.response);
+  }
+}
+
+async function playTTS(text) {
+  const response = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  const audioBlob = await response.blob();
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audio = new Audio(audioUrl);
+  audioQueue.push(audio);
+  if (!isPlaying) playNextAudio();
+}
+
+function playNextAudio() {
+  if (audioQueue.length === 0) {
+    isPlaying = false;
+    return;
+  }
+  isPlaying = true;
+  const audio = audioQueue.shift();
+  audio.play();
+  audio.onended = playNextAudio;
+}
+
+// ===== UI EVENT LISTENERS =====
+document.addEventListener('DOMContentLoaded', () => {
+  initThreeEnhanced();
+  initWebSocket();
+  updatePrice();
+
+  document.getElementById('send').addEventListener('click', () => {
+    const input = document.getElementById('input');
+    if (input.value.trim()) {
+      sendChat(input.value);
+      input.value = '';
+    }
+  });
+
+  document.getElementById('mute').addEventListener('click', (e) => {
+    e.target.textContent = e.target.textContent === '🔇' ? '🔊' : '🔇';
+  });
+
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    document.body.classList.toggle('light-theme'); // Assume CSS class for theme
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'd') {
+      const logs = document.getElementById('overlayLogs');
+      logs.style.display = logs.style.display === 'none' ? 'block' : 'none';
+    }
+  });
+});
+
+// Service Worker for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(() => log('Service Worker registered')).catch(err => log('Service Worker registration failed', err));
+}
