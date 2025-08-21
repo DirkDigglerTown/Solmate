@@ -1425,3 +1425,158 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+// ===== OVERRIDE FIXES FOR TEXTURES AND PRICE =====
+
+// Override the existing fetchPrice function
+window.originalFetchPrice = fetchPrice;
+fetchPrice = function() {
+  return new Promise(async (resolve, reject) => {
+    try {
+      log('=== FETCHING PRICE DATA (ENHANCED) ===');
+      const url = `/api/price?ids=${SOL_MINT}`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      
+      const data = await res.json();
+      log('Raw price data received:', data);
+      
+      const solPrice = document.getElementById('solPrice');
+      if (!solPrice) {
+        resolve();
+        return;
+      }
+      
+      let price = null;
+      
+      // Enhanced price extraction
+      if (data.data && data.data[SOL_MINT]?.price) {
+        price = data.data[SOL_MINT].price;
+      } else if (data.price) {
+        price = data.price;
+      } else {
+        // Search all values for a reasonable price
+        function findPrice(obj) {
+          if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
+          if (typeof obj === 'object' && obj !== null) {
+            for (const value of Object.values(obj)) {
+              const found = findPrice(value);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        price = findPrice(data);
+      }
+      
+      if (price && price > 0) {
+        solPrice.textContent = `SOL — $${price.toFixed(2)}`;
+        solPrice.style.color = '#00ff88';
+        log(`✅ Price updated: $${price.toFixed(2)}`);
+      } else {
+        solPrice.textContent = 'SOL — Error';
+        solPrice.style.color = '#ff6b6b';
+        log('❌ Could not find price in:', data);
+      }
+      
+      resolve();
+    } catch (err) {
+      log('Price fetch failed:', err);
+      const solPrice = document.getElementById('solPrice');
+      if (solPrice) {
+        solPrice.textContent = 'SOL — Error';
+        solPrice.style.color = '#ff6b6b';
+      }
+      reject(err);
+    }
+  });
+};
+
+// Add texture enhancement after VRM loads
+setTimeout(() => {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (vrmModel) {
+    log('🎨 Applying enhanced textures...');
+    
+    // Apply VRoid character colors
+    const colors = [
+      { keywords: ['hair'], color: 0x8B4513 },
+      { keywords: ['skin', 'face', 'body'], color: 0xFFCDB2 },
+      { keywords: ['top', 'shirt', 'cloth'], color: 0xFF6B6B },
+      { keywords: ['skirt', 'bottom'], color: 0x4169E1 },
+      { keywords: ['sock', 'leg'], color: 0xFF4444 },
+      { keywords: ['shoe', 'foot'], color: 0x2C3E50 }
+    ];
+    
+    let meshIndex = 0;
+    vrmModel.traverse((child) => {
+      if (child.isMesh && child.material) {
+        const meshName = child.name.toLowerCase();
+        let assignedColor = null;
+        
+        // Find matching color
+        for (const colorConfig of colors) {
+          if (colorConfig.keywords.some(keyword => meshName.includes(keyword))) {
+            assignedColor = colorConfig.color;
+            break;
+          }
+        }
+        
+        // Fallback colors
+        if (!assignedColor) {
+          const fallbackColors = [0x8B4513, 0xFFCDB2, 0xFF6B6B, 0x4169E1, 0xFF4444, 0x2C3E50];
+          assignedColor = fallbackColors[meshIndex % fallbackColors.length];
+        }
+        
+        // Apply color
+        const material = new THREE.MeshStandardMaterial({
+          color: assignedColor,
+          roughness: 0.7,
+          metalness: 0.1,
+          toneMapped: false
+        });
+        
+        child.material = material;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        
+        log(`Applied color ${assignedColor.toString(16)} to: ${child.name}`);
+        meshIndex++;
+      }
+    });
+    
+    // Enhance lighting
+    const lights = [];
+    scene.traverse(child => { if (child.isLight) lights.push(child); });
+    lights.forEach(light => scene.remove(light));
+    
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    mainLight.position.set(2, 3, 2);
+    scene.add(mainLight);
+    
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    fillLight.position.set(-1, 1, -1);
+    scene.add(fillLight);
+    
+    log('✅ Enhanced textures and lighting applied');
+  }
+}, 5000); // Apply after 5 seconds
+
+// Manual fix functions
+window.fixTextures = function() {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (vrmModel) {
+    console.log('🎨 Fixing textures...');
+    // Trigger the enhancement logic above
+    setTimeout(() => window.location.reload(), 100);
+  }
+};
+
+window.fixPrice = function() {
+  console.log('💰 Fixing price...');
+  fetchPrice();
+};
+
+console.log('🔧 Fixes loaded! Commands: fixTextures(), fixPrice()');
