@@ -51,10 +51,6 @@
     "eslint": "^8.56.0",
     "@vercel/node": "^3.0.0"
   },
-  "peerDependencies": {
-    "three": "^0.158.0",
-    "@pixiv/three-vrm": "^2.0.6"
-  },
   "vercel": {
     "framework": null,
     "outputDirectory": "web",
