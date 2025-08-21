@@ -3,11 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Solmate</title>
+  <title>Solmate - Enhanced VRM Companion</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/logo/solmatelogo.png">
   <link rel="icon" href="/assets/logo/solmatelogo.png">
   <link rel="stylesheet" href="/style.css">
+  
+  <!-- Three.js Core -->
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  
+  <!-- GLTF Loader -->
+  <script src="https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
+  
+  <!-- Official VRM Library -->
+  <script src="https://unpkg.com/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js"></script>
 </head>
 <body>
   <header class="hud">
@@ -24,42 +33,55 @@
       ❤️
     </div>
   </header>
+  
   <canvas id="vrmCanvas"></canvas>
+  
   <div id="chatContainer" class="dock">
     <form id="chatForm">
       <input id="promptInput" type="text" class="ask" placeholder="Ask anything about Solana, crypto, or just vibe...">
       <select id="voiceSelect" class="sel">
-        <option value="verse">Verse</option>
+        <option value="nova">Nova</option>
         <option value="alloy">Alloy</option>
-        <option value="aria">Aria</option>
         <option value="echo">Echo</option>
         <option value="fable">Fable</option>
         <option value="onyx">Onyx</option>
-        <option value="nova">Nova</option>
         <option value="shimmer">Shimmer</option>
       </select>
       <button id="sendBtn" class="send icon-btn">▶</button>
       <button id="clearBtn" class="send icon-btn">🔇</button>
     </form>
   </div>
+  
   <div id="debugOverlay" class="overlay hidden">
-    <h3>Debug</h3>
+    <h3>Enhanced VRM Debug</h3>
     <ul>
-      <li>Press Ctrl+D to toggle logs overlay</li>
-      <li>Check browser console for detailed errors</li>
-      <li>VRM file should be ~21MB</li>
-      <li>Verify /api/health endpoint</li>
-      <li>OpenAI key must be set in Vercel env</li>
+      <li>Press Ctrl+D to toggle debug overlay</li>
+      <li>Commands: debugVRM(), testExpressions(), sayHello()</li>
+      <li>VRM file: 21MB with expressions & animations</li>
+      <li>Official @pixiv/three-vrm library loaded</li>
+      <li>Full facial expressions and lip sync</li>
     </ul>
     <div id="overlayLogs"></div>
   </div>
   
   <!-- Loading indicator -->
-  <div id="loadingStatus" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: Arial, sans-serif; z-index: 1000;">
-    Initializing Solmate...
+  <div id="loadingStatus" style="
+    position: fixed; 
+    top: 50%; 
+    left: 50%; 
+    transform: translate(-50%, -50%); 
+    color: white; 
+    font-family: Arial, sans-serif; 
+    z-index: 1000;
+    background: rgba(0,0,0,0.8);
+    padding: 20px 30px;
+    border-radius: 10px;
+    text-align: center;
+  ">
+    🎭 Initializing Enhanced VRM Companion...
   </div>
   
-  <!-- FIXED: Remove type="module" since we're using regular script loading -->
+  <!-- Enhanced VRM Companion Script -->
   <script src="/script.js"></script>
 </body>
 </html>
