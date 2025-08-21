@@ -10,9 +10,13 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
   <title>Solmate</title>
   <style>
-    /* Add production-optimized CSS here. For brevity, assuming external CSS or inline minified. */
     body { margin: 0; padding: 0; background: #000; color: #fff; font-family: sans-serif; }
-    /* Glassmorphism and UI styles would go here, minified for production. */
+    #ui { position: absolute; top: 10px; left: 10px; }
+    #topBar { display: flex; gap: 10px; }
+    #chatContainer { position: absolute; bottom: 10px; left: 10px; }
+    #debug { position: absolute; bottom: 10px; right: 10px; font-size: 12px; }
+    #overlayLogs { display: none; position: absolute; bottom: 50px; right: 10px; max-height: 200px; overflow-y: auto; }
+    #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
   </style>
 </head>
 <body>
@@ -58,8 +62,7 @@
   <div id="overlayLogs"></div>
   <div id="loading">Initializing Solmate...</div>
 
-  <!-- Canvas for Three.js will be appended dynamically -->
-
-  <script type="module" src="/web/script.js"></script>
+  <!-- Use a script tag without type="module" to revert to dynamic loading -->
+  <script src="/web/script.js"></script>
 </body>
 </html>
