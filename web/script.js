@@ -2406,20 +2406,706 @@ if (document.readyState === 'loading') {
   init();
 }
 
+// ===== ENHANCED SOLMATE WITH AIRI-INSPIRED FEATURES =====
+
+// ===== ADVANCED VRM LOOK-AT SYSTEM (inspired by AIRI) =====
+class VRMLookAtController {
+  constructor(vrm, camera) {
+    this.vrm = vrm;
+    this.camera = camera;
+    this.lookAtTarget = new THREE.Vector3();
+    this.mode = 'camera'; // 'camera', 'mouse', 'idle', 'disabled'
+    this.mousePosition = new THREE.Vector2();
+    this.idleTimer = 0;
+    this.blinkTimer = 0;
+    this.enabled = true;
+  }
+  
+  setMode(mode) {
+    this.mode = mode;
+    log(`👀 VRM LookAt mode set to: ${mode}`);
+  }
+  
+  update(deltaTime) {
+    if (!this.enabled || !this.vrm || !this.vrm.lookAt) return;
+    
+    switch (this.mode) {
+      case 'camera':
+        this.lookAtCamera();
+        break;
+      case 'mouse':
+        this.lookAtMouse();
+        break;
+      case 'idle':
+        this.idleLookAround(deltaTime);
+        break;
+      case 'disabled':
+        this.vrm.lookAt.target = null;
+        break;
+    }
+    
+    // Auto-blink system
+    this.updateBlinking(deltaTime);
+  }
+  
+  lookAtCamera() {
+    if (this.camera) {
+      this.vrm.lookAt.target = this.camera;
+    }
+  }
+  
+  lookAtMouse() {
+    // Convert mouse position to 3D world space
+    const vector = new THREE.Vector3(this.mousePosition.x, this.mousePosition.y, 0.5);
+    vector.unproject(this.camera);
+    vector.sub(this.camera.position).normalize();
+    
+    const distance = 2.0;
+    this.lookAtTarget.copy(this.camera.position).add(vector.multiplyScalar(distance));
+    this.vrm.lookAt.target = this.lookAtTarget;
+  }
+  
+  idleLookAround(deltaTime) {
+    this.idleTimer += deltaTime;
+    
+    // Random look-around every 3-8 seconds
+    if (this.idleTimer > 3 + Math.random() * 5) {
+      const randomX = (Math.random() - 0.5) * 2;
+      const randomY = (Math.random() - 0.5) * 1;
+      
+      this.lookAtTarget.set(randomX, randomY + 1.6, 1);
+      this.vrm.lookAt.target = this.lookAtTarget;
+      this.idleTimer = 0;
+    }
+  }
+  
+  updateBlinking(deltaTime) {
+    this.blinkTimer += deltaTime;
+    
+    // Blink every 2-5 seconds
+    if (this.blinkTimer > 2 + Math.random() * 3) {
+      this.performBlink();
+      this.blinkTimer = 0;
+    }
+  }
+  
+  performBlink() {
+    if (this.vrm.expressionManager) {
+      try {
+        this.vrm.expressionManager.setValue('blink', 1.0);
+        setTimeout(() => {
+          if (this.vrm.expressionManager) {
+            this.vrm.expressionManager.setValue('blink', 0);
+          }
+        }, 150);
+      } catch (e) {
+        // Blink expression not available
+      }
+    }
+  }
+  
+  setMousePosition(x, y) {
+    this.mousePosition.set(x, y);
+  }
+}
+
+// ===== ENHANCED MEMORY SYSTEM (inspired by AIRI's memory) =====
+class SolmateMemorySystem {
+  constructor() {
+    this.conversations = [];
+    this.userProfile = {
+      name: 'User',
+      preferences: {},
+      interactionHistory: [],
+      favoriteTopics: [],
+      personality: 'friendly'
+    };
+    this.contextWindow = 20; // Remember last 20 interactions
+    this.emotionalState = {
+      happiness: 0.7,
+      excitement: 0.5,
+      curiosity: 0.6,
+      friendliness: 0.8
+    };
+  }
+  
+  addInteraction(userMessage, assistantResponse) {
+    const interaction = {
+      timestamp: Date.now(),
+      userMessage,
+      assistantResponse,
+      context: this.extractContext(userMessage),
+      emotion: this.analyzeEmotion(userMessage)
+    };
+    
+    this.conversations.push(interaction);
+    this.updateUserProfile(interaction);
+    this.updateEmotionalState(interaction);
+    
+    // Keep only recent conversations
+    if (this.conversations.length > this.contextWindow) {
+      this.conversations = this.conversations.slice(-this.contextWindow);
+    }
+    
+    this.saveToStorage();
+  }
+  
+  extractContext(message) {
+    const lowerMsg = message.toLowerCase();
+    const contexts = [];
+    
+    if (lowerMsg.includes('solana') || lowerMsg.includes('sol')) contexts.push('crypto');
+    if (lowerMsg.includes('price') || lowerMsg.includes('trading')) contexts.push('trading');
+    if (lowerMsg.includes('game') || lowerMsg.includes('play')) contexts.push('gaming');
+    if (lowerMsg.includes('code') || lowerMsg.includes('program')) contexts.push('programming');
+    
+    return contexts;
+  }
+  
+  analyzeEmotion(message) {
+    const lowerMsg = message.toLowerCase();
+    let emotion = 'neutral';
+    
+    if (lowerMsg.includes('happy') || lowerMsg.includes('great') || lowerMsg.includes('awesome')) {
+      emotion = 'happy';
+    } else if (lowerMsg.includes('sad') || lowerMsg.includes('bad') || lowerMsg.includes('terrible')) {
+      emotion = 'sad';
+    } else if (lowerMsg.includes('angry') || lowerMsg.includes('mad') || lowerMsg.includes('frustrated')) {
+      emotion = 'angry';
+    } else if (lowerMsg.includes('excited') || lowerMsg.includes('amazing') || lowerMsg.includes('wow')) {
+      emotion = 'excited';
+    }
+    
+    return emotion;
+  }
+  
+  updateUserProfile(interaction) {
+    // Update favorite topics
+    interaction.context.forEach(topic => {
+      const existing = this.userProfile.favoriteTopics.find(t => t.topic === topic);
+      if (existing) {
+        existing.count++;
+      } else {
+        this.userProfile.favoriteTopics.push({ topic, count: 1 });
+      }
+    });
+    
+    // Sort by frequency
+    this.userProfile.favoriteTopics.sort((a, b) => b.count - a.count);
+    this.userProfile.favoriteTopics = this.userProfile.favoriteTopics.slice(0, 10);
+  }
+  
+  updateEmotionalState(interaction) {
+    switch (interaction.emotion) {
+      case 'happy':
+        this.emotionalState.happiness = Math.min(1.0, this.emotionalState.happiness + 0.1);
+        this.emotionalState.friendliness = Math.min(1.0, this.emotionalState.friendliness + 0.05);
+        break;
+      case 'excited':
+        this.emotionalState.excitement = Math.min(1.0, this.emotionalState.excitement + 0.15);
+        break;
+      case 'sad':
+        this.emotionalState.happiness = Math.max(0.0, this.emotionalState.happiness - 0.1);
+        break;
+    }
+  }
+  
+  getContextualPrompt() {
+    const recentTopics = this.userProfile.favoriteTopics.slice(0, 3).map(t => t.topic);
+    const recentConversations = this.conversations.slice(-5);
+    
+    let contextPrompt = `Remember: User likes talking about ${recentTopics.join(', ')}. `;
+    
+    if (recentConversations.length > 0) {
+      contextPrompt += `Recent context: ${recentConversations.map(c => c.userMessage).join(' | ')}. `;
+    }
+    
+    contextPrompt += `Your current emotional state: happiness=${this.emotionalState.happiness.toFixed(1)}, excitement=${this.emotionalState.excitement.toFixed(1)}. Adjust your personality accordingly.`;
+    
+    return contextPrompt;
+  }
+  
+  saveToStorage() {
+    try {
+      localStorage.setItem('solmateMemory', JSON.stringify({
+        conversations: this.conversations,
+        userProfile: this.userProfile,
+        emotionalState: this.emotionalState
+      }));
+    } catch (e) {
+      log('Failed to save memory to storage', e);
+    }
+  }
+  
+  loadFromStorage() {
+    try {
+      const saved = localStorage.getItem('solmateMemory');
+      if (saved) {
+        const data = JSON.parse(saved);
+        this.conversations = data.conversations || [];
+        this.userProfile = { ...this.userProfile, ...data.userProfile };
+        this.emotionalState = { ...this.emotionalState, ...data.emotionalState };
+        log(`Loaded memory: ${this.conversations.length} conversations`);
+      }
+    } catch (e) {
+      log('Failed to load memory from storage', e);
+    }
+  }
+}
+
+// ===== ADVANCED EXPRESSION CONTROLLER =====
+class VRMExpressionController {
+  constructor(vrm) {
+    this.vrm = vrm;
+    this.currentExpression = 'neutral';
+    this.expressionQueue = [];
+    this.isPlaying = false;
+    this.availableExpressions = this.detectAvailableExpressions();
+  }
+  
+  detectAvailableExpressions() {
+    if (!this.vrm || !this.vrm.expressionManager) return [];
+    
+    const commonExpressions = [
+      'happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral',
+      'fun', 'joy', 'sorrow', 'aa', 'ih', 'ou', 'ee', 'oh',
+      'blink', 'blinkLeft', 'blinkRight', 'wink', 'winkLeft', 'winkRight'
+    ];
+    
+    const available = [];
+    commonExpressions.forEach(expr => {
+      try {
+        this.vrm.expressionManager.setValue(expr, 0);
+        available.push(expr);
+      } catch (e) {
+        // Expression not available
+      }
+    });
+    
+    log(`Available VRM expressions: ${available.join(', ')}`);
+    return available;
+  }
+  
+  playExpression(expressionName, intensity = 0.8, duration = 2000) {
+    if (!this.availableExpressions.includes(expressionName)) return;
+    
+    this.expressionQueue.push({ expressionName, intensity, duration });
+    if (!this.isPlaying) {
+      this.processQueue();
+    }
+  }
+  
+  async processQueue() {
+    if (this.expressionQueue.length === 0) {
+      this.isPlaying = false;
+      return;
+    }
+    
+    this.isPlaying = true;
+    const { expressionName, intensity, duration } = this.expressionQueue.shift();
+    
+    try {
+      // Set expression
+      this.vrm.expressionManager.setValue(expressionName, intensity);
+      this.currentExpression = expressionName;
+      
+      // Wait for duration
+      await new Promise(resolve => setTimeout(resolve, duration));
+      
+      // Reset expression
+      this.vrm.expressionManager.setValue(expressionName, 0);
+      
+      // Process next in queue
+      setTimeout(() => this.processQueue(), 200);
+      
+    } catch (e) {
+      log('Expression playback failed:', e);
+      this.processQueue();
+    }
+  }
+  
+  expressEmotionBasedOnText(text) {
+    const lowerText = text.toLowerCase();
+    
+    if (lowerText.includes('happy') || lowerText.includes('great') || lowerText.includes('awesome')) {
+      this.playExpression('happy', 0.9, 2500);
+    } else if (lowerText.includes('excited') || lowerText.includes('amazing') || lowerText.includes('wow')) {
+      this.playExpression('fun', 0.8, 2000);
+    } else if (lowerText.includes('sad') || lowerText.includes('sorry')) {
+      this.playExpression('sad', 0.7, 3000);
+    } else if (lowerText.includes('surprised') || lowerText.includes('unexpected')) {
+      this.playExpression('surprised', 0.9, 1500);
+    } else if (lowerText.includes('thinking') || lowerText.includes('hmm')) {
+      this.playExpression('relaxed', 0.6, 2000);
+    }
+  }
+  
+  startIdleExpressions() {
+    const playRandomExpression = () => {
+      if (!this.isPlaying && Math.random() < 0.3) {
+        const idleExpressions = ['neutral', 'relaxed', 'happy'];
+        const randomExpr = idleExpressions[Math.floor(Math.random() * idleExpressions.length)];
+        this.playExpression(randomExpr, 0.4, 1500);
+      }
+      
+      setTimeout(playRandomExpression, 5000 + Math.random() * 10000);
+    };
+    
+    setTimeout(playRandomExpression, 5000);
+  }
+}
+
+// ===== ENHANCED VOICE ACTIVITY DETECTION =====
+class VoiceActivityDetector {
+  constructor() {
+    this.isListening = false;
+    this.audioContext = null;
+    this.microphone = null;
+    this.analyser = null;
+    this.threshold = 0.01;
+    this.onSpeechStart = null;
+    this.onSpeechEnd = null;
+    this.silenceTimer = 0;
+    this.silenceThreshold = 1000; // 1 second of silence
+  }
+  
+  async start() {
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.microphone = this.audioContext.createMediaStreamSource(stream);
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;
+      
+      this.microphone.connect(this.analyser);
+      this.isListening = true;
+      this.detectVoiceActivity();
+      
+      log('Voice activity detection started');
+    } catch (e) {
+      log('Failed to start voice activity detection:', e);
+    }
+  }
+  
+  detectVoiceActivity() {
+    if (!this.isListening) return;
+    
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    this.analyser.getByteFrequencyData(dataArray);
+    
+    // Calculate average volume
+    const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
+    const normalizedVolume = average / 255;
+    
+    if (normalizedVolume > this.threshold) {
+      if (this.silenceTimer > 0) {
+        // Speech started
+        this.silenceTimer = 0;
+        if (this.onSpeechStart) this.onSpeechStart();
+      }
+    } else {
+      this.silenceTimer += 50; // Roughly 50ms per frame
+      if (this.silenceTimer > this.silenceThreshold && this.onSpeechEnd) {
+        this.onSpeechEnd();
+        this.silenceTimer = 0;
+      }
+    }
+    
+    setTimeout(() => this.detectVoiceActivity(), 50);
+  }
+  
+  stop() {
+    this.isListening = false;
+    if (this.microphone) this.microphone.disconnect();
+    if (this.audioContext) this.audioContext.close();
+  }
+}
+
+// ===== ENHANCED SOLMATE SYSTEM INTEGRATION =====
+class EnhancedSolmateSystem {
+  constructor() {
+    this.lookAtController = null;
+    this.memorySystem = new SolmateMemorySystem();
+    this.expressionController = null;
+    this.voiceDetector = new VoiceActivityDetector();
+    this.isInitialized = false;
+  }
+  
+  async initialize(vrm, camera) {
+    if (vrm && !vrm.isStandardGLTF) {
+      this.lookAtController = new VRMLookAtController(vrm, camera);
+      this.expressionController = new VRMExpressionController(vrm);
+      
+      // Setup voice activity detection
+      this.voiceDetector.onSpeechStart = () => {
+        log('🎤 Speech detected');
+        if (this.expressionController) {
+          this.expressionController.playExpression('surprised', 0.5, 1000);
+        }
+      };
+      
+      this.voiceDetector.onSpeechEnd = () => {
+        log('🔇 Speech ended');
+      };
+      
+      // Load memory
+      this.memorySystem.loadFromStorage();
+      
+      // Start expression system
+      if (this.expressionController) {
+        this.expressionController.startIdleExpressions();
+      }
+      
+      log('Enhanced Solmate system initialized');
+      this.isInitialized = true;
+    }
+  }
+  
+  update(deltaTime) {
+    if (this.lookAtController) {
+      this.lookAtController.update(deltaTime);
+    }
+  }
+  
+  setLookAtMode(mode) {
+    if (this.lookAtController) {
+      this.lookAtController.setMode(mode);
+    }
+  }
+  
+  onMouseMove(x, y) {
+    if (this.lookAtController) {
+      // Convert to normalized device coordinates
+      const normalizedX = (x / window.innerWidth) * 2 - 1;
+      const normalizedY = -(y / window.innerHeight) * 2 + 1;
+      this.lookAtController.setMousePosition(normalizedX, normalizedY);
+    }
+  }
+  
+  onChatMessage(userMessage, assistantResponse) {
+    // Add to memory
+    this.memorySystem.addInteraction(userMessage, assistantResponse);
+    
+    // Express emotion based on response
+    if (this.expressionController) {
+      this.expressionController.expressEmotionBasedOnText(assistantResponse);
+    }
+  }
+  
+  getEnhancedPrompt(originalPrompt) {
+    const contextualPrompt = this.memorySystem.getContextualPrompt();
+    return `${originalPrompt}\n\nContext: ${contextualPrompt}`;
+  }
+  
+  async startVoiceDetection() {
+    await this.voiceDetector.start();
+  }
+  
+  stopVoiceDetection() {
+    this.voiceDetector.stop();
+  }
+}
+
+// ===== INTEGRATION WITH EXISTING SOLMATE SYSTEM =====
+let enhancedSolmate = new EnhancedSolmateSystem();
+
+// Override existing VRM setup function
+const originalSetupVRMFeatures = setupVRMFeatures;
+setupVRMFeatures = function(gltf) {
+  // Call original setup
+  originalSetupVRMFeatures(gltf);
+  
+  // Initialize enhanced features
+  if (currentVRM && camera) {
+    enhancedSolmate.initialize(currentVRM, camera);
+  }
+};
+
+// Override existing chat function
+const originalSendMessage = sendMessage;
+sendMessage = function(text) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Get enhanced prompt with memory context
+      const enhancedPrompt = enhancedSolmate.getEnhancedPrompt(SYSTEM_PROMPT);
+      
+      conversation.push({ role: 'user', content: text });
+      
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: [
+            { role: 'system', content: enhancedPrompt }, 
+            ...conversation
+          ] 
+        })
+      });
+      
+      if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
+      
+      const { content } = await res.json();
+      conversation.push({ role: 'assistant', content });
+      
+      // Add to enhanced memory system
+      enhancedSolmate.onChatMessage(text, content);
+      
+      try {
+        localStorage.setItem('solmateConversation', JSON.stringify(conversation));
+      } catch (storageErr) {
+        log('Failed to save conversation', storageErr);
+      }
+      
+      queueTTS(content);
+      resolve(content);
+    } catch (err) {
+      log('Chat failed:', err);
+      const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
+      alert(errorMsg);
+      resolve(errorMsg);
+    }
+  });
+};
+
+// Enhanced mouse movement tracking
+document.addEventListener('mousemove', (event) => {
+  enhancedSolmate.onMouseMove(event.clientX, event.clientY);
+});
+
+// Enhanced animation loop
+const originalAnimate = animate;
+animate = function() {
+  requestAnimationFrame(animate);
+  
+  if (!renderer || !scene || !camera) return;
+  
+  const delta = clock.getDelta();
+  if (mixer) mixer.update(delta);
+  if (currentVRM) currentVRM.update(delta);
+  
+  // Update enhanced systems
+  enhancedSolmate.update(delta);
+  
+  renderer.render(scene, camera);
+};
+
+// ===== NEW UI CONTROLS FOR ENHANCED FEATURES =====
+function createEnhancedUI() {
+  // Look-at mode controls
+  const lookAtControls = document.createElement('div');
+  lookAtControls.style.cssText = `
+    position: fixed; top: 70px; right: 20px;
+    background: var(--glass); backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px; z-index: 15; display: flex; gap: 5px; flex-direction: column;
+  `;
+  
+  const modes = [
+    { id: 'camera', label: '📷', title: 'Look at camera' },
+    { id: 'mouse', label: '🖱️', title: 'Track mouse' },
+    { id: 'idle', label: '👀', title: 'Idle look around' },
+    { id: 'disabled', label: '❌', title: 'Disable look-at' }
+  ];
+  
+  modes.forEach(mode => {
+    const btn = document.createElement('button');
+    btn.textContent = mode.label;
+    btn.title = mode.title;
+    btn.className = 'icon-btn';
+    btn.onclick = () => {
+      enhancedSolmate.setLookAtMode(mode.id);
+      // Update active state
+      lookAtControls.querySelectorAll('button').forEach(b => b.style.background = 'var(--pill)');
+      btn.style.background = 'var(--accent)';
+    };
+    lookAtControls.appendChild(btn);
+  });
+  
+  // Voice detection toggle
+  const voiceBtn = document.createElement('button');
+  voiceBtn.textContent = '🎤';
+  voiceBtn.title = 'Toggle voice detection';
+  voiceBtn.className = 'icon-btn';
+  voiceBtn.onclick = async () => {
+    if (enhancedSolmate.voiceDetector.isListening) {
+      enhancedSolmate.stopVoiceDetection();
+      voiceBtn.style.background = 'var(--pill)';
+    } else {
+      await enhancedSolmate.startVoiceDetection();
+      voiceBtn.style.background = 'var(--success)';
+    }
+  };
+  lookAtControls.appendChild(voiceBtn);
+  
+  document.body.appendChild(lookAtControls);
+  
+  // Default to camera mode
+  lookAtControls.querySelector('button').click();
+}
+
+// ===== NEW DEBUG COMMANDS =====
+window.testEnhancedFeatures = function() {
+  console.log('🧪 Testing enhanced features...');
+  console.log('Enhanced Solmate initialized:', enhancedSolmate.isInitialized);
+  console.log('Look-at controller:', !!enhancedSolmate.lookAtController);
+  console.log('Expression controller:', !!enhancedSolmate.expressionController);
+  console.log('Memory system conversations:', enhancedSolmate.memorySystem.conversations.length);
+  console.log('User profile:', enhancedSolmate.memorySystem.userProfile);
+  
+  // Test expression
+  if (enhancedSolmate.expressionController) {
+    enhancedSolmate.expressionController.playExpression('happy', 0.8, 2000);
+  }
+};
+
+window.setLookAtMode = function(mode) {
+  enhancedSolmate.setLookAtMode(mode);
+  console.log(`Look-at mode set to: ${mode}`);
+};
+
+window.testExpression = function(expression = 'happy') {
+  if (enhancedSolmate.expressionController) {
+    enhancedSolmate.expressionController.playExpression(expression, 0.8, 2000);
+    console.log(`Playing expression: ${expression}`);
+  }
+};
+
+window.getMemoryStats = function() {
+  const memory = enhancedSolmate.memorySystem;
+  console.log('Memory Statistics:', {
+    conversations: memory.conversations.length,
+    favoriteTopics: memory.userProfile.favoriteTopics,
+    emotionalState: memory.emotionalState
+  });
+  return memory;
+};
+
 // ===== AUTO-START ENHANCED VRM SYSTEM =====
 setTimeout(() => {
   const vrmModel = scene?.getObjectByName('VRM_Model');
   if (vrmModel) {
     console.log('🚀 Auto-starting enhanced VRM system...');
     
+    // Initialize enhanced features if not already done
+    if (currentVRM && camera && !enhancedSolmate.isInitialized) {
+      enhancedSolmate.initialize(currentVRM, camera);
+      createEnhancedUI();
+    }
+    
     // Test wave after everything is set up
     setTimeout(() => {
       if (window.vrmAnimationData && Object.keys(window.vrmAnimationData.bones).length > 0) {
         playEnhancedVRMWave();
-        queueTTS("Hello! I'm your enhanced VRM assistant with proper bone animations and preserved textures!", 'nova');
+        queueTTS("Hello! I'm your enhanced VRM assistant with advanced look-at, memory, and expression systems!", 'nova');
       } else {
-        queueTTS("Hello! I'm your Solana companion Solmate. My animations are loading!", 'nova');
+        queueTTS("Hello! I'm Solmate with enhanced features! I can track your mouse, remember our conversations, and express emotions naturally!", 'nova');
       }
     }, 2000);
   }
-}, 10000); // Start after VRM is fully loaded and processed
+}, 12000); // Start after VRM is fully loaded and processed
+
+console.log('🎭 Enhanced Solmate features loaded!');
+console.log('🎮 New commands: testEnhancedFeatures(), setLookAtMode("camera"), testExpression("happy"), getMemoryStats()');
+console.log('👀 Look-at modes: camera, mouse, idle, disabled');
+console.log('💭 Memory system now tracks your conversations and preferences!');
