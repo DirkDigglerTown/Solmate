@@ -59,27 +59,78 @@ function loadVRMWithProperSupport(url, retryCount = 0) {
         throw new Error(`VRM file not accessible: ${checkResponse.status}`);
       }
       
-      // Try to load VRM plugin from CDN first
+      // Enhanced VRM plugin loading with multiple strategies
       let VRMLoaderPlugin = null;
+      
+      // Strategy 1: Try the official @pixiv/three-vrm package
       try {
+        log('Attempting to load VRM plugin...');
         await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@latest/lib/three-vrm.js');
+        
+        // Check multiple possible locations for the VRM plugin
         if (window.VRM && window.VRM.VRMLoaderPlugin) {
           VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
-          log('✅ VRM plugin loaded from CDN');
+          log('✅ VRM plugin found at window.VRM.VRMLoaderPlugin');
+        } else if (window.THREE && window.THREE.VRMLoaderPlugin) {
+          VRMLoaderPlugin = window.THREE.VRMLoaderPlugin;
+          log('✅ VRM plugin found at window.THREE.VRMLoaderPlugin');
+        } else if (window.VRMLoaderPlugin) {
+          VRMLoaderPlugin = window.VRMLoaderPlugin;
+          log('✅ VRM plugin found at window.VRMLoaderPlugin');
+        } else {
+          log('⚠️ VRM plugin loaded but not found in expected locations');
+          console.log('Available VRM objects:', {
+            windowVRM: !!window.VRM,
+            vrmKeys: window.VRM ? Object.keys(window.VRM) : null,
+            windowTHREE: !!window.THREE,
+            threeKeys: window.THREE ? Object.keys(window.THREE).filter(k => k.includes('VRM')) : null
+          });
         }
       } catch (e) {
-        log('VRM plugin CDN failed, using fallback', e);
+        log('VRM plugin CDN failed:', e);
+      }
+      
+      // Strategy 2: Try alternative VRM sources
+      if (!VRMLoaderPlugin) {
+        const vrmSources = [
+          'https://unpkg.com/@pixiv/three-vrm@latest/lib/three-vrm.js',
+          'https://cdn.skypack.dev/@pixiv/three-vrm',
+          'https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.js'
+        ];
+        
+        for (const source of vrmSources) {
+          try {
+            log(`Trying VRM source: ${source}`);
+            await loadScript(source);
+            
+            if (window.VRM && window.VRM.VRMLoaderPlugin) {
+              VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
+              log(`✅ VRM plugin loaded from: ${source}`);
+              break;
+            }
+          } catch (e) {
+            log(`VRM source failed: ${source}`, e);
+          }
+        }
       }
       
       const loader = new THREE.GLTFLoader();
       
       // Register VRM plugin if available
       if (VRMLoaderPlugin) {
-        loader.register((parser) => {
-          return new VRMLoaderPlugin(parser);
-        });
-        log('✅ VRM plugin registered');
-      } else {
+        try {
+          loader.register((parser) => {
+            const vrmPlugin = new VRMLoaderPlugin(parser);
+            log('✅ VRM plugin successfully registered');
+            return vrmPlugin;
+          });
+        } catch (registrationError) {
+          log('❌ VRM plugin registration failed:', registrationError);
+          VRMLoaderPlugin = null;
+        }
+      }
+      
+      if (!VRMLoaderPlugin) {
         log('⚠️ Loading as standard GLTF (VRM features may be limited)');
       }
       
@@ -95,7 +146,7 @@ function loadVRMWithProperSupport(url, retryCount = 0) {
             clearTimeout(timeoutId);
             log('✅ VRM file loaded successfully!');
             
-            // Check if VRM data is present
+            // Enhanced VRM data detection
             if (loadedGltf.userData && loadedGltf.userData.vrm) {
               currentVRM = loadedGltf.userData.vrm;
               log('✅ VRM data found and stored');
@@ -103,10 +154,27 @@ function loadVRMWithProperSupport(url, retryCount = 0) {
                 hasHumanoid: !!(currentVRM.humanoid),
                 hasExpressions: !!(currentVRM.expressionManager),
                 hasMaterials: !!(currentVRM.materials && currentVRM.materials.length > 0),
-                hasLookAt: !!(currentVRM.lookAt)
+                hasLookAt: !!(currentVRM.lookAt),
+                hasScene: !!(currentVRM.scene)
               });
+            } else if (loadedGltf.userData && loadedGltf.userData.gltfExtensions) {
+              // Check for VRM extensions in GLTF
+              const extensions = loadedGltf.userData.gltfExtensions;
+              if (extensions.VRM) {
+                log('✅ VRM extension found in GLTF');
+                currentVRM = extensions.VRM;
+              } else {
+                log('⚠️ No VRM data found, treating as standard GLTF');
+              }
             } else {
               log('⚠️ No VRM data found, treating as standard GLTF');
+              
+              // Create a pseudo-VRM object for compatibility
+              currentVRM = {
+                scene: loadedGltf.scene,
+                userData: loadedGltf.userData,
+                isStandardGLTF: true
+              };
             }
             
             resolve(loadedGltf);
@@ -115,7 +183,9 @@ function loadVRMWithProperSupport(url, retryCount = 0) {
             if (progress.total > 0) {
               const percent = Math.round((progress.loaded / progress.total) * 100);
               updateLoadingProgress('vrm', percent);
-              log(`Loading progress: ${percent}%`);
+              if (percent % 10 === 0) { // Log every 10%
+                log(`Loading progress: ${percent}%`);
+              }
             }
           },
           (error) => {
@@ -818,51 +888,26 @@ function setupVRMAnimationSystem() {
   
   log('🎭 Setting up comprehensive VRM animation system...');
   
+  // Enhanced bone detection
+  const { bones, humanoidBones, isVRMHumanoid } = findVRMBonesAdvanced(vrmModel);
+  
   // Initialize animation data
   const animationData = {
     model: vrmModel,
-    bones: {},
-    hasVRMHumanoid: false,
-    hasExpressions: false,
+    bones: bones,
+    humanoidBones: humanoidBones,
+    hasVRMHumanoid: isVRMHumanoid,
+    hasExpressions: !!(currentVRM && currentVRM.expressionManager && !currentVRM.isStandardGLTF),
     isAnimating: false
   };
   
-  // Detect VRM capabilities
-  if (currentVRM) {
-    if (currentVRM.humanoid) {
-      animationData.hasVRMHumanoid = true;
-      log('🤖 VRM Humanoid detected');
-      
-      // Get humanoid bones
-      const humanoidBoneNames = [
-        'head', 'neck', 'chest', 'spine', 'hips',
-        'leftShoulder', 'rightShoulder',
-        'leftUpperArm', 'rightUpperArm',
-        'leftLowerArm', 'rightLowerArm',
-        'leftHand', 'rightHand'
-      ];
-      
-      humanoidBoneNames.forEach(boneName => {
-        try {
-          const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
-          if (bone) {
-            animationData.bones[boneName] = bone;
-          }
-        } catch (e) {
-          // Bone not available
-        }
-      });
-    }
-    
-    if (currentVRM.expressionManager) {
-      animationData.hasExpressions = true;
-      log('😊 VRM Expressions detected');
-    }
-  }
-  
   // Start appropriate animation system
   if (Object.keys(animationData.bones).length > 0) {
-    startVRMBoneAnimations(animationData);
+    if (isVRMHumanoid) {
+      startVRMBoneAnimations(animationData);
+    } else {
+      startSceneBoneAnimations(animationData);
+    }
   } else {
     startFallbackAnimations(animationData);
   }
@@ -875,7 +920,210 @@ function setupVRMAnimationSystem() {
   // Global animation functions
   window.vrmAnimationData = animationData;
   
-  log(`🎭 Animation system started with ${Object.keys(animationData.bones).length} bones`);
+  log(`🎭 Animation system started with ${Object.keys(animationData.bones).length} bones (VRM Humanoid: ${isVRMHumanoid})`);
+}
+
+// ===== ENHANCED VRM BONE DETECTION =====
+function findVRMBonesAdvanced(vrmModel) {
+  const bones = {};
+  const humanoidBones = {};
+  
+  log('🔍 Starting advanced VRM bone detection...');
+  
+  // Strategy 1: VRM Humanoid system (if available)
+  if (currentVRM && currentVRM.humanoid && !currentVRM.isStandardGLTF) {
+    log('🤖 Using VRM Humanoid bone system');
+    
+    const vrmBoneNames = [
+      'head', 'neck', 'chest', 'spine', 'hips',
+      'leftShoulder', 'rightShoulder',
+      'leftUpperArm', 'rightUpperArm',
+      'leftLowerArm', 'rightLowerArm',
+      'leftHand', 'rightHand'
+    ];
+    
+    vrmBoneNames.forEach(boneName => {
+      try {
+        const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
+        if (bone) {
+          bones[boneName] = bone;
+          humanoidBones[boneName] = bone;
+          log(`Found VRM humanoid bone ${boneName}: ${bone.name}`);
+        }
+      } catch (e) {
+        // Bone not available
+      }
+    });
+  }
+  
+  // Strategy 2: Search scene hierarchy for bone-like objects
+  if (Object.keys(bones).length === 0) {
+    log('🔍 Searching scene hierarchy for bones...');
+    
+    const boneKeywords = {
+      head: ['head', 'Head', 'HEAD', 'skull', 'Skull', 'neck', 'Neck'],
+      neck: ['neck', 'Neck', 'NECK'],
+      spine: ['spine', 'Spine', 'SPINE', 'backbone', 'chest', 'Chest'],
+      chest: ['chest', 'Chest', 'CHEST', 'torso', 'Torso', 'upperBody'],
+      leftShoulder: ['leftshoulder', 'LeftShoulder', 'L_Shoulder', 'shoulder_L', 'shoulderL'],
+      rightShoulder: ['rightshoulder', 'RightShoulder', 'R_Shoulder', 'shoulder_R', 'shoulderR'],
+      leftUpperArm: ['leftupperarm', 'LeftUpperArm', 'L_UpperArm', 'upperarm_L', 'armL', 'leftarm'],
+      rightUpperArm: ['rightupperarm', 'RightUpperArm', 'R_UpperArm', 'upperarm_R', 'armR', 'rightarm'],
+      leftLowerArm: ['leftlowerarm', 'LeftLowerArm', 'L_LowerArm', 'lowerarm_L', 'forearmL', 'leftforearm'],
+      rightLowerArm: ['rightlowerarm', 'RightLowerArm', 'R_LowerArm', 'lowerarm_R', 'forearmR', 'rightforearm'],
+      leftHand: ['lefthand', 'LeftHand', 'L_Hand', 'hand_L', 'handL'],
+      rightHand: ['righthand', 'RightHand', 'R_Hand', 'hand_R', 'handR'],
+      hips: ['hips', 'Hips', 'HIPS', 'pelvis', 'Pelvis', 'root', 'Root']
+    };
+    
+    // Search all objects in the scene
+    vrmModel.traverse((child) => {
+      const childName = child.name.toLowerCase();
+      const childType = child.type;
+      
+      // Check if this could be a bone
+      const isPotentialBone = (
+        childType === 'Bone' || 
+        child.isBone || 
+        childName.includes('bone') ||
+        childName.includes('joint') ||
+        childName.includes('armature') ||
+        (child.children && child.children.length > 0) // Has children (bone-like structure)
+      );
+      
+      if (isPotentialBone || child.isObject3D) {
+        for (const [boneType, keywords] of Object.entries(boneKeywords)) {
+          if (!bones[boneType]) {
+            for (const keyword of keywords) {
+              if (childName.includes(keyword.toLowerCase()) || 
+                  childName === keyword.toLowerCase() ||
+                  child.name === keyword) {
+                bones[boneType] = child;
+                log(`Found scene bone ${boneType}: ${child.name} (${child.type})`);
+                break;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+  
+  // Strategy 3: Look for any mesh that could be animated
+  if (Object.keys(bones).length === 0) {
+    log('🎭 No bones found, searching for animatable meshes...');
+    
+    const meshParts = {};
+    vrmModel.traverse((child) => {
+      if (child.isMesh) {
+        const name = child.name.toLowerCase();
+        
+        if (name.includes('head') || name.includes('face') || name.includes('hair')) {
+          meshParts.head = child;
+          log(`Found head mesh: ${child.name}`);
+        } else if (name.includes('body') || name.includes('torso') || name.includes('chest')) {
+          meshParts.body = child;
+          log(`Found body mesh: ${child.name}`);
+        } else if (name.includes('arm') && (name.includes('left') || name.includes('l_'))) {
+          meshParts.leftArm = child;
+          log(`Found left arm mesh: ${child.name}`);
+        } else if (name.includes('arm') && (name.includes('right') || name.includes('r_'))) {
+          meshParts.rightArm = child;
+          log(`Found right arm mesh: ${child.name}`);
+        }
+      }
+    });
+    
+    Object.assign(bones, meshParts);
+  }
+  
+  // Strategy 4: Use the VRM model itself for animations
+  if (Object.keys(bones).length === 0) {
+    log('🎪 Using VRM root for model-level animations');
+    bones.root = vrmModel;
+  }
+  
+  const isVRMHumanoid = Object.keys(humanoidBones).length > 0;
+  log(`🦴 Bone detection complete: ${Object.keys(bones).length} bones found (VRM Humanoid: ${isVRMHumanoid})`);
+  
+  return { bones, humanoidBones, isVRMHumanoid };
+}
+
+// ===== SCENE BONE ANIMATIONS =====
+function startSceneBoneAnimations(animationData) {
+  log('🔗 Starting scene bone animations...');
+  
+  let time = 0;
+  let breathingPhase = 0;
+  let blinkTimer = 0;
+  
+  function animateSceneBones() {
+    if (!scene?.getObjectByName('VRM_Model') || !animationData.model) return;
+    
+    time += 0.016;
+    breathingPhase += 0.016;
+    blinkTimer += 0.016;
+    
+    const bones = animationData.bones;
+    
+    // Model-level breathing
+    const breathe = 1 + Math.sin(breathingPhase * 2.5) * 0.008;
+    animationData.model.scale.y = breathe;
+    
+    // Head movement (any head-like object)
+    if (bones.head && !animationState.isTalking) {
+      bones.head.rotation.y = Math.sin(time * 0.8) * 0.03 + (animationTargets.headRotation.y * 0.2);
+      bones.head.rotation.x = Math.sin(time * 0.6) * 0.015 + (animationTargets.headRotation.x * 0.2);
+      bones.head.rotation.z = Math.sin(time * 0.4) * 0.006;
+    }
+    
+    // Body/spine movement
+    if (bones.spine || bones.chest || bones.body) {
+      const target = bones.spine || bones.chest || bones.body;
+      target.rotation.y = Math.sin(time * 0.5) * 0.008;
+      if (target.scale) {
+        target.scale.y = 1 + Math.sin(breathingPhase * 2.5) * 0.01;
+      }
+    }
+    
+    // Arm movement (if available)
+    if (bones.leftArm || bones.leftUpperArm) {
+      const arm = bones.leftUpperArm || bones.leftArm;
+      if (!animationState.isWaving) {
+        arm.rotation.z = Math.sin(time * 1.2) * 0.04;
+        arm.rotation.x = Math.sin(time * 0.9) * 0.015;
+      }
+    }
+    
+    if (bones.rightArm || bones.rightUpperArm) {
+      const arm = bones.rightUpperArm || bones.rightArm;
+      if (!animationState.isWaving) {
+        arm.rotation.z = Math.sin(time * 1.4) * -0.04;
+        arm.rotation.x = Math.sin(time * 1.1) * 0.015;
+      }
+    }
+    
+    // Hip movement
+    if (bones.hips) {
+      bones.hips.rotation.y = Math.sin(time * 0.7) * 0.006;
+      bones.hips.position.y += Math.sin(time * 2.8) * 0.0008;
+    }
+    
+    // Model sway
+    animationData.model.rotation.y = Math.sin(time * 0.6) * 0.01;
+    animationData.model.position.y += Math.sin(time * 2.0) * 0.001;
+    
+    // Blinking
+    if (blinkTimer > 3 + Math.random() * 4) {
+      performVRMBlink();
+      blinkTimer = 0;
+    }
+    
+    requestAnimationFrame(animateSceneBones);
+  }
+  
+  animateSceneBones();
+  log('✅ Scene bone animations started');
 }
 
 // ===== VRM BONE ANIMATIONS =====
@@ -2093,6 +2341,33 @@ window.testVRMSystem = function() {
   }
 };
 
+window.debugVRMPlugin = function() {
+  console.log('=== VRM PLUGIN DEBUG ===');
+  console.log('Window VRM:', !!window.VRM);
+  if (window.VRM) {
+    console.log('VRM object keys:', Object.keys(window.VRM));
+  }
+  console.log('Window THREE VRM keys:', window.THREE ? Object.keys(window.THREE).filter(k => k.includes('VRM')) : 'No THREE');
+  console.log('Current VRM:', !!currentVRM);
+  if (currentVRM) {
+    console.log('VRM properties:', Object.keys(currentVRM));
+    console.log('Is standard GLTF:', currentVRM.isStandardGLTF);
+  }
+  
+  // Test VRM plugin registration
+  try {
+    const testLoader = new THREE.GLTFLoader();
+    if (window.VRM && window.VRM.VRMLoaderPlugin) {
+      testLoader.register((parser) => new window.VRM.VRMLoaderPlugin(parser));
+      console.log('✅ VRM plugin can be registered');
+    } else {
+      console.log('❌ VRM plugin not available for registration');
+    }
+  } catch (e) {
+    console.log('❌ VRM plugin registration test failed:', e);
+  }
+};
+
 window.fixVRMTextures = function() {
   const vrmModel = scene?.getObjectByName('VRM_Model');
   if (vrmModel) {
@@ -2106,11 +2381,22 @@ window.fixPrice = function() {
   fetchPrice();
 };
 
+window.testVRMBoneDetection = function() {
+  const vrmModel = scene?.getObjectByName('VRM_Model');
+  if (vrmModel) {
+    console.log('🔍 Testing enhanced bone detection...');
+    const result = findVRMBonesAdvanced(vrmModel);
+    console.log('Bone detection result:', result);
+    return result;
+  }
+  return null;
+};
+
 // ===== CONSOLE MESSAGES =====
 console.log('🚀 Enhanced Solmate VRM Companion loaded!');
-console.log('📋 Debug commands: debugVRM(), debugVRMBones(), reloadVRM(), testVRMSystem()');
+console.log('📋 Debug commands: debugVRM(), debugVRMBones(), debugVRMPlugin(), reloadVRM(), testVRMSystem()');
 console.log('🎭 Animation commands: playEnhancedWave(), testTTS(), testChat()');
-console.log('🔧 Fixes: fixVRMTextures(), fixPrice()');
+console.log('🔧 Fixes: fixVRMTextures(), fixPrice(), testVRMBoneDetection()');
 console.log('👀 Move your mouse around to see head tracking!');
 
 // ===== START APPLICATION =====
