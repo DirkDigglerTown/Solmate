@@ -63,19 +63,6 @@
       ]
     },
     {
-      "source": "/assets/icons/favicon.ico",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=604800"
-        },
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        }
-      ]
-    },
-    {
       "source": "/(.*)",
       "headers": [
         {
@@ -83,13 +70,19 @@
           "value": "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://threejs.org https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:*; connect-src 'self' https://api.openai.com https://mainnet.helius-rpc.com https://lite-api.jup.ag wss://mainnet.helius-rpc.com; frame-ancestors 'self'; media-src 'self' blob:;"
         }
       ]
-    }
-  ],
-  "redirects": [
+    },
     {
-      "source": "/favicon.ico",
-      "destination": "/assets/icons/favicon.ico",
-      "statusCode": 301
+      "source": "/assets/**/*.{vrm,glb,gltf,bin,ico,png,json}",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
     }
   ],
   "functions": {
@@ -97,5 +90,12 @@
       "memory": 1024,
       "maxDuration": 30
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/favicon.ico",
+      "destination": "/assets/icons/favicon.ico",
+      "statusCode": 301
+    }
+  ]
 }
