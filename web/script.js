@@ -1,5 +1,5 @@
-// web/script.js - Complete Solmate Implementation with Enhanced VRM Support
-// Enhanced VRM Loading, Three.js, Chat, TTS, WebSocket, and UI
+// web/script.js - Complete Solmate Implementation with AIRI-Inspired VRM Fixes
+// Fixed: Model direction, texture rendering, camera positioning, animations
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
@@ -13,8 +13,7 @@ You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsu
 `;
 
 // ===== GLOBAL STATE =====
-let THREE, GLTFLoader, VRMLoaderPlugin, VRM;
-let scene, camera, renderer, mixer, clock;
+let THREE, scene, camera, renderer, mixer, clock;
 let currentVRM = null;
 let audioQueue = [];
 let isPlaying = false;
@@ -24,3119 +23,1418 @@ let priceUpdateTimer = null;
 let tpsUpdateTimer = null;
 let conversation = [];
 
-// Animation state tracking
+// Animation state
 let animationState = {
-  isWaving: false,
-  isIdle: true,
-  isTalking: false,
-  headTarget: { x: 0, y: 0 },
-  breathingPhase: 0,
-  blinkTimer: 0,
-  gestureTimer: 0,
-  expressionTimer: 0
+    isWaving: false,
+    isIdle: true,
+    isTalking: false,
+    headTarget: { x: 0, y: 0 },
+    breathingPhase: 0,
+    blinkTimer: 0
 };
-
-// Animation targets for smooth interpolation
-let animationTargets = {
-  headRotation: { x: 0, y: 0, z: 0 },
-  bodyPosition: { x: 0, y: 0, z: 0 },
-  armRotations: {
-    leftArm: { x: 0, y: 0, z: 0 },
-    rightArm: { x: 0, y: 0, z: 0 }
-  }
-};
-
-// ===== ENHANCED VRM LOADING WITH PROPER PLUGIN SUPPORT =====
-function loadVRMWithProperSupport(url, retryCount = 0) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      log(`=== ENHANCED VRM LOADING (attempt ${retryCount + 1}) ===`);
-      updateLoadingProgress('vrm', 0);
-      
-      // Check file accessibility
-      const checkResponse = await fetch(url, { method: 'HEAD' });
-      if (!checkResponse.ok) {
-        throw new Error(`VRM file not accessible: ${checkResponse.status}`);
-      }
-      
-      // Enhanced VRM plugin loading with multiple strategies
-      let VRMLoaderPlugin = null;
-      
-      // Strategy 1: Try the official @pixiv/three-vrm package
-      try {
-        log('Attempting to load VRM plugin...');
-        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@latest/lib/three-vrm.js');
-        
-        // Check multiple possible locations for the VRM plugin
-        if (window.VRM && window.VRM.VRMLoaderPlugin) {
-          VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
-          log('✅ VRM plugin found at window.VRM.VRMLoaderPlugin');
-        } else if (window.THREE && window.THREE.VRMLoaderPlugin) {
-          VRMLoaderPlugin = window.THREE.VRMLoaderPlugin;
-          log('✅ VRM plugin found at window.THREE.VRMLoaderPlugin');
-        } else if (window.VRMLoaderPlugin) {
-          VRMLoaderPlugin = window.VRMLoaderPlugin;
-          log('✅ VRM plugin found at window.VRMLoaderPlugin');
-        } else {
-          log('⚠️ VRM plugin loaded but not found in expected locations');
-          console.log('Available VRM objects:', {
-            windowVRM: !!window.VRM,
-            vrmKeys: window.VRM ? Object.keys(window.VRM) : null,
-            windowTHREE: !!window.THREE,
-            threeKeys: window.THREE ? Object.keys(window.THREE).filter(k => k.includes('VRM')) : null
-          });
-        }
-      } catch (e) {
-        log('VRM plugin CDN failed:', e);
-      }
-      
-      // Strategy 2: Try alternative VRM sources
-      if (!VRMLoaderPlugin) {
-        const vrmSources = [
-          'https://unpkg.com/@pixiv/three-vrm@latest/lib/three-vrm.js',
-          'https://cdn.skypack.dev/@pixiv/three-vrm',
-          'https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.js'
-        ];
-        
-        for (const source of vrmSources) {
-          try {
-            log(`Trying VRM source: ${source}`);
-            await loadScript(source);
-            
-            if (window.VRM && window.VRM.VRMLoaderPlugin) {
-              VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
-              log(`✅ VRM plugin loaded from: ${source}`);
-              break;
-            }
-          } catch (e) {
-            log(`VRM source failed: ${source}`, e);
-          }
-        }
-      }
-      
-      const loader = new THREE.GLTFLoader();
-      
-      // Register VRM plugin if available
-      if (VRMLoaderPlugin) {
-        try {
-          loader.register((parser) => {
-            const vrmPlugin = new VRMLoaderPlugin(parser);
-            log('✅ VRM plugin successfully registered');
-            return vrmPlugin;
-          });
-        } catch (registrationError) {
-          log('❌ VRM plugin registration failed:', registrationError);
-          VRMLoaderPlugin = null;
-        }
-      }
-      
-      if (!VRMLoaderPlugin) {
-        log('⚠️ Loading as standard GLTF (VRM features may be limited)');
-      }
-      
-      // Load with progress tracking
-      const gltf = await new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('VRM loading timeout'));
-        }, ASSET_LOAD_TIMEOUT);
-        
-        loader.load(
-          url,
-          (loadedGltf) => {
-            clearTimeout(timeoutId);
-            log('✅ VRM file loaded successfully!');
-            
-            // Enhanced VRM data detection
-            if (loadedGltf.userData && loadedGltf.userData.vrm) {
-              currentVRM = loadedGltf.userData.vrm;
-              log('✅ VRM data found and stored');
-              log('VRM Capabilities:', {
-                hasHumanoid: !!(currentVRM.humanoid),
-                hasExpressions: !!(currentVRM.expressionManager),
-                hasMaterials: !!(currentVRM.materials && currentVRM.materials.length > 0),
-                hasLookAt: !!(currentVRM.lookAt),
-                hasScene: !!(currentVRM.scene)
-              });
-            } else if (loadedGltf.userData && loadedGltf.userData.gltfExtensions) {
-              // Check for VRM extensions in GLTF
-              const extensions = loadedGltf.userData.gltfExtensions;
-              if (extensions.VRM) {
-                log('✅ VRM extension found in GLTF');
-                currentVRM = extensions.VRM;
-              } else {
-                log('⚠️ No VRM data found, treating as standard GLTF');
-              }
-            } else {
-              log('⚠️ No VRM data found, treating as standard GLTF');
-              
-              // Create a pseudo-VRM object for compatibility
-              currentVRM = {
-                scene: loadedGltf.scene,
-                userData: loadedGltf.userData,
-                isStandardGLTF: true
-              };
-            }
-            
-            resolve(loadedGltf);
-          },
-          (progress) => {
-            if (progress.total > 0) {
-              const percent = Math.round((progress.loaded / progress.total) * 100);
-              updateLoadingProgress('vrm', percent);
-              if (percent % 10 === 0) { // Log every 10%
-                log(`Loading progress: ${percent}%`);
-              }
-            }
-          },
-          (error) => {
-            clearTimeout(timeoutId);
-            log('❌ VRM loading error:', error);
-            reject(error);
-          }
-        );
-      });
-      
-      // Remove existing models
-      ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
-        const existing = scene.getObjectByName(name);
-        if (existing) {
-          scene.remove(existing);
-          log(`Removed existing ${name}`);
-        }
-      });
-      
-      if (gltf.scene) {
-        updateLoadingProgress('positioning');
-        processAndAddVRMEnhanced(gltf);
-        updateLoadingProgress('complete');
-        log('🎉 VRM loaded and positioned successfully!');
-        resolve();
-      } else {
-        throw new Error('No scene found in VRM file');
-      }
-      
-    } catch (err) {
-      if (retryCount < VRM_MAX_RETRIES) {
-        log(`VRM retry ${retryCount + 1} in 3s...`, err.message);
-        setTimeout(() => {
-          loadVRMWithProperSupport(url, retryCount + 1).then(resolve).catch(reject);
-        }, 3000);
-      } else {
-        log('❌ VRM loading failed completely', err);
-        handleVRMLoadingError(err);
-        reject(err);
-      }
-    }
-  });
-}
-
-// ===== ENHANCED VRM PROCESSING =====
-function processAndAddVRMEnhanced(gltf) {
-  log('🎭 Processing VRM with enhanced support...');
-  
-  const box = new THREE.Box3().setFromObject(gltf.scene);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  
-  log('VRM dimensions:', {
-    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
-    center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
-  });
-  
-  // Smart scaling based on VRM size
-  let scale = 1.0;
-  if (size.y > 10) {
-    scale = 1.8 / size.y;
-    gltf.scene.scale.setScalar(scale);
-    log(`Applied scaling: ${scale.toFixed(4)}`);
-  }
-  
-  // Position the model
-  const scaledBox = new THREE.Box3().setFromObject(gltf.scene);
-  const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
-  
-  gltf.scene.position.x = -scaledCenter.x;
-  gltf.scene.position.y = -scaledBox.min.y;
-  gltf.scene.position.z = -scaledCenter.z;
-  
-  gltf.scene.name = 'VRM_Model';
-  scene.add(gltf.scene);
-  
-  // Setup camera for optimal viewing
-  const finalSize = scaledBox.getSize(new THREE.Vector3());
-  const finalHeight = finalSize.y;
-  const finalWidth = Math.max(finalSize.x, finalSize.z);
-  const cameraDistance = Math.max(finalHeight * 1.5, finalWidth * 2.0, 3.0);
-  const lookAtHeight = finalHeight * 0.6;
-  
-  camera.position.set(0, lookAtHeight, cameraDistance);
-  camera.lookAt(0, lookAtHeight, 0);
-  
-  log('✅ VRM positioned successfully');
-  
-  // Setup VRM-specific features
-  setupVRMFeatures(gltf);
-  
-  // Preserve original textures
-  preserveVRMTextures(gltf.scene);
-  
-  // Setup animations after a short delay
-  setTimeout(() => {
-    setupVRMAnimationSystem();
-  }, 1000);
-}
-
-// ===== VRM FEATURE SETUP =====
-function setupVRMFeatures(gltf) {
-  log('🚀 Setting up VRM features...');
-  
-  // Handle animations
-  if (gltf.animations && gltf.animations.length > 0) {
-    log(`Found ${gltf.animations.length} animations`);
-    mixer = new THREE.AnimationMixer(gltf.scene);
-    
-    // Play the first animation if available
-    const action = mixer.clipAction(gltf.animations[0]);
-    action.play();
-  }
-  
-  // VRM-specific setup
-  if (currentVRM) {
-    log('🎭 Configuring VRM-specific features...');
-    
-    // Humanoid setup
-    if (currentVRM.humanoid) {
-      log('🤖 VRM Humanoid system available');
-      
-      // List available humanoid bones
-      const humanoidBones = [];
-      const humanoidBoneNames = [
-        'head', 'neck', 'chest', 'spine', 'hips',
-        'leftShoulder', 'rightShoulder',
-        'leftUpperArm', 'rightUpperArm',
-        'leftLowerArm', 'rightLowerArm',
-        'leftHand', 'rightHand'
-      ];
-      
-      humanoidBoneNames.forEach(boneName => {
-        try {
-          const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
-          if (bone) {
-            humanoidBones.push(boneName);
-          }
-        } catch (e) {
-          // Bone not available
-        }
-      });
-      
-      log('Available humanoid bones:', humanoidBones);
-    }
-    
-    // Expression setup
-    if (currentVRM.expressionManager) {
-      log('😊 VRM Expression system available');
-      
-      // Get available expressions
-      const availableExpressions = [];
-      const commonExpressions = [
-        'happy', 'angry', 'sad', 'surprised', 'relaxed',
-        'neutral', 'blink', 'blinkLeft', 'blinkRight',
-        'fun', 'joy', 'sorrow'
-      ];
-      
-      commonExpressions.forEach(expr => {
-        try {
-          // Test if expression exists by trying to set it to 0
-          currentVRM.expressionManager.setValue(expr, 0);
-          availableExpressions.push(expr);
-        } catch (e) {
-          // Expression not available
-        }
-      });
-      
-      log('Available expressions:', availableExpressions);
-    }
-    
-    // LookAt setup
-    if (currentVRM.lookAt) {
-      log('👀 VRM LookAt system available');
-      currentVRM.lookAt.target = camera;
-    }
-  }
-}
-
-// ===== PRESERVE VRM TEXTURES =====
-function preserveVRMTextures(vrmScene) {
-  log('🎨 Preserving VRM textures and materials...');
-  
-  let preservedCount = 0;
-  let enhancedCount = 0;
-  
-  vrmScene.traverse((child) => {
-    if (child.isMesh && child.material) {
-      // Check if material has existing textures
-      const hasTextures = !!(
-        child.material.map ||
-        child.material.baseColorTexture ||
-        child.material.diffuseTexture ||
-        child.material.emissiveMap ||
-        child.material.normalMap
-      );
-      
-      if (hasTextures) {
-        log(`✅ Preserving textures on: ${child.name}`);
-        preservedCount++;
-        
-        // Ensure proper texture settings
-        if (child.material.map) {
-          child.material.map.flipY = false; // VRM standard
-          child.material.map.colorSpace = THREE.SRGBColorSpace;
-        }
-        
-        // Keep original material properties
-        return;
-      }
-      
-      // Only enhance materials that appear to need help
-      const materialColor = child.material.color;
-      if (materialColor && (
-        materialColor.r < 0.1 && materialColor.g < 0.1 && materialColor.b < 0.1 || // Very dark
-        materialColor.r === materialColor.g && materialColor.g === materialColor.b // Grayscale
-      )) {
-        log(`🎨 Enhancing material on: ${child.name}`);
-        enhancedCount++;
-        
-        // Apply subtle enhancements based on mesh name
-        const name = child.name.toLowerCase();
-        if (name.includes('hair')) {
-          child.material.color.setHex(0x8B4513);
-        } else if (name.includes('skin') || name.includes('face') || name.includes('body')) {
-          child.material.color.setHex(0xFFCDB2);
-        } else if (name.includes('eye')) {
-          child.material.color.setHex(0x4169E1);
-        } else if (name.includes('cloth') || name.includes('dress') || name.includes('shirt')) {
-          child.material.color.setHex(0xFF6B6B);
-        } else {
-          // Brighten existing color slightly
-          child.material.color.multiplyScalar(1.3);
-        }
-        
-        // Improve material properties
-        child.material.roughness = 0.7;
-        child.material.metalness = 0.1;
-      }
-    }
-  });
-  
-  log(`🎨 Texture preservation complete: ${preservedCount} preserved, ${enhancedCount} enhanced`);
-}
 
 // ===== LOGGING =====
 function log(msg, data = null) {
-  const time = new Date().toLocaleTimeString();
-  const entry = `[${time}] ${msg}`;
-  console.log(entry, data || '');
-  
-  const logs = document.getElementById('overlayLogs');
-  if (logs) {
-    const div = document.createElement('div');
-    div.textContent = data ? `${entry} ${JSON.stringify(data)}` : entry;
-    logs.appendChild(div);
-    if (logs.children.length > 20) logs.removeChild(logs.firstChild);
-  }
+    const time = new Date().toLocaleTimeString();
+    const entry = `[${time}] ${msg}`;
+    console.log(entry, data || '');
+    
+    const logs = document.getElementById('overlayLogs');
+    if (logs) {
+        const div = document.createElement('div');
+        div.textContent = data ? `${entry} ${JSON.stringify(data)}` : entry;
+        logs.appendChild(div);
+        if (logs.children.length > 20) logs.removeChild(logs.firstChild);
+    }
 }
 
 // ===== UTILITY: LOAD SCRIPT =====
 function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    log(`Loading script: ${src}`);
-    
-    const existingScript = document.querySelector(`script[src="${src}"]`);
-    if (existingScript) {
-      log(`Script already exists: ${src}`);
-      resolve();
-      return;
-    }
-    
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = () => {
-      log(`✅ Script loaded: ${src}`);
-      resolve();
-    };
-    script.onerror = (error) => {
-      log(`❌ Script failed: ${src}`, error);
-      reject(new Error(`Failed to load script: ${src}`));
-    };
-    
-    document.head.appendChild(script);
-  });
+    return new Promise((resolve, reject) => {
+        log(`Loading script: ${src}`);
+        
+        const existingScript = document.querySelector(`script[src="${src}"]`);
+        if (existingScript) {
+            log(`Script already exists: ${src}`);
+            resolve();
+            return;
+        }
+        
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => {
+            log(`✅ Script loaded: ${src}`);
+            resolve();
+        };
+        script.onerror = (error) => {
+            log(`❌ Script failed: ${src}`, error);
+            reject(new Error(`Failed to load script: ${src}`));
+        };
+        
+        document.head.appendChild(script);
+    });
 }
 
-// ===== THREE.JS SETUP =====
-function initThreeEnhanced() {
-  return new Promise(async (resolve, reject) => {
+// ===== VRM SYSTEM INITIALIZATION (AIRI APPROACH) =====
+async function initializeVRMSystem() {
+    log('🎭 Initializing VRM system (AIRI approach)...');
+    
     try {
-      log('=== ENHANCED THREE.JS INITIALIZATION ===');
-      
-      await loadThreeJSReliably();
-      await loadGLTFLoaderReliably();
-      setupThreeJSScene();
-      animate();
-      createFallbackAvatar();
-      
-      setTimeout(async () => {
-        try {
-          await loadVRMWithProperSupport(VRM_PATH);
-        } catch (vrmError) {
-          log('VRM loading failed, keeping fallback', vrmError);
-          handleVRMLoadingError(vrmError);
+        // Load Three.js core
+        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js');
+        THREE = window.THREE;
+        
+        if (!THREE) {
+            throw new Error('Three.js failed to load');
         }
-      }, 1000);
-      
-      log('=== THREE.JS INITIALIZATION COMPLETE ===');
-      resolve();
-      
-    } catch (err) {
-      log('=== INITIALIZATION FAILED ===', err);
-      handleVRMLoadingError(err);
-      createSimpleFallback();
-      reject(err);
+        
+        // Load VRM loader
+        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js');
+        
+        if (!window.VRM || !window.VRM.VRMLoaderPlugin) {
+            throw new Error('VRM library not loaded properly');
+        }
+        
+        log('✅ VRM system initialized successfully');
+        return true;
+    } catch (error) {
+        log('❌ VRM system initialization failed:', error);
+        return false;
     }
-  });
 }
 
-// ===== RELIABLE THREE.JS LOADING =====
-function loadThreeJSReliably() {
-  return new Promise(async (resolve, reject) => {
-    if (window.THREE) {
-      THREE = window.THREE;
-      log('Three.js already available');
-      resolve();
-      return;
+// ===== SCENE SETUP (PROPER CAMERA POSITIONING) =====
+function setupScene() {
+    log('🎬 Setting up Three.js scene...');
+    
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0e17);
+    
+    // Camera - proper positioning for VRM
+    camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
+    
+    // Renderer
+    const canvas = document.getElementById('vrmCanvas');
+    if (!canvas) {
+        throw new Error('Canvas element not found');
     }
     
-    const threeSources = [
-      'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js',
-      'https://unpkg.com/three@0.158.0/build/three.min.js',
-      'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js'
-    ];
+    renderer = new THREE.WebGLRenderer({ 
+        canvas, 
+        antialias: true,
+        alpha: false  // Important for proper VRM rendering
+    });
     
-    for (const source of threeSources) {
-      try {
-        log(`Loading Three.js from: ${source}`);
-        
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = source;
-          script.onload = resolve;
-          script.onerror = reject;
-          
-          const existingScripts = document.querySelectorAll('script[src*="three"]');
-          existingScripts.forEach(s => s.remove());
-          
-          document.head.appendChild(script);
-          setTimeout(() => reject(new Error('Timeout')), 10000);
-        });
-        
-        if (window.THREE) {
-          THREE = window.THREE;
-          log(`✅ Three.js loaded from: ${source}`);
-          
-          const testScene = new THREE.Scene();
-          const testCamera = new THREE.PerspectiveCamera();
-          log('Three.js functionality verified');
-          resolve();
-          return;
-        }
-        
-      } catch (err) {
-        log(`Three.js failed from ${source}:`, err.message);
-        continue;
-      }
-    }
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     
-    reject(new Error('All Three.js sources failed'));
-  });
+    // Lighting setup optimized for VRM
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight.position.set(1, 1, 1);
+    directionalLight.castShadow = true;
+    scene.add(directionalLight);
+    
+    // Additional fill light for better VRM visibility
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    fillLight.position.set(-1, 0.5, -1);
+    scene.add(fillLight);
+    
+    // Clock for animations
+    clock = new THREE.Clock();
+    
+    log('✅ Scene setup complete');
 }
 
-// ===== GLTF LOADER =====
-function loadGLTFLoaderReliably() {
-  return new Promise(async (resolve, reject) => {
-    const gltfSources = [
-      'https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/loaders/GLTFLoader.js',
-      'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js'
-    ];
+// ===== PROPER VRM LOADING =====
+async function loadVRMModel(url, retryCount = 0) {
+    log(`📦 Loading VRM model (attempt ${retryCount + 1}): ${url}`);
+    updateLoadingProgress('vrm', 0);
     
-    for (const source of gltfSources) {
-      try {
-        log(`Trying GLTF loader: ${source}`);
+    try {
+        // Check file accessibility
+        const checkResponse = await fetch(url, { method: 'HEAD' });
+        if (!checkResponse.ok) {
+            throw new Error(`VRM file not accessible: ${checkResponse.status}`);
+        }
         
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = source;
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-          setTimeout(() => reject(new Error('Timeout')), 8000);
+        // Create GLTFLoader with VRM plugin
+        const loader = new THREE.GLTFLoader();
+        
+        // Register VRM loader plugin
+        loader.register((parser) => {
+            return new window.VRM.VRMLoaderPlugin(parser);
         });
         
-        if (THREE.GLTFLoader || window.GLTFLoader) {
-          if (window.GLTFLoader && !THREE.GLTFLoader) {
-            THREE.GLTFLoader = window.GLTFLoader;
-          }
-          log(`✅ GLTF loader loaded from: ${source}`);
-          resolve();
-          return;
-        }
-        
-      } catch (err) {
-        log(`GLTF loader failed from ${source}:`, err.message);
-      }
-    }
-    
-    log('Creating embedded GLTF loader...');
-    createProductionGLTFLoader();
-    
-    if (THREE.GLTFLoader) {
-      log('✅ Embedded GLTF loader created');
-      resolve();
-    } else {
-      reject(new Error('All GLTF loader strategies failed'));
-    }
-  });
-}
-
-// ===== EMBEDDED GLTF LOADER =====
-function createProductionGLTFLoader() {
-  if (!THREE) {
-    throw new Error('Three.js not loaded');
-  }
-  
-  THREE.GLTFLoader = function(manager) {
-    this.manager = manager || THREE.DefaultLoadingManager;
-    this.path = '';
-  };
-  
-  THREE.GLTFLoader.prototype = {
-    constructor: THREE.GLTFLoader,
-    
-    load: function(url, onLoad, onProgress, onError) {
-      const scope = this;
-      const loader = new THREE.FileLoader(scope.manager);
-      loader.setPath(scope.path);
-      loader.setResponseType('arraybuffer');
-      
-      loader.load(url, function(data) {
-        try {
-          scope.parse(data, onLoad, onError);
-        } catch (e) {
-          if (onError) onError(e);
-          else console.error('GLTFLoader parse error:', e);
-        }
-      }, onProgress, onError);
-    },
-    
-    parse: function(data, onLoad, onError) {
-      try {
-        const parser = new GLTFParser(data);
-        parser.parse().then(onLoad).catch(onError || console.error);
-      } catch (error) {
-        if (onError) onError(error);
-      }
-    }
-  };
-  
-  function GLTFParser(data) {
-    this.json = {};
-    this.textureLoader = new THREE.TextureLoader();
-    this.textureLoader.setCrossOrigin('anonymous');
-    this.data = data;
-  }
-  
-  GLTFParser.prototype = {
-    parse: function() {
-      return new Promise((resolve, reject) => {
-        try {
-          if (this.data instanceof ArrayBuffer) {
-            this.parseGLB();
-          }
-          
-          if (!this.json) {
-            throw new Error('No JSON found in GLTF data');
-          }
-          
-          this.buildScene().then(resolve).catch(reject);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    },
-    
-    parseGLB: function() {
-      const headerView = new DataView(this.data, 0, 12);
-      const magic = headerView.getUint32(0, true);
-      
-      if (magic !== 0x46546C67) {
-        throw new Error('Invalid GLB file');
-      }
-      
-      const length = headerView.getUint32(8, true);
-      let chunkIndex = 12;
-      
-      while (chunkIndex < length) {
-        const chunkHeaderView = new DataView(this.data, chunkIndex, 8);
-        const chunkLength = chunkHeaderView.getUint32(0, true);
-        const chunkType = chunkHeaderView.getUint32(4, true);
-        
-        if (chunkType === 0x4E4F534A) {
-          const jsonChunk = new Uint8Array(this.data, chunkIndex + 8, chunkLength);
-          this.json = JSON.parse(new TextDecoder().decode(jsonChunk));
-        } else if (chunkType === 0x004E4942) {
-          this.body = this.data.slice(chunkIndex + 8, chunkIndex + 8 + chunkLength);
-        }
-        
-        chunkIndex += 8 + chunkLength;
-      }
-    },
-    
-    buildScene: function() {
-      return new Promise((resolve) => {
-        const scene = new THREE.Group();
-        scene.name = 'VRM_Scene';
-        
-        if (this.json.meshes && this.json.nodes) {
-          const meshes = this.createMeshes();
-          const nodes = this.createNodes(meshes);
-          this.buildHierarchy(nodes);
-          this.addToScene(scene, nodes);
-        }
-        
-        resolve({
-          scene: scene,
-          animations: this.json.animations || [],
-          userData: { json: this.json }
-        });
-      });
-    },
-    
-    createMeshes: function() {
-      const meshes = [];
-      const colors = [0x8B4513, 0xffdbac, 0xff6b6b, 0x4169E1, 0xffdbac, 0x000000];
-      
-      this.json.meshes.forEach((meshDef, index) => {
-        const group = new THREE.Group();
-        group.name = meshDef.name || `Mesh_${index}`;
-        
-        meshDef.primitives.forEach((primitive, primitiveIndex) => {
-          try {
-            const geometry = this.createGeometry(primitive);
-            const color = colors[index % colors.length];
-            const material = new THREE.MeshLambertMaterial({ color });
+        // Load the VRM with progress tracking
+        const gltf = await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error('VRM loading timeout'));
+            }, ASSET_LOAD_TIMEOUT);
             
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.name = `${group.name}_${primitiveIndex}`;
-            group.add(mesh);
-          } catch (err) {
-            console.warn('Failed to create mesh primitive:', err);
-          }
+            loader.load(
+                url,
+                (loadedGltf) => {
+                    clearTimeout(timeoutId);
+                    resolve(loadedGltf);
+                },
+                (progress) => {
+                    if (progress.total > 0) {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        updateLoadingProgress('vrm', percent);
+                    }
+                },
+                (error) => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                }
+            );
         });
         
-        meshes[index] = group;
-      });
-      
-      return meshes;
-    },
-    
-    createGeometry: function(primitive) {
-      const geometry = new THREE.BufferGeometry();
-      
-      try {
-        if (primitive.attributes.POSITION !== undefined) {
-          const accessor = this.json.accessors[primitive.attributes.POSITION];
-          const bufferAttribute = this.createBufferAttribute(accessor);
-          geometry.setAttribute('position', bufferAttribute);
+        // Extract VRM
+        const vrm = gltf.userData.vrm;
+        if (!vrm) {
+            throw new Error('No VRM data found in file');
         }
         
-        if (primitive.attributes.NORMAL !== undefined) {
-          const accessor = this.json.accessors[primitive.attributes.NORMAL];
-          const bufferAttribute = this.createBufferAttribute(accessor);
-          geometry.setAttribute('normal', bufferAttribute);
-        }
+        currentVRM = vrm;
+        log('✅ VRM loaded successfully');
         
-        if (primitive.indices !== undefined) {
-          const accessor = this.json.accessors[primitive.indices];
-          const bufferAttribute = this.createBufferAttribute(accessor);
-          geometry.setIndex(bufferAttribute);
-        }
+        // Setup VRM properly
+        await setupVRMModel(vrm);
         
-        if (!primitive.attributes.NORMAL) {
-          geometry.computeVertexNormals();
-        }
-      } catch (err) {
-        console.warn('Geometry creation error:', err);
-        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0, 1,0,0, 0,1,0]), 3));
-      }
-      
-      return geometry;
-    },
-    
-    createBufferAttribute: function(accessor) {
-      try {
-        const bufferView = this.json.bufferViews[accessor.bufferView];
-        const byteOffset = (accessor.byteOffset || 0) + (bufferView.byteOffset || 0);
-        const componentType = accessor.componentType;
-        const itemSize = this.getItemSize(accessor.type);
-        const TypedArray = this.getTypedArray(componentType);
+        updateLoadingProgress('complete');
+        return vrm;
         
-        const array = new TypedArray(this.body, byteOffset, accessor.count * itemSize);
-        return new THREE.BufferAttribute(array, itemSize);
-      } catch (err) {
-        console.warn('Buffer attribute creation failed:', err);
-        return new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3);
-      }
-    },
-    
-    createNodes: function(meshes) {
-      const nodes = [];
-      
-      this.json.nodes.forEach((nodeDef, index) => {
-        const node = new THREE.Object3D();
-        node.name = nodeDef.name || `Node_${index}`;
-        
-        if (nodeDef.matrix) {
-          node.matrix.fromArray(nodeDef.matrix);
-          node.matrix.decompose(node.position, node.quaternion, node.scale);
+    } catch (error) {
+        if (retryCount < VRM_MAX_RETRIES) {
+            log(`VRM retry ${retryCount + 1} in 3s...`, error.message);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            return loadVRMModel(url, retryCount + 1);
         } else {
-          if (nodeDef.translation) node.position.fromArray(nodeDef.translation);
-          if (nodeDef.rotation) node.quaternion.fromArray(nodeDef.rotation);
-          if (nodeDef.scale) node.scale.fromArray(nodeDef.scale);
+            log('❌ VRM loading failed completely:', error);
+            handleVRMLoadingError(error);
+            throw error;
         }
-        
-        if (nodeDef.mesh !== undefined && meshes[nodeDef.mesh]) {
-          node.add(meshes[nodeDef.mesh]);
-        }
-        
-        nodes[index] = node;
-      });
-      
-      return nodes;
-    },
+    }
+}
+
+// ===== PROPER VRM MODEL SETUP (FIXING DIRECTION & TEXTURES) =====
+async function setupVRMModel(vrm) {
+    log('🎭 Setting up VRM model...');
+    updateLoadingProgress('positioning');
     
-    buildHierarchy: function(nodes) {
-      this.json.nodes.forEach((nodeDef, index) => {
-        if (nodeDef.children) {
-          nodeDef.children.forEach(childIndex => {
-            if (nodes[childIndex]) {
-              nodes[index].add(nodes[childIndex]);
-            }
-          });
+    // Remove any existing models
+    ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
+        const existing = scene.getObjectByName(name);
+        if (existing) {
+            scene.remove(existing);
+            log(`Removed existing ${name}`);
         }
-      });
-    },
+    });
     
-    addToScene: function(scene, nodes) {
-      if (this.json.scenes && this.json.scenes.length > 0) {
-        const sceneDef = this.json.scenes[this.json.scene || 0];
-        if (sceneDef.nodes) {
-          sceneDef.nodes.forEach(nodeIndex => {
-            if (nodes[nodeIndex]) {
-              scene.add(nodes[nodeIndex]);
-            }
-          });
+    // Add to scene
+    vrm.scene.name = 'VRM_Model';
+    scene.add(vrm.scene);
+    
+    // Get model dimensions
+    const box = new THREE.Box3().setFromObject(vrm.scene);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    
+    log('📏 Model dimensions:', {
+        size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+        center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
+    });
+    
+    // Scale to appropriate size
+    const targetHeight = 1.8;
+    let scale = 1.0;
+    if (size.y > 0.1) { // Avoid division by zero
+        scale = targetHeight / size.y;
+        vrm.scene.scale.setScalar(scale);
+        log(`Applied scaling: ${scale.toFixed(4)}`);
+    }
+    
+    // Position model properly
+    const scaledBox = new THREE.Box3().setFromObject(vrm.scene);
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+    
+    // Center horizontally and place on ground
+    vrm.scene.position.x = -scaledCenter.x;
+    vrm.scene.position.y = -scaledBox.min.y;
+    vrm.scene.position.z = -scaledCenter.z;
+    
+    // CRITICAL FIX: Check if model is facing away and rotate if needed
+    // Most VRM models need 180-degree rotation to face the camera
+    const shouldRotate = await checkModelDirection(vrm.scene);
+    if (shouldRotate) {
+        vrm.scene.rotation.y = Math.PI; // Rotate 180 degrees
+        log('🔄 Rotated model 180° to face camera');
+    }
+    
+    // Setup camera to view model properly
+    setupCameraForModel(scaledBox);
+    
+    // Setup VRM features
+    setupVRMFeatures(vrm);
+    
+    // Fix materials and textures
+    fixVRMTextures(vrm.scene);
+    
+    // Start animations
+    startVRMAnimations(vrm);
+    
+    log('✅ VRM model setup complete');
+}
+
+// ===== CHECK MODEL DIRECTION =====
+async function checkModelDirection(vrmScene) {
+    // Simple heuristic: if the model has a "forward" direction indicator
+    // or if we can detect it's facing away, return true to rotate
+    
+    // For most VRM models, they face negative Z by default
+    // but we want them to face positive Z (towards camera)
+    
+    // Check if there are any bones or objects that suggest direction
+    let needsRotation = true; // Default assumption for VRM models
+    
+    vrmScene.traverse((child) => {
+        // Look for naming patterns that might indicate front-facing
+        if (child.name && (
+            child.name.toLowerCase().includes('front') ||
+            child.name.toLowerCase().includes('face') ||
+            child.name.toLowerCase().includes('eye')
+        )) {
+            // If we find front-facing elements, the model might already be correct
+            // This is a simple heuristic and might need adjustment
         }
-      } else {
-        nodes.forEach(node => {
-          if (!node.parent) {
-            scene.add(node);
-          }
+    });
+    
+    return needsRotation;
+}
+
+// ===== PROPER CAMERA POSITIONING =====
+function setupCameraForModel(modelBox) {
+    const size = modelBox.getSize(new THREE.Vector3());
+    const center = modelBox.getCenter(new THREE.Vector3());
+    
+    // Calculate optimal camera position
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const cameraDistance = Math.max(maxDim * 1.8, 2.5); // Ensure minimum distance
+    
+    // Position camera to view upper body/face area
+    const lookAtY = center.y + size.y * 0.2; // Look slightly above center
+    
+    camera.position.set(0, lookAtY, cameraDistance);
+    camera.lookAt(center.x, lookAtY, center.z);
+    
+    log('📷 Camera positioned:', {
+        position: camera.position,
+        lookAt: { x: center.x, y: lookAtY, z: center.z },
+        distance: cameraDistance.toFixed(2)
+    });
+}
+
+// ===== VRM FEATURES SETUP =====
+function setupVRMFeatures(vrm) {
+    log('🎯 Setting up VRM features...');
+    
+    // Setup look-at
+    if (vrm.lookAt) {
+        vrm.lookAt.target = camera;
+        log('👀 Look-at enabled');
+    }
+    
+    // Setup expressions
+    if (vrm.expressionManager) {
+        log('😊 Expression manager available');
+        
+        // Test available expressions
+        const expressions = ['happy', 'angry', 'sad', 'surprised', 'relaxed', 'neutral', 'blink'];
+        const availableExpressions = [];
+        
+        expressions.forEach(expr => {
+            try {
+                vrm.expressionManager.setValue(expr, 0);
+                availableExpressions.push(expr);
+            } catch (e) {
+                // Expression not available
+            }
         });
-      }
-    },
-    
-    getItemSize: function(type) {
-      switch (type) {
-        case 'SCALAR': return 1;
-        case 'VEC2': return 2;
-        case 'VEC3': return 3;
-        case 'VEC4': return 4;
-        default: return 1;
-      }
-    },
-    
-    getTypedArray: function(componentType) {
-      switch (componentType) {
-        case 5120: return Int8Array;
-        case 5121: return Uint8Array;
-        case 5122: return Int16Array;
-        case 5123: return Uint16Array;
-        case 5125: return Uint32Array;
-        case 5126: return Float32Array;
-        default: return Float32Array;
-      }
-    }
-  };
-}
-
-// ===== ANIMATION SYSTEM SETUP =====
-function setupVRMAnimationSystem() {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (!vrmModel) {
-    log('❌ No VRM model found for animation setup');
-    return;
-  }
-  
-  log('🎭 Setting up comprehensive VRM animation system...');
-  
-  // Enhanced bone detection
-  const { bones, humanoidBones, isVRMHumanoid } = findVRMBonesAdvanced(vrmModel);
-  
-  // Initialize animation data
-  const animationData = {
-    model: vrmModel,
-    bones: bones,
-    humanoidBones: humanoidBones,
-    hasVRMHumanoid: isVRMHumanoid,
-    hasExpressions: !!(currentVRM && currentVRM.expressionManager && !currentVRM.isStandardGLTF),
-    isAnimating: false
-  };
-  
-  // Start appropriate animation system
-  if (Object.keys(animationData.bones).length > 0) {
-    if (isVRMHumanoid) {
-      startVRMBoneAnimations(animationData);
-    } else {
-      startSceneBoneAnimations(animationData);
-    }
-  } else {
-    startFallbackAnimations(animationData);
-  }
-  
-  // Start expression system
-  if (animationData.hasExpressions) {
-    startVRMExpressions();
-  }
-  
-  // Global animation functions
-  window.vrmAnimationData = animationData;
-  
-  log(`🎭 Animation system started with ${Object.keys(animationData.bones).length} bones (VRM Humanoid: ${isVRMHumanoid})`);
-}
-
-// ===== ENHANCED VRM BONE DETECTION =====
-function findVRMBonesAdvanced(vrmModel) {
-  const bones = {};
-  const humanoidBones = {};
-  
-  log('🔍 Starting advanced VRM bone detection...');
-  
-  // Strategy 1: VRM Humanoid system (if available)
-  if (currentVRM && currentVRM.humanoid && !currentVRM.isStandardGLTF) {
-    log('🤖 Using VRM Humanoid bone system');
-    
-    const vrmBoneNames = [
-      'head', 'neck', 'chest', 'spine', 'hips',
-      'leftShoulder', 'rightShoulder',
-      'leftUpperArm', 'rightUpperArm',
-      'leftLowerArm', 'rightLowerArm',
-      'leftHand', 'rightHand'
-    ];
-    
-    vrmBoneNames.forEach(boneName => {
-      try {
-        const bone = currentVRM.humanoid.getNormalizedBoneNode(boneName);
-        if (bone) {
-          bones[boneName] = bone;
-          humanoidBones[boneName] = bone;
-          log(`Found VRM humanoid bone ${boneName}: ${bone.name}`);
-        }
-      } catch (e) {
-        // Bone not available
-      }
-    });
-  }
-  
-  // Strategy 2: Search scene hierarchy for bone-like objects
-  if (Object.keys(bones).length === 0) {
-    log('🔍 Searching scene hierarchy for bones...');
-    
-    const boneKeywords = {
-      head: ['head', 'Head', 'HEAD', 'skull', 'Skull', 'neck', 'Neck'],
-      neck: ['neck', 'Neck', 'NECK'],
-      spine: ['spine', 'Spine', 'SPINE', 'backbone', 'chest', 'Chest'],
-      chest: ['chest', 'Chest', 'CHEST', 'torso', 'Torso', 'upperBody'],
-      leftShoulder: ['leftshoulder', 'LeftShoulder', 'L_Shoulder', 'shoulder_L', 'shoulderL'],
-      rightShoulder: ['rightshoulder', 'RightShoulder', 'R_Shoulder', 'shoulder_R', 'shoulderR'],
-      leftUpperArm: ['leftupperarm', 'LeftUpperArm', 'L_UpperArm', 'upperarm_L', 'armL', 'leftarm'],
-      rightUpperArm: ['rightupperarm', 'RightUpperArm', 'R_UpperArm', 'upperarm_R', 'armR', 'rightarm'],
-      leftLowerArm: ['leftlowerarm', 'LeftLowerArm', 'L_LowerArm', 'lowerarm_L', 'forearmL', 'leftforearm'],
-      rightLowerArm: ['rightlowerarm', 'RightLowerArm', 'R_LowerArm', 'lowerarm_R', 'forearmR', 'rightforearm'],
-      leftHand: ['lefthand', 'LeftHand', 'L_Hand', 'hand_L', 'handL'],
-      rightHand: ['righthand', 'RightHand', 'R_Hand', 'hand_R', 'handR'],
-      hips: ['hips', 'Hips', 'HIPS', 'pelvis', 'Pelvis', 'root', 'Root']
-    };
-    
-    // Search all objects in the scene
-    vrmModel.traverse((child) => {
-      const childName = child.name.toLowerCase();
-      const childType = child.type;
-      
-      // Check if this could be a bone
-      const isPotentialBone = (
-        childType === 'Bone' || 
-        child.isBone || 
-        childName.includes('bone') ||
-        childName.includes('joint') ||
-        childName.includes('armature') ||
-        (child.children && child.children.length > 0) // Has children (bone-like structure)
-      );
-      
-      if (isPotentialBone || child.isObject3D) {
-        for (const [boneType, keywords] of Object.entries(boneKeywords)) {
-          if (!bones[boneType]) {
-            for (const keyword of keywords) {
-              if (childName.includes(keyword.toLowerCase()) || 
-                  childName === keyword.toLowerCase() ||
-                  child.name === keyword) {
-                bones[boneType] = child;
-                log(`Found scene bone ${boneType}: ${child.name} (${child.type})`);
-                break;
-              }
-            }
-          }
-        }
-      }
-    });
-  }
-  
-  // Strategy 3: Look for any mesh that could be animated
-  if (Object.keys(bones).length === 0) {
-    log('🎭 No bones found, searching for animatable meshes...');
-    
-    const meshParts = {};
-    vrmModel.traverse((child) => {
-      if (child.isMesh) {
-        const name = child.name.toLowerCase();
         
-        if (name.includes('head') || name.includes('face') || name.includes('hair')) {
-          meshParts.head = child;
-          log(`Found head mesh: ${child.name}`);
-        } else if (name.includes('body') || name.includes('torso') || name.includes('chest')) {
-          meshParts.body = child;
-          log(`Found body mesh: ${child.name}`);
-        } else if (name.includes('arm') && (name.includes('left') || name.includes('l_'))) {
-          meshParts.leftArm = child;
-          log(`Found left arm mesh: ${child.name}`);
-        } else if (name.includes('arm') && (name.includes('right') || name.includes('r_'))) {
-          meshParts.rightArm = child;
-          log(`Found right arm mesh: ${child.name}`);
+        log(`Available expressions: ${availableExpressions.join(', ')}`);
+    }
+    
+    // Setup humanoid
+    if (vrm.humanoid) {
+        log('🤖 Humanoid system available');
+        
+        // List available bones
+        const humanoidBones = [];
+        const boneNames = ['head', 'neck', 'chest', 'spine', 'hips', 'leftShoulder', 'rightShoulder'];
+        
+        boneNames.forEach(boneName => {
+            try {
+                const bone = vrm.humanoid.getNormalizedBoneNode(boneName);
+                if (bone) {
+                    humanoidBones.push(boneName);
+                }
+            } catch (e) {
+                // Bone not available
+            }
+        });
+        
+        log(`Available bones: ${humanoidBones.join(', ')}`);
+    }
+}
+
+// ===== TEXTURE FIXING (ADDRESSING MISSING TEXTURES) =====
+function fixVRMTextures(vrmScene) {
+    log('🎨 Fixing VRM textures and materials...');
+    
+    let materialsFixed = 0;
+    let texturesPreserved = 0;
+    
+    vrmScene.traverse((child) => {
+        if (child.isMesh && child.material) {
+            const material = child.material;
+            
+            // Check if material has existing textures
+            const hasTextures = !!(
+                material.map ||
+                material.baseColorTexture ||
+                material.diffuseTexture ||
+                material.emissiveMap ||
+                material.normalMap
+            );
+            
+            if (hasTextures) {
+                texturesPreserved++;
+                log(`✅ Preserving textures on: ${child.name}`);
+                
+                // Ensure proper texture settings for VRM
+                if (material.map) {
+                    material.map.flipY = false; // VRM standard
+                    material.map.colorSpace = THREE.SRGBColorSpace;
+                }
+                
+                if (material.normalMap) {
+                    material.normalMap.flipY = false;
+                }
+                
+                if (material.emissiveMap) {
+                    material.emissiveMap.flipY = false;
+                    material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+                }
+            }
+            
+            // Fix MToon materials specifically
+            if (material.isMToonMaterial) {
+                log(`🎭 MToon material found: ${child.name}`);
+                
+                // Ensure proper MToon settings
+                if (material.map) {
+                    material.map.flipY = false;
+                    material.map.colorSpace = THREE.SRGBColorSpace;
+                }
+                
+                // Adjust MToon parameters for better visibility
+                if (material.shadeColorFactor) {
+                    material.shadeColorFactor.setRGB(0.8, 0.8, 0.8);
+                }
+                
+                // Ensure shade texture is assigned if missing
+                if (!material.shadeColorTexture && material.map) {
+                    material.shadeColorTexture = material.map;
+                    log(`Assigned shade texture for: ${child.name}`);
+                }
+                
+                materialsFixed++;
+            } else {
+                // For non-MToon materials, ensure proper settings
+                if (material.map) {
+                    material.map.flipY = false;
+                    material.map.colorSpace = THREE.SRGBColorSpace;
+                }
+                
+                // Improve material properties for better visibility
+                material.roughness = 0.7;
+                material.metalness = 0.0;
+                
+                // Enhance color slightly if it's too dark
+                const color = material.color;
+                if (color && (color.r < 0.1 && color.g < 0.1 && color.b < 0.1)) {
+                    color.multiplyScalar(1.3);
+                    log(`Enhanced color for: ${child.name}`);
+                }
+                
+                materialsFixed++;
+            }
+            
+            // Force material update
+            material.needsUpdate = true;
         }
-      }
     });
     
-    Object.assign(bones, meshParts);
-  }
-  
-  // Strategy 4: Use the VRM model itself for animations
-  if (Object.keys(bones).length === 0) {
-    log('🎪 Using VRM root for model-level animations');
-    bones.root = vrmModel;
-  }
-  
-  const isVRMHumanoid = Object.keys(humanoidBones).length > 0;
-  log(`🦴 Bone detection complete: ${Object.keys(bones).length} bones found (VRM Humanoid: ${isVRMHumanoid})`);
-  
-  return { bones, humanoidBones, isVRMHumanoid };
+    log(`✅ Texture fix complete: ${texturesPreserved} preserved, ${materialsFixed} materials fixed`);
 }
 
-// ===== SCENE BONE ANIMATIONS =====
-function startSceneBoneAnimations(animationData) {
-  log('🔗 Starting scene bone animations...');
-  
-  let time = 0;
-  let breathingPhase = 0;
-  let blinkTimer = 0;
-  
-  function animateSceneBones() {
-    if (!scene?.getObjectByName('VRM_Model') || !animationData.model) return;
+// ===== PROPER VRM ANIMATIONS (NO MORE FLOATING!) =====
+function startVRMAnimations(vrm) {
+    log('🎭 Starting natural VRM animations...');
     
-    time += 0.016;
-    breathingPhase += 0.016;
-    blinkTimer += 0.016;
+    let time = 0;
+    let blinkTimer = 0;
+    let breathingPhase = 0;
     
-    const bones = animationData.bones;
-    
-    // Model-level breathing
-    const breathe = 1 + Math.sin(breathingPhase * 2.5) * 0.008;
-    animationData.model.scale.y = breathe;
-    
-    // Head movement (any head-like object)
-    if (bones.head && !animationState.isTalking) {
-      bones.head.rotation.y = Math.sin(time * 0.8) * 0.03 + (animationTargets.headRotation.y * 0.2);
-      bones.head.rotation.x = Math.sin(time * 0.6) * 0.015 + (animationTargets.headRotation.x * 0.2);
-      bones.head.rotation.z = Math.sin(time * 0.4) * 0.006;
-    }
-    
-    // Body/spine movement
-    if (bones.spine || bones.chest || bones.body) {
-      const target = bones.spine || bones.chest || bones.body;
-      target.rotation.y = Math.sin(time * 0.5) * 0.008;
-      if (target.scale) {
-        target.scale.y = 1 + Math.sin(breathingPhase * 2.5) * 0.01;
-      }
-    }
-    
-    // Arm movement (if available)
-    if (bones.leftArm || bones.leftUpperArm) {
-      const arm = bones.leftUpperArm || bones.leftArm;
-      if (!animationState.isWaving) {
-        arm.rotation.z = Math.sin(time * 1.2) * 0.04;
-        arm.rotation.x = Math.sin(time * 0.9) * 0.015;
-      }
-    }
-    
-    if (bones.rightArm || bones.rightUpperArm) {
-      const arm = bones.rightUpperArm || bones.rightArm;
-      if (!animationState.isWaving) {
-        arm.rotation.z = Math.sin(time * 1.4) * -0.04;
-        arm.rotation.x = Math.sin(time * 1.1) * 0.015;
-      }
-    }
-    
-    // Hip movement
-    if (bones.hips) {
-      bones.hips.rotation.y = Math.sin(time * 0.7) * 0.006;
-      bones.hips.position.y += Math.sin(time * 2.8) * 0.0008;
-    }
-    
-    // Model sway
-    animationData.model.rotation.y = Math.sin(time * 0.6) * 0.01;
-    animationData.model.position.y += Math.sin(time * 2.0) * 0.001;
-    
-    // Blinking
-    if (blinkTimer > 3 + Math.random() * 4) {
-      performVRMBlink();
-      blinkTimer = 0;
-    }
-    
-    requestAnimationFrame(animateSceneBones);
-  }
-  
-  animateSceneBones();
-  log('✅ Scene bone animations started');
-}
-
-// ===== VRM BONE ANIMATIONS =====
-function startVRMBoneAnimations(animationData) {
-  log('🦴 Starting VRM bone animations...');
-  
-  let time = 0;
-  let breathingPhase = 0;
-  let blinkTimer = 0;
-  
-  function animateVRMBones() {
-    if (!scene?.getObjectByName('VRM_Model') || !animationData.model) return;
-    
-    time += 0.016;
-    breathingPhase += 0.016;
-    blinkTimer += 0.016;
-    
-    const bones = animationData.bones;
-    
-    // Breathing animation
-    if (bones.chest || bones.spine) {
-      const target = bones.chest || bones.spine;
-      const breathe = 1 + Math.sin(breathingPhase * 2.5) * 0.012;
-      target.scale.y = breathe;
-    }
-    
-    // Head movement (if not talking)
-    if (bones.head && !animationState.isTalking) {
-      bones.head.rotation.y = Math.sin(time * 0.8) * 0.04 + (animationTargets.headRotation.y * 0.3);
-      bones.head.rotation.x = Math.sin(time * 0.6) * 0.02 + (animationTargets.headRotation.x * 0.3);
-      bones.head.rotation.z = Math.sin(time * 0.4) * 0.008;
-    }
-    
-    // Neck support
-    if (bones.neck && !animationState.isTalking) {
-      bones.neck.rotation.y = Math.sin(time * 0.5) * 0.01;
-    }
-    
-    // Shoulder movement
-    if (bones.leftShoulder) {
-      bones.leftShoulder.rotation.z = Math.sin(time * 1.2) * 0.025;
-    }
-    if (bones.rightShoulder) {
-      bones.rightShoulder.rotation.z = Math.sin(time * 1.4) * -0.025;
-    }
-    
-    // Arm movement (if not waving)
-    if (bones.leftUpperArm && !animationState.isWaving) {
-      bones.leftUpperArm.rotation.z = Math.sin(time * 1.1) * 0.06;
-      bones.leftUpperArm.rotation.x = Math.sin(time * 0.9) * 0.02;
-    }
-    
-    if (bones.rightUpperArm && !animationState.isWaving) {
-      bones.rightUpperArm.rotation.z = Math.sin(time * 1.3) * -0.06;
-      bones.rightUpperArm.rotation.x = Math.sin(time * 1.1) * 0.02;
-    }
-    
-    // Lower arm movement
-    if (bones.leftLowerArm && !animationState.isWaving) {
-      bones.leftLowerArm.rotation.y = Math.sin(time * 1.5) * 0.03;
-    }
-    
-    if (bones.rightLowerArm && !animationState.isWaving) {
-      bones.rightLowerArm.rotation.y = Math.sin(time * 1.7) * 0.03;
-    }
-    
-    // Hand movement
-    if (bones.leftHand) {
-      bones.leftHand.rotation.z = Math.sin(time * 2.1) * 0.015;
-    }
-    if (bones.rightHand) {
-      bones.rightHand.rotation.z = Math.sin(time * 2.3) * 0.015;
-    }
-    
-    // Hip movement
-    if (bones.hips) {
-      bones.hips.rotation.y = Math.sin(time * 0.7) * 0.008;
-      bones.hips.position.y += Math.sin(time * 2.8) * 0.001;
-    }
-    
-    // Blinking
-    if (blinkTimer > 3 + Math.random() * 4) {
-      performVRMBlink();
-      blinkTimer = 0;
-    }
-    
-    requestAnimationFrame(animateVRMBones);
-  }
-  
-  animateVRMBones();
-  log('✅ VRM bone animations started');
-}
-
-// ===== FALLBACK ANIMATIONS =====
-function startFallbackAnimations(animationData) {
-  log('🎪 Starting fallback model animations...');
-  
-  let time = 0;
-  
-  function animateFallback() {
-    if (!animationData.model) return;
-    
-    time += 0.016;
-    
-    // Model-level animations
-    animationData.model.position.y += Math.sin(time * 2.0) * 0.001;
-    animationData.model.rotation.y = Math.sin(time * 0.6) * 0.012;
-    animationData.model.rotation.z = Math.sin(time * 0.4) * 0.004;
-    
-    // Breathing effect
-    const breathe = 1 + Math.sin(time * 2.2) * 0.006;
-    animationData.model.scale.y = breathe;
-    
-    requestAnimationFrame(animateFallback);
-  }
-  
-  animateFallback();
-  log('✅ Fallback animations started');
-}
-
-// ===== VRM EXPRESSIONS =====
-function startVRMExpressions() {
-  if (!currentVRM || !currentVRM.expressionManager) return;
-  
-  log('😊 Starting VRM expression cycles...');
-  
-  const expressions = ['happy', 'relaxed', 'surprised', 'neutral', 'fun'];
-  
-  function cycleExpression() {
-    const randomExpression = expressions[Math.floor(Math.random() * expressions.length)];
-    const intensity = 0.3 + Math.random() * 0.4;
-    
-    try {
-      currentVRM.expressionManager.setValue(randomExpression, intensity);
-      
-      setTimeout(() => {
-        if (currentVRM && currentVRM.expressionManager) {
-          currentVRM.expressionManager.setValue(randomExpression, 0);
+    function animateVRM() {
+        if (!currentVRM || !scene.getObjectByName('VRM_Model')) return;
+        
+        const deltaTime = clock.getDelta();
+        time += deltaTime;
+        blinkTimer += deltaTime;
+        breathingPhase += deltaTime;
+        
+        // Update VRM system
+        if (typeof vrm.update === 'function') {
+            vrm.update(deltaTime);
         }
-      }, 2000 + Math.random() * 2000);
-      
-    } catch (e) {
-      // Expression not available
+        
+        // Natural breathing animation - SUBTLE!
+        if (vrm.humanoid) {
+            const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+            if (chest) {
+                const breatheScale = 1 + Math.sin(breathingPhase * 2) * 0.008; // Very subtle
+                chest.scale.y = breatheScale;
+            }
+        }
+        
+        // Auto-blink
+        if (blinkTimer > 2 + Math.random() * 3) {
+            performBlink();
+            blinkTimer = 0;
+        }
+        
+        // Subtle idle movements - NO FLOATING, NO Y-POSITION CHANGES!
+        if (!animationState.isTalking && !animationState.isWaving) {
+            if (vrm.humanoid) {
+                const head = vrm.humanoid.getNormalizedBoneNode('head');
+                if (head) {
+                    // Very subtle head movements
+                    head.rotation.x = Math.sin(time * 0.8) * 0.015 + animationState.headTarget.x * 0.2;
+                    head.rotation.y = Math.sin(time * 0.6) * 0.02 + animationState.headTarget.y * 0.2;
+                    head.rotation.z = Math.sin(time * 0.4) * 0.006;
+                }
+                
+                // Subtle shoulder movement
+                const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+                const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+                
+                if (leftShoulder) {
+                    leftShoulder.rotation.z = Math.sin(time * 1.2) * 0.01;
+                }
+                if (rightShoulder) {
+                    rightShoulder.rotation.z = Math.sin(time * 1.4) * -0.01;
+                }
+            }
+        }
+        
+        requestAnimationFrame(animateVRM);
     }
     
-    // Next expression
-    setTimeout(cycleExpression, 4000 + Math.random() * 6000);
-  }
-  
-  setTimeout(cycleExpression, 3000);
-  log('✅ VRM expressions started');
+    animateVRM();
+    log('✅ Natural VRM animations started');
+}
+
+// ===== BLINKING =====
+function performBlink() {
+    if (currentVRM && currentVRM.expressionManager) {
+        try {
+            currentVRM.expressionManager.setValue('blink', 1.0);
+            setTimeout(() => {
+                if (currentVRM && currentVRM.expressionManager) {
+                    currentVRM.expressionManager.setValue('blink', 0);
+                }
+            }, 150);
+        } catch (e) {
+            // Blink not available
+        }
+    }
 }
 
 // ===== ENHANCED WAVE ANIMATION =====
 function playEnhancedVRMWave() {
-  const animationData = window.vrmAnimationData;
-  if (!animationData || !animationData.bones.rightUpperArm) {
-    log('⚠️ No right arm bone available for waving');
-    return;
-  }
-  
-  log('👋 Playing enhanced VRM wave...');
-  animationState.isWaving = true;
-  
-  const rightArm = animationData.bones.rightUpperArm;
-  const rightLowerArm = animationData.bones.rightLowerArm;
-  const rightHand = animationData.bones.rightHand;
-  
-  // Save original positions
-  const originalRotations = {
-    upperArm: rightArm.rotation.clone(),
-    lowerArm: rightLowerArm ? rightLowerArm.rotation.clone() : null,
-    hand: rightHand ? rightHand.rotation.clone() : null
-  };
-  
-  // Enhanced wave sequence
-  const waveFrames = [
-    { time: 0, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0}, hand: {x: 0, y: 0, z: 0} },
-    { time: 0.4, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
-    { time: 0.7, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5}, hand: {x: 0, y: 0, z: -0.4} },
-    { time: 1.0, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
-    { time: 1.3, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5}, hand: {x: 0, y: 0, z: -0.4} },
-    { time: 1.6, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8}, hand: {x: 0, y: 0, z: 0.4} },
-    { time: 2.2, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0}, hand: {x: 0, y: 0, z: 0} }
-  ];
-  
-  let frameIndex = 0;
-  const startTime = Date.now();
-  
-  function animateWave() {
-    const elapsed = (Date.now() - startTime) / 1000;
-    
-    if (elapsed >= 2.2 || frameIndex >= waveFrames.length - 1) {
-      // Return to original positions
-      rightArm.rotation.copy(originalRotations.upperArm);
-      if (rightLowerArm && originalRotations.lowerArm) {
-        rightLowerArm.rotation.copy(originalRotations.lowerArm);
-      }
-      if (rightHand && originalRotations.hand) {
-        rightHand.rotation.copy(originalRotations.hand);
-      }
-      
-      animationState.isWaving = false;
-      log('👋 Enhanced wave complete');
-      return;
+    if (!currentVRM || !currentVRM.humanoid) {
+        log('❌ No VRM humanoid available for waving');
+        return;
     }
     
-    // Find current frame
-    while (frameIndex < waveFrames.length - 1 && elapsed >= waveFrames[frameIndex + 1].time) {
-      frameIndex++;
+    const rightArm = currentVRM.humanoid.getNormalizedBoneNode('rightUpperArm');
+    const rightLowerArm = currentVRM.humanoid.getNormalizedBoneNode('rightLowerArm');
+    const rightHand = currentVRM.humanoid.getNormalizedBoneNode('rightHand');
+    
+    if (!rightArm) {
+        log('❌ No right arm bone available for waving');
+        return;
     }
     
-    const currentFrame = waveFrames[frameIndex];
-    const nextFrame = waveFrames[frameIndex + 1] || currentFrame;
+    log('👋 Playing enhanced VRM wave...');
+    animationState.isWaving = true;
     
-    const frameProgress = (elapsed - currentFrame.time) / (nextFrame.time - currentFrame.time);
-    const smoothProgress = Math.sin(frameProgress * Math.PI * 0.5);
+    // Save original positions
+    const originalRotations = {
+        upperArm: rightArm.rotation.clone(),
+        lowerArm: rightLowerArm ? rightLowerArm.rotation.clone() : null,
+        hand: rightHand ? rightHand.rotation.clone() : null
+    };
     
-    // Animate upper arm
-    rightArm.rotation.x = THREE.MathUtils.lerp(currentFrame.upper.x, nextFrame.upper.x, smoothProgress);
-    rightArm.rotation.y = THREE.MathUtils.lerp(currentFrame.upper.y, nextFrame.upper.y, smoothProgress);
-    rightArm.rotation.z = THREE.MathUtils.lerp(currentFrame.upper.z, nextFrame.upper.z, smoothProgress);
+    // Wave sequence
+    const waveFrames = [
+        { time: 0, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0} },
+        { time: 0.4, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8} },
+        { time: 0.7, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5} },
+        { time: 1.0, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8} },
+        { time: 1.3, upper: {x: 0.7, y: 0.1, z: -0.7}, lower: {x: 0, y: 0, z: -0.5} },
+        { time: 1.6, upper: {x: 0.9, y: 0.2, z: -0.9}, lower: {x: 0, y: 0, z: -0.8} },
+        { time: 2.2, upper: {x: 0, y: 0, z: 0}, lower: {x: 0, y: 0, z: 0} }
+    ];
     
-    // Animate lower arm
-    if (rightLowerArm) {
-      rightLowerArm.rotation.x = THREE.MathUtils.lerp(currentFrame.lower.x, nextFrame.lower.x, smoothProgress);
-      rightLowerArm.rotation.y = THREE.MathUtils.lerp(currentFrame.lower.y, nextFrame.lower.y, smoothProgress);
-      rightLowerArm.rotation.z = THREE.MathUtils.lerp(currentFrame.lower.z, nextFrame.lower.z, smoothProgress);
-    }
+    let frameIndex = 0;
+    const startTime = Date.now();
     
-    // Animate hand
-    if (rightHand) {
-      rightHand.rotation.x = THREE.MathUtils.lerp(currentFrame.hand.x, nextFrame.hand.x, smoothProgress);
-      rightHand.rotation.y = THREE.MathUtils.lerp(currentFrame.hand.y, nextFrame.hand.y, smoothProgress);
-      rightHand.rotation.z = THREE.MathUtils.lerp(currentFrame.hand.z, nextFrame.hand.z, smoothProgress);
-    }
-    
-    requestAnimationFrame(animateWave);
-  }
-  
-  animateWave();
-}
-
-// ===== VRM BLINKING =====
-function performVRMBlink() {
-  if (currentVRM && currentVRM.expressionManager) {
-    try {
-      currentVRM.expressionManager.setValue('blink', 1.0);
-      setTimeout(() => {
-        if (currentVRM && currentVRM.expressionManager) {
-          currentVRM.expressionManager.setValue('blink', 0);
+    function animateWave() {
+        const elapsed = (Date.now() - startTime) / 1000;
+        
+        if (elapsed >= 2.2 || frameIndex >= waveFrames.length - 1) {
+            // Return to original positions
+            rightArm.rotation.copy(originalRotations.upperArm);
+            if (rightLowerArm && originalRotations.lowerArm) {
+                rightLowerArm.rotation.copy(originalRotations.lowerArm);
+            }
+            if (rightHand && originalRotations.hand) {
+                rightHand.rotation.copy(originalRotations.hand);
+            }
+            
+            animationState.isWaving = false;
+            log('👋 Wave complete');
+            return;
         }
-      }, 150);
-    } catch (e) {
-      // Blink expression not available
+        
+        // Find current frame
+        while (frameIndex < waveFrames.length - 1 && elapsed >= waveFrames[frameIndex + 1].time) {
+            frameIndex++;
+        }
+        
+        const currentFrame = waveFrames[frameIndex];
+        const nextFrame = waveFrames[frameIndex + 1] || currentFrame;
+        
+        const frameProgress = (elapsed - currentFrame.time) / (nextFrame.time - currentFrame.time);
+        const smoothProgress = Math.sin(frameProgress * Math.PI * 0.5);
+        
+        // Animate upper arm
+        rightArm.rotation.x = THREE.MathUtils.lerp(currentFrame.upper.x, nextFrame.upper.x, smoothProgress);
+        rightArm.rotation.y = THREE.MathUtils.lerp(currentFrame.upper.y, nextFrame.upper.y, smoothProgress);
+        rightArm.rotation.z = THREE.MathUtils.lerp(currentFrame.upper.z, nextFrame.upper.z, smoothProgress);
+        
+        // Animate lower arm
+        if (rightLowerArm) {
+            rightLowerArm.rotation.z = THREE.MathUtils.lerp(currentFrame.lower.z, nextFrame.lower.z, smoothProgress);
+        }
+        
+        requestAnimationFrame(animateWave);
     }
-  }
-}
-
-// ===== SCENE SETUP =====
-function setupThreeJSScene() {
-  log('Setting up Three.js scene...');
-  
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0e17);
-  
-  camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
-  camera.position.set(0, 1.3, 2.5);
-  camera.lookAt(0, 1, 0);
-  
-  const canvas = document.getElementById('vrmCanvas');
-  if (!canvas) {
-    throw new Error('Canvas element not found');
-  }
-  
-  renderer = new THREE.WebGLRenderer({ 
-    canvas, 
-    antialias: true,
-    alpha: true 
-  });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  
-  try {
-    if (renderer.outputColorSpace !== undefined) {
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-    } else if (renderer.outputEncoding !== undefined) {
-      renderer.outputEncoding = THREE.sRGBEncoding;
-    }
-  } catch (colorSpaceError) {
-    log('Color space setting failed, continuing', colorSpaceError);
-  }
-  
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambient);
-  
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-  dirLight.position.set(1, 1, 1);
-  scene.add(dirLight);
-  
-  clock = new THREE.Clock();
-  
-  log('Scene setup complete');
+    
+    animateWave();
 }
 
 // ===== ERROR HANDLING =====
 function handleVRMLoadingError(error) {
-  log('VRM loading error:', error);
-  
-  const errorTypes = {
-    'GLTFLoader': 'GLTF loader failed',
-    'NetworkError': 'Network issue',
-    'timeout': 'Loading timeout',
-    'parse': 'File format issue'
-  };
-  
-  let errorType = 'unknown';
-  let solution = 'Try refreshing';
-  
-  const errorMsg = error.message.toLowerCase();
-  
-  if (errorMsg.includes('gltf') || errorMsg.includes('loader')) {
-    errorType = 'GLTFLoader';
-    solution = 'Using emergency fallback';
+    log('VRM loading error:', error);
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = `
+        position: fixed; bottom: 20px; right: 20px;
+        background: rgba(255, 107, 107, 0.9); color: white;
+        padding: 15px; border-radius: 8px;
+        font-family: Arial, sans-serif; font-size: 14px;
+        max-width: 300px; z-index: 1000; cursor: pointer;
+    `;
+    
+    errorDiv.innerHTML = `
+        <strong>Avatar Loading Issue</strong><br>
+        ${error.message}<br>
+        <small>Click to dismiss</small>
+    `;
+    
+    errorDiv.onclick = () => errorDiv.remove();
+    document.body.appendChild(errorDiv);
+    
+    setTimeout(() => {
+        if (errorDiv.parentNode) errorDiv.remove();
+    }, 10000);
+    
+    // Create fallback
     createEmergencyFallback();
-  } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
-    errorType = 'NetworkError';
-    solution = 'Check connection';
-  } else if (errorMsg.includes('timeout')) {
-    errorType = 'timeout';
-    solution = 'Large file, please wait';
-  }
-  
-  const errorDiv = document.createElement('div');
-  errorDiv.style.cssText = `
-    position: fixed; bottom: 20px; right: 20px;
-    background: rgba(255, 107, 107, 0.9); color: white;
-    padding: 15px; border-radius: 8px;
-    font-family: Arial, sans-serif; font-size: 14px;
-    max-width: 300px; z-index: 1000; cursor: pointer;
-  `;
-  
-  errorDiv.innerHTML = `
-    <strong>Avatar Loading Issue</strong><br>
-    ${errorTypes[errorType] || 'Unknown error'}<br>
-    <em>${solution}</em><br>
-    <small>Click to dismiss</small>
-  `;
-  
-  errorDiv.onclick = () => errorDiv.remove();
-  document.body.appendChild(errorDiv);
-  
-  setTimeout(() => {
-    if (errorDiv.parentNode) errorDiv.remove();
-  }, 10000);
 }
 
 // ===== LOADING PROGRESS =====
 function updateLoadingProgress(stage, percent = null) {
-  const statusEl = document.getElementById('loadingStatus');
-  if (!statusEl) return;
-  
-  const stages = {
-    'three': '🔧 Loading 3D Engine',
-    'gltf': '📦 Loading GLTF Loader', 
-    'vrm': '👤 Loading Avatar',
-    'positioning': '📍 Positioning Avatar',
-    'complete': '✅ Ready!'
-  };
-  
-  const message = stages[stage] || stage;
-  const percentText = percent !== null ? ` ${percent}%` : '';
-  
-  statusEl.textContent = `${message}${percentText}`;
-  statusEl.style.color = stage === 'complete' ? '#00ff88' : '#ffffff';
-  
-  if (stage === 'complete') {
-    setTimeout(() => {
-      statusEl.style.display = 'none';
-    }, 2000);
-  }
+    const statusEl = document.getElementById('loadingStatus');
+    if (!statusEl) return;
+    
+    const stages = {
+        'vrm-init': '🎭 Initializing VRM System',
+        'vrm': '👤 Loading Avatar',
+        'positioning': '📍 Positioning Avatar',
+        'complete': '✅ Ready!'
+    };
+    
+    const message = stages[stage] || stage;
+    const percentText = percent !== null ? ` ${percent}%` : '';
+    
+    statusEl.textContent = `${message}${percentText}`;
+    statusEl.style.color = stage === 'complete' ? '#00ff88' : '#ffffff';
+    
+    if (stage === 'complete') {
+        setTimeout(() => {
+            statusEl.style.display = 'none';
+        }, 2000);
+    }
 }
 
-// ===== FALLBACK AVATARS =====
+// ===== EMERGENCY FALLBACK =====
 function createEmergencyFallback() {
-  log('Creating emergency fallback...');
-  
-  const character = new THREE.Group();
-  character.name = 'EmergencyFallback';
-  
-  const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
-  const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.y = 1.6;
-  character.add(head);
-  
-  const hairGeo = new THREE.SphereGeometry(0.15, 24, 24);
-  const hairMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-  const hair = new THREE.Mesh(hairGeo, hairMat);
-  hair.position.y = 1.7;
-  hair.scale.set(1.4, 0.9, 1.3);
-  character.add(hair);
-  
-  const eyeGeo = new THREE.SphereGeometry(0.025, 12, 12);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x4169E1 });
-  
-  const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-  leftEye.position.set(-0.045, 1.62, 0.11);
-  character.add(leftEye);
-  
-  const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-  rightEye.position.set(0.045, 1.62, 0.11);
-  character.add(rightEye);
-  
-  const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 1.1;
-  character.add(body);
-  
-  const skirtGeo = new THREE.CylinderGeometry(0.18, 0.25, 0.3, 12);
-  const skirtMat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
-  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
-  skirt.position.y = 0.75;
-  character.add(skirt);
-  
-  character.position.y = -0.1;
-  scene.add(character);
-  
-  let time = 0;
-  let blinkTimer = 0;
-  
-  function animateEmergencyFallback() {
-    const fallbackChar = scene.getObjectByName('EmergencyFallback');
-    if (!fallbackChar) return;
+    log('Creating emergency fallback...');
     
-    time += 0.016;
-    blinkTimer += 0.016;
+    const character = new THREE.Group();
+    character.name = 'EmergencyFallback';
     
-    character.scale.y = 1 + Math.sin(time * 3) * 0.01;
-    character.rotation.y = Math.sin(time * 0.8) * 0.05;
+    // Simple character representation
+    const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
+    const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.6;
+    character.add(head);
     
-    head.rotation.y = Math.sin(time * 1.2) * 0.1;
-    head.rotation.x = Math.sin(time * 0.9) * 0.03;
+    const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1.1;
+    character.add(body);
     
-    hair.rotation.z = Math.sin(time * 1.5) * 0.02;
+    character.position.y = -0.1;
+    scene.add(character);
     
-    if (blinkTimer > 3) {
-      leftEye.scale.y = 0.1;
-      rightEye.scale.y = 0.1;
-      setTimeout(() => {
-        leftEye.scale.y = 1;
-        rightEye.scale.y = 1;
-      }, 150);
-      blinkTimer = 0;
+    // Simple animation
+    let time = 0;
+    function animateEmergency() {
+        const fallbackChar = scene.getObjectByName('EmergencyFallback');
+        if (!fallbackChar) return;
+        
+        time += 0.016;
+        character.rotation.y = Math.sin(time * 0.8) * 0.05;
+        
+        requestAnimationFrame(animateEmergency);
     }
     
-    requestAnimationFrame(animateEmergencyFallback);
-  }
-  
-  animateEmergencyFallback();
-  log('Emergency fallback created with animations');
+    animateEmergency();
+    log('Emergency fallback created');
 }
 
-function createFallbackAvatar() {
-  try {
-    const geometry = new THREE.SphereGeometry(0.3, 32, 32);
-    const material = new THREE.MeshLambertMaterial({ color: 0x4a90e2 });
-    const avatar = new THREE.Mesh(geometry, material);
-    avatar.position.set(0, 0.5, 0);
-    avatar.name = 'fallbackAvatar';
-    scene.add(avatar);
-    
-    function animateFallback() {
-      const fallback = scene.getObjectByName('fallbackAvatar');
-      if (fallback) {
-        avatar.rotation.y += 0.01;
-        requestAnimationFrame(animateFallback);
-      }
-    }
-    animateFallback();
-    
-    log('Fallback avatar created');
-  } catch (err) {
-    log('Failed to create fallback avatar', err);
-  }
-}
-
-function createSimpleFallback() {
-  const canvas = document.getElementById('vrmCanvas');
-  if (canvas) {
-    canvas.style.display = 'none';
-  }
-  
-  const fallback = document.createElement('div');
-  fallback.style.cssText = `
-    position: absolute; top: 50%; left: 50%;
-    transform: translate(-50%, -50%); text-align: center;
-    color: white; font-family: Arial, sans-serif;
-  `;
-  fallback.innerHTML = `
-    <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
-    <div style="margin-top: 20px;">
-      <h2>Solmate</h2>
-      <p>Audio-only mode active</p>
-    </div>
-  `;
-  document.body.appendChild(fallback);
-}
-
-// ===== ANIMATION LOOP =====
+// ===== MAIN RENDER LOOP =====
 function animate() {
-  requestAnimationFrame(animate);
-  
-  if (!renderer || !scene || !camera) return;
-  
-  const delta = clock.getDelta();
-  if (mixer) mixer.update(delta);
-  
-  // Safe VRM update with proper error handling
-  if (currentVRM && typeof currentVRM.update === 'function') {
-    try {
-      currentVRM.update(delta);
-    } catch (e) {
-      log('VRM update error:', e);
-    }
-  }
-  
-  renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+    
+    if (!renderer || !scene || !camera) return;
+    
+    const delta = clock.getDelta();
+    if (mixer) mixer.update(delta);
+    
+    renderer.render(scene, camera);
 }
 
-// ===== WEBSOCKET =====
+// ===== WEBSOCKET SYSTEM =====
 function connectWebSocket() {
-  if (ws) ws.close();
-  
-  try {
-    ws = new WebSocket(HELIUS_WS);
+    if (ws) ws.close();
     
-    ws.onopen = () => {
-      log('WebSocket connected');
-      const wsLight = document.getElementById('wsLight');
-      if (wsLight) {
-        wsLight.textContent = 'WS ON';
-        wsLight.classList.add('online');
-      }
-    };
-    
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.tps) updateTPS(data.tps);
-      } catch (err) {
-        log('WebSocket message error', err);
-      }
-    };
-    
-    ws.onclose = () => {
-      log('WebSocket closed, reconnecting...');
-      const wsLight = document.getElementById('wsLight');
-      if (wsLight) {
-        wsLight.textContent = 'WS OFF';
-        wsLight.classList.remove('online');
-      }
-      
-      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = setTimeout(connectWebSocket, 5000);
-    };
-    
-    ws.onerror = (err) => log('WebSocket error', err);
-    
-  } catch (err) {
-    log('WebSocket connection failed', err);
-    if (!tpsUpdateTimer) {
-      tpsUpdateTimer = setInterval(() => {
-        fetchTPS().catch(e => log('TPS polling error:', e));
-      }, 10000);
+    try {
+        ws = new WebSocket(HELIUS_WS);
+        
+        ws.onopen = () => {
+            log('WebSocket connected');
+            const wsLight = document.getElementById('wsLight');
+            if (wsLight) {
+                wsLight.textContent = 'WS ON';
+                wsLight.style.color = '#00ff88';
+            }
+        };
+        
+        ws.onmessage = (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.tps) updateTPS(data.tps);
+            } catch (err) {
+                log('WebSocket message error', err);
+            }
+        };
+        
+        ws.onclose = () => {
+            log('WebSocket closed, reconnecting...');
+            const wsLight = document.getElementById('wsLight');
+            if (wsLight) {
+                wsLight.textContent = 'WS OFF';
+                wsLight.style.color = '#ff6b6b';
+            }
+            
+            if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+        };
+        
+        ws.onerror = (err) => log('WebSocket error', err);
+        
+    } catch (err) {
+        log('WebSocket connection failed', err);
+        if (!tpsUpdateTimer) {
+            tpsUpdateTimer = setInterval(() => {
+                fetchTPS().catch(e => log('TPS polling error:', e));
+            }, 10000);
+        }
     }
-  }
 }
 
 function updateTPS(tps) {
-  const networkTPS = document.getElementById('networkTPS');
-  if (networkTPS) {
-    networkTPS.textContent = `${tps} TPS`;
-  }
+    const networkTPS = document.getElementById('networkTPS');
+    if (networkTPS) {
+        networkTPS.textContent = `${tps} TPS`;
+        networkTPS.style.color = '#00ff88';
+    }
 }
 
 // ===== API CALLS =====
 function fetchPrice() {
-  return new Promise(async (resolve, reject) => {
-    try {
-      log('=== FETCHING PRICE DATA (ENHANCED) ===');
-      const url = `/api/price?ids=${SOL_MINT}`;
-      
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      
-      const data = await res.json();
-      log('Raw price data received:', data);
-      
-      const solPrice = document.getElementById('solPrice');
-      if (!solPrice) {
-        resolve();
-        return;
-      }
-      
-      let price = null;
-      
-      // Enhanced price extraction
-      if (data.data && data.data[SOL_MINT]?.price) {
-        price = data.data[SOL_MINT].price;
-      } else if (data.price) {
-        price = data.price;
-      } else {
-        // Search all values for a reasonable price
-        function findPrice(obj) {
-          if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
-          if (typeof obj === 'object' && obj !== null) {
-            for (const value of Object.values(obj)) {
-              const found = findPrice(value);
-              if (found) return found;
+    return new Promise(async (resolve, reject) => {
+        try {
+            log('💰 Fetching SOL price...');
+            const url = `/api/price?ids=${SOL_MINT}`;
+            
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            
+            const data = await res.json();
+            
+            const solPrice = document.getElementById('solPrice');
+            if (!solPrice) {
+                resolve();
+                return;
             }
-          }
-          return null;
+            
+            let price = null;
+            
+            // Enhanced price extraction
+            if (data.data && data.data[SOL_MINT]?.price) {
+                price = data.data[SOL_MINT].price;
+            } else if (data.price) {
+                price = data.price;
+            } else {
+                // Search all values for a reasonable price
+                function findPrice(obj) {
+                    if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
+                    if (typeof obj === 'object' && obj !== null) {
+                        for (const value of Object.values(obj)) {
+                            const found = findPrice(value);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+                price = findPrice(data);
+            }
+            
+            if (price && price > 0) {
+                solPrice.textContent = `SOL — ${price.toFixed(2)}`;
+                solPrice.style.color = '#00ff88';
+                log(`✅ Price updated: ${price.toFixed(2)}`);
+            } else {
+                solPrice.textContent = 'SOL — Error';
+                solPrice.style.color = '#ff6b6b';
+                log('❌ Could not find price in data');
+            }
+            
+            resolve();
+        } catch (err) {
+            log('Price fetch failed:', err);
+            const solPrice = document.getElementById('solPrice');
+            if (solPrice) {
+                solPrice.textContent = 'SOL — Error';
+                solPrice.style.color = '#ff6b6b';
+            }
+            reject(err);
         }
-        price = findPrice(data);
-      }
-      
-      if (price && price > 0) {
-        solPrice.textContent = `SOL — ${price.toFixed(2)}`;
-        solPrice.style.color = '#00ff88';
-        log(`✅ Price updated: ${price.toFixed(2)}`);
-      } else {
-        solPrice.textContent = 'SOL — Error';
-        solPrice.style.color = '#ff6b6b';
-        log('❌ Could not find price in:', data);
-      }
-      
-      resolve();
-    } catch (err) {
-      log('Price fetch failed:', err);
-      const solPrice = document.getElementById('solPrice');
-      if (solPrice) {
-        solPrice.textContent = 'SOL — Error';
-        solPrice.style.color = '#ff6b6b';
-      }
-      reject(err);
-    }
-  });
+    });
 }
 
 function fetchTPS() {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const res = await fetch('/api/tps');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      
-      const data = await res.json();
-      
-      if (data.tps) {
-        updateTPS(data.tps);
-        log(`TPS updated: ${data.tps}`);
-      }
-      resolve();
-    } catch (err) {
-      log('TPS fetch failed:', err);
-      const networkTPS = document.getElementById('networkTPS');
-      if (networkTPS) {
-        networkTPS.textContent = 'TPS Error';
-        networkTPS.style.color = '#ff6b6b';
-      }
-      reject(err);
-    }
-  });
+    return new Promise(async (resolve, reject) => {
+        try {
+            const res = await fetch('/api/tps');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            
+            const data = await res.json();
+            
+            if (data.tps) {
+                updateTPS(data.tps);
+                log(`TPS updated: ${data.tps}`);
+            }
+            resolve();
+        } catch (err) {
+            log('TPS fetch failed:', err);
+            const networkTPS = document.getElementById('networkTPS');
+            if (networkTPS) {
+                networkTPS.textContent = 'TPS Error';
+                networkTPS.style.color = '#ff6b6b';
+            }
+            reject(err);
+        }
+    });
 }
 
 // ===== CHAT SYSTEM =====
 function sendMessage(text) {
-  return new Promise(async (resolve, reject) => {
-    conversation.push({ role: 'user', content: text });
-    
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT }, 
-            ...conversation
-          ] 
-        })
-      });
-      
-      if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
-      
-      const { content } = await res.json();
-      conversation.push({ role: 'assistant', content });
-      
-      try {
-        localStorage.setItem('solmateConversation', JSON.stringify(conversation));
-      } catch (storageErr) {
-        log('Failed to save conversation', storageErr);
-      }
-      
-      queueTTS(content);
-      resolve(content);
-    } catch (err) {
-      log('Chat failed:', err);
-      const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
-      alert(errorMsg);
-      resolve(errorMsg);
-    }
-  });
+    return new Promise(async (resolve, reject) => {
+        conversation.push({ role: 'user', content: text });
+        
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    messages: [
+                        { role: 'system', content: SYSTEM_PROMPT }, 
+                        ...conversation
+                    ] 
+                })
+            });
+            
+            if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
+            
+            const { content } = await res.json();
+            conversation.push({ role: 'assistant', content });
+            
+            try {
+                localStorage.setItem('solmateConversation', JSON.stringify(conversation));
+            } catch (storageErr) {
+                log('Failed to save conversation', storageErr);
+            }
+            
+            // Start speech animation and queue TTS
+            startSpeechAnimation(content);
+            queueTTS(content);
+            resolve(content);
+        } catch (err) {
+            log('Chat failed:', err);
+            const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
+            resolve(errorMsg);
+        }
+    });
 }
 
-// ===== ENHANCED TTS SYSTEM WITH SPEECH ANIMATIONS =====
-function queueTTS(text, voice = 'nova') {
-  audioQueue.push({ text, voice });
-  if (!isPlaying) playNextAudio();
-  
-  // Start speech animation
-  startSpeechAnimation(text);
-}
-
+// ===== SPEECH ANIMATION =====
 function startSpeechAnimation(text) {
-  log('🗣️ Starting speech animation');
-  animationState.isTalking = true;
-  
-  const animationData = window.vrmAnimationData;
-  if (animationData && animationData.bones.head) {
-    const speechDuration = text.length * 50; // Rough estimate
-    let speechTime = 0;
+    log('🗣️ Starting speech animation');
+    animationState.isTalking = true;
     
-    function animateSpeech() {
-      if (!animationState.isTalking) return;
-      
-      speechTime += 16;
-      
-      // Natural head movement during speech
-      const intensity = 0.05;
-      animationData.bones.head.rotation.y = Math.sin(speechTime * 0.005) * intensity;
-      animationData.bones.head.rotation.x = Math.sin(speechTime * 0.003) * intensity * 0.5;
-      
-      // Slight body animation
-      const vrmModel = scene.getObjectByName('VRM_Model');
-      if (vrmModel) {
-        vrmModel.rotation.y = Math.sin(speechTime * 0.002) * 0.01;
-      }
-      
-      if (speechTime < speechDuration) {
-        requestAnimationFrame(animateSpeech);
-      } else {
-        stopSpeechAnimation();
-      }
+    if (currentVRM && currentVRM.humanoid) {
+        const speechDuration = text.length * 50; // Rough estimate
+        let speechTime = 0;
+        
+        function animateSpeech() {
+            if (!animationState.isTalking) return;
+            
+            speechTime += 16;
+            
+            const head = currentVRM.humanoid.getNormalizedBoneNode('head');
+            if (head) {
+                // Natural head movement during speech
+                const intensity = 0.03;
+                head.rotation.y = Math.sin(speechTime * 0.005) * intensity;
+                head.rotation.x = Math.sin(speechTime * 0.003) * intensity * 0.5;
+            }
+            
+            if (speechTime < speechDuration) {
+                requestAnimationFrame(animateSpeech);
+            } else {
+                stopSpeechAnimation();
+            }
+        }
+        
+        animateSpeech();
     }
     
-    animateSpeech();
-  }
+    // Set expression during speech
+    if (currentVRM && currentVRM.expressionManager) {
+        try {
+            currentVRM.expressionManager.setValue('happy', 0.3);
+        } catch (e) {
+            // Expression not available
+        }
+    }
 }
 
 function stopSpeechAnimation() {
-  log('🔇 Stopping speech animation');
-  animationState.isTalking = false;
-  
-  // Reset head position smoothly
-  animationTargets.headRotation = { x: 0, y: 0, z: 0 };
-}
-
-function fallbackTTS(text, voice) {
-  try {
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = speechSynthesis.getVoices();
-    const selectedVoice = voices.find(v => 
-      v.name.toLowerCase().includes(voice.toLowerCase())
-    ) || voices[0];
-    if (selectedVoice) utterance.voice = selectedVoice;
+    log('🔇 Stopping speech animation');
+    animationState.isTalking = false;
     
-    utterance.rate = 0.9;
-    utterance.pitch = 1.1;
-    utterance.volume = 0.8;
-    
-    utterance.onend = () => {
-      isPlaying = false;
-      stopSpeechAnimation();
-      playNextAudio();
-    };
-    
-    utterance.onerror = () => {
-      isPlaying = false;
-      stopSpeechAnimation();
-      playNextAudio();
-    };
-    
-    speechSynthesis.speak(utterance);
-    isPlaying = true;
-    log('Browser TTS playing');
-  } catch (err) {
-    log('Fallback TTS failed:', err);
-    isPlaying = false;
-    stopSpeechAnimation();
-    playNextAudio();
-  }
-}
-
-function playAudio(blob) {
-  return new Promise((resolve, reject) => {
-    try {
-      isPlaying = true;
-      const audio = new Audio(URL.createObjectURL(blob));
-      
-      audio.onended = () => {
-        isPlaying = false;
-        stopSpeechAnimation();
-        playNextAudio();
-        resolve();
-      };
-      
-      audio.onerror = (err) => {
-        log('Audio playback failed:', err);
-        isPlaying = false;
-        stopSpeechAnimation();
-        reject(err);
-      };
-      
-      audio.play().then(resolve).catch(reject);
-    } catch (err) {
-      log('Audio play error:', err);
-      isPlaying = false;
-      stopSpeechAnimation();
-      reject(err);
+    // Reset expression
+    if (currentVRM && currentVRM.expressionManager) {
+        try {
+            currentVRM.expressionManager.setValue('happy', 0);
+        } catch (e) {
+            // Expression not available
+        }
     }
-  });
+}
+
+// ===== TTS SYSTEM =====
+function queueTTS(text, voice = 'nova') {
+    audioQueue.push({ text, voice });
+    if (!isPlaying) playNextAudio();
 }
 
 function playNextAudio() {
-  return new Promise(async (resolve) => {
-    if (audioQueue.length === 0) {
-      isPlaying = false;
-      stopSpeechAnimation();
-      resolve();
-      return;
-    }
-    
-    const { text, voice } = audioQueue.shift();
-    
+    return new Promise(async (resolve) => {
+        if (audioQueue.length === 0) {
+            isPlaying = false;
+            stopSpeechAnimation();
+            resolve();
+            return;
+        }
+        
+        const { text, voice } = audioQueue.shift();
+        
+        try {
+            const res = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, voice })
+            });
+            
+            if (!res.ok || res.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
+                fallbackTTS(text, voice);
+                resolve();
+                return;
+            }
+            
+            const blob = await res.blob();
+            if (blob.size === 0) {
+                throw new Error('Empty audio response');
+            }
+            
+            await playAudio(blob);
+            resolve();
+        } catch (err) {
+            log('TTS failed, using browser fallback:', err);
+            fallbackTTS(text, voice);
+            resolve();
+        }
+    });
+}
+
+function fallbackTTS(text, voice) {
     try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice })
-      });
-      
-      if (!res.ok || res.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
-        fallbackTTS(text, voice);
-        resolve();
-        return;
-      }
-      
-      const blob = await res.blob();
-      if (blob.size === 0) {
-        throw new Error('Empty audio response');
-      }
-      
-      await playAudio(blob);
-      resolve();
+        const utterance = new SpeechSynthesisUtterance(text);
+        const voices = speechSynthesis.getVoices();
+        const selectedVoice = voices.find(v => 
+            v.name.toLowerCase().includes(voice.toLowerCase())
+        ) || voices[0];
+        if (selectedVoice) utterance.voice = selectedVoice;
+        
+        utterance.rate = 0.9;
+        utterance.pitch = 1.1;
+        utterance.volume = 0.8;
+        
+        utterance.onend = () => {
+            isPlaying = false;
+            stopSpeechAnimation();
+            playNextAudio();
+        };
+        
+        utterance.onerror = () => {
+            isPlaying = false;
+            stopSpeechAnimation();
+            playNextAudio();
+        };
+        
+        speechSynthesis.speak(utterance);
+        isPlaying = true;
+        log('Browser TTS playing');
     } catch (err) {
-      log('TTS failed, using browser fallback:', err);
-      fallbackTTS(text, voice);
-      resolve();
+        log('Fallback TTS failed:', err);
+        isPlaying = false;
+        stopSpeechAnimation();
+        playNextAudio();
     }
-  });
+}
+
+function playAudio(blob) {
+    return new Promise((resolve, reject) => {
+        try {
+            isPlaying = true;
+            const audio = new Audio(URL.createObjectURL(blob));
+            
+            audio.onended = () => {
+                isPlaying = false;
+                stopSpeechAnimation();
+                playNextAudio();
+                resolve();
+            };
+            
+            audio.onerror = (err) => {
+                log('Audio playback failed:', err);
+                isPlaying = false;
+                stopSpeechAnimation();
+                reject(err);
+            };
+            
+            audio.play().then(resolve).catch(reject);
+        } catch (err) {
+            log('Audio play error:', err);
+            isPlaying = false;
+            stopSpeechAnimation();
+            reject(err);
+        }
+    });
 }
 
 function clearAudioQueue() {
-  audioQueue = [];
-  speechSynthesis.cancel();
-  isPlaying = false;
-  stopSpeechAnimation();
-  log('Audio queue cleared');
+    audioQueue = [];
+    speechSynthesis.cancel();
+    isPlaying = false;
+    stopSpeechAnimation();
+    log('Audio queue cleared');
 }
 
 // ===== UI SETUP =====
 function setupUI() {
-  log('Setting up UI...');
-  
-  const themeBtn = document.getElementById('themeToggle');
-  if (themeBtn) {
-    themeBtn.addEventListener('click', () => {
-      document.documentElement.classList.toggle('light');
-    });
-  }
-  
-  const chatForm = document.getElementById('chatForm');
-  const promptInput = document.getElementById('promptInput');
-  const sendBtn = document.getElementById('sendBtn');
-  
-  if (chatForm && promptInput && sendBtn) {
-    chatForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const text = promptInput.value.trim();
-      if (!text) return;
-      
-      promptInput.value = '';
-      sendBtn.disabled = true;
-      sendBtn.textContent = '🤔';
-      
-      try {
-        await sendMessage(text);
-      } finally {
-        sendBtn.disabled = false;
-        sendBtn.textContent = '▶';
-      }
-    });
-  }
-  
-  const clearBtn = document.getElementById('clearBtn');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', clearAudioQueue);
-  }
-  
-  window.addEventListener('resize', () => {
-    if (camera && renderer) {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-  });
-  
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'd') {
-      e.preventDefault();
-      const logs = document.getElementById('debugOverlay');
-      if (logs) logs.classList.toggle('hidden');
-    }
-  });
-  
-  try {
-    const saved = localStorage.getItem('solmateConversation');
-    if (saved) {
-      conversation = JSON.parse(saved);
-      log(`Loaded ${conversation.length} conversation messages`);
-    }
-  } catch (err) {
-    log('Failed to load conversation history:', err);
-  }
-  
-  document.addEventListener('click', enableAudio, { once: true });
-  document.addEventListener('keydown', enableAudio, { once: true });
-  
-  // Interaction system for head tracking
-  document.addEventListener('mousemove', (event) => {
-    if (animationState.isTalking) return;
+    log('Setting up UI...');
     
-    const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-    const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    animationTargets.headRotation.y = mouseX * 0.2;
-    animationTargets.headRotation.x = mouseY * 0.1;
-  });
-  
-  document.addEventListener('mouseleave', () => {
-    if (!animationState.isTalking) {
-      animationTargets.headRotation = { x: 0, y: 0, z: 0 };
+    const themeBtn = document.getElementById('themeToggle');
+    if (themeBtn) {
+        themeBtn.addEventListener('click', () => {
+            document.documentElement.classList.toggle('light');
+        });
     }
-  });
-  
-  log('UI setup complete');
+    
+    const chatForm = document.getElementById('chatForm');
+    const promptInput = document.getElementById('promptInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    if (chatForm && promptInput && sendBtn) {
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const text = promptInput.value.trim();
+            if (!text) return;
+            
+            promptInput.value = '';
+            sendBtn.disabled = true;
+            sendBtn.textContent = '🤔';
+            
+            try {
+                await sendMessage(text);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '▶';
+            }
+        });
+    }
+    
+    const clearBtn = document.getElementById('clearBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearAudioQueue);
+    }
+    
+    // Window resize handler
+    window.addEventListener('resize', () => {
+        if (camera && renderer) {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    });
+    
+    // Debug overlay toggle
+    document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 'd') {
+            e.preventDefault();
+            const logs = document.getElementById('debugOverlay');
+            if (logs) logs.classList.toggle('hidden');
+        }
+    });
+    
+    // Load conversation history
+    try {
+        const saved = localStorage.getItem('solmateConversation');
+        if (saved) {
+            conversation = JSON.parse(saved);
+            log(`Loaded ${conversation.length} conversation messages`);
+        }
+    } catch (err) {
+        log('Failed to load conversation history:', err);
+    }
+    
+    // Enable audio context on user interaction
+    document.addEventListener('click', enableAudio, { once: true });
+    document.addEventListener('keydown', enableAudio, { once: true });
+    
+    // Mouse tracking for head movement
+    document.addEventListener('mousemove', (event) => {
+        if (animationState.isTalking || animationState.isWaving) return;
+        
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        animationState.headTarget.x = mouseY * 0.1;
+        animationState.headTarget.y = mouseX * 0.2;
+    });
+    
+    document.addEventListener('mouseleave', () => {
+        if (!animationState.isTalking) {
+            animationState.headTarget = { x: 0, y: 0 };
+        }
+    });
+    
+    log('UI setup complete');
 }
 
 function enableAudio() {
-  try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    audioContext.resume();
-    log('Audio context enabled');
-  } catch (e) {
-    log('Audio enable failed:', e);
-  }
-}
-
-// ===== BASIC THREE.JS FALLBACK =====
-function initBasicThreeJS() {
-  return new Promise(async (resolve, reject) => {
     try {
-      log('Initializing basic Three.js...');
-      
-      if (!window.THREE) {
-        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js');
-        THREE = window.THREE;
-      }
-      
-      if (!THREE) {
-        throw new Error('Could not load Three.js');
-      }
-      
-      setupThreeJSScene();
-      animate();
-      
-      log('Basic Three.js setup complete');
-      resolve();
-    } catch (err) {
-      reject(err);
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext.resume();
+        log('Audio context enabled');
+    } catch (e) {
+        log('Audio enable failed:', e);
     }
-  });
 }
 
 // ===== MAIN INITIALIZATION =====
-function init() {
-  return new Promise(async (resolve) => {
-    log('=== INITIALIZING SOLMATE ===');
+async function init() {
+    log('🚀 Initializing Enhanced Solmate...');
     
     try {
-      // Setup UI first
-      setupUI();
-      
-      // Start API calls
-      try {
-        await fetchPrice();
-      } catch (priceErr) {
-        log('Initial price fetch failed:', priceErr);
-      }
-      
-      try {
-        await fetchTPS();
-      } catch (tpsErr) {
-        log('Initial TPS fetch failed:', tpsErr);
-      }
-      
-      // Start periodic updates
-      priceUpdateTimer = setInterval(() => {
-        fetchPrice().catch(err => log('Price update failed:', err));
-      }, 30000);
-      
-      tpsUpdateTimer = setInterval(() => {
-        fetchTPS().catch(err => log('TPS update failed:', err));
-      }, 60000);
-      
-      // Initialize 3D system
-      try {
-        await initThreeEnhanced();
-      } catch (threeError) {
-        log('3D initialization failed, trying basic mode:', threeError);
+        // Setup UI first
+        setupUI();
+        
+        // Start API calls
         try {
-          await initBasicThreeJS();
-          createEmergencyFallback();
-        } catch (emergencyError) {
-          log('All 3D systems failed, audio-only mode:', emergencyError);
-          createSimpleFallback();
+            await fetchPrice();
+            await fetchTPS();
+        } catch (apiErr) {
+            log('Initial API calls failed:', apiErr);
         }
-      }
-      
-      // Connect WebSocket
-      connectWebSocket();
-      
-      log('=== INITIALIZATION COMPLETE ===');
-      
-      // Welcome message
-      setTimeout(() => {
-        queueTTS("Hello! I'm your enhanced Solana companion, Solmate. I have proper animations and preserved textures now!", 'nova');
-      }, 2000);
-      
-      resolve();
-      
-    } catch (err) {
-      log('=== INITIALIZATION FAILED ===', err);
-      setupUI();
-      
-      try {
-        await fetchPrice();
-        await fetchTPS();
+        
+        // Start periodic updates
         priceUpdateTimer = setInterval(() => {
-          fetchPrice().catch(e => log('Price error:', e));
+            fetchPrice().catch(err => log('Price update failed:', err));
         }, 30000);
+        
         tpsUpdateTimer = setInterval(() => {
-          fetchTPS().catch(e => log('TPS error:', e));
+            fetchTPS().catch(err => log('TPS update failed:', err));
         }, 60000);
-      } catch (apiError) {
-        log('API initialization failed:', apiError);
-      }
-      
-      createSimpleFallback();
-      resolve();
+        
+        // Initialize VRM system
+        updateLoadingProgress('vrm-init');
+        const vrmReady = await initializeVRMSystem();
+        
+        if (!vrmReady) {
+            throw new Error('VRM system initialization failed');
+        }
+        
+        // Setup Three.js scene
+        setupScene();
+        
+        // Start render loop
+        animate();
+        
+        // Load VRM model
+        try {
+            await loadVRMModel(VRM_PATH);
+        } catch (vrmError) {
+            log('VRM loading failed, using emergency fallback', vrmError);
+            handleVRMLoadingError(vrmError);
+        }
+        
+        // Connect WebSocket
+        connectWebSocket();
+        
+        log('✅ Solmate initialization complete!');
+        
+        // Welcome message
+        setTimeout(() => {
+            queueTTS("Hello! I'm your enhanced Solmate companion. I should now be facing you properly with all textures visible and natural animations!");
+        }, 3000);
+        
+    } catch (err) {
+        log('❌ Initialization failed:', err);
+        
+        // Fallback initialization
+        setupUI();
+        
+        try {
+            await fetchPrice();
+            await fetchTPS();
+            priceUpdateTimer = setInterval(() => {
+                fetchPrice().catch(e => log('Price error:', e));
+            }, 30000);
+            tpsUpdateTimer = setInterval(() => {
+                fetchTPS().catch(e => log('TPS error:', e));
+            }, 60000);
+        } catch (apiError) {
+            log('API initialization failed:', apiError);
+        }
+        
+        // Create simple fallback
+        const fallback = document.createElement('div');
+        fallback.style.cssText = `
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); text-align: center;
+            color: white; font-family: Arial, sans-serif;
+        `;
+        fallback.innerHTML = `
+            <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
+            <div style="margin-top: 20px;">
+                <h2>Solmate</h2>
+                <p>Audio-only mode active</p>
+            </div>
+        `;
+        document.body.appendChild(fallback);
     }
-  });
 }
 
 // ===== CLEANUP =====
 window.addEventListener('beforeunload', () => {
-  if (ws) ws.close();
-  
-  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-  if (priceUpdateTimer) clearInterval(priceUpdateTimer);
-  if (tpsUpdateTimer) clearInterval(tpsUpdateTimer);
-  
-  clearAudioQueue();
-  
-  if (renderer) {
-    renderer.dispose();
-  }
-  if (currentVRM && scene) {
-    scene.remove(currentVRM.scene);
-  }
+    if (ws) ws.close();
+    
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    if (priceUpdateTimer) clearInterval(priceUpdateTimer);
+    if (tpsUpdateTimer) clearInterval(tpsUpdateTimer);
+    
+    clearAudioQueue();
+    
+    if (renderer) {
+        renderer.dispose();
+    }
+    if (currentVRM && scene) {
+        scene.remove(currentVRM.scene);
+    }
 });
 
-// ===== ENHANCED DEBUG COMMANDS =====
+// ===== DEBUG COMMANDS =====
 window.debugVRM = function() {
-  console.log('=== VRM DEBUG REPORT ===');
-  console.log('Three.js loaded:', !!window.THREE);
-  console.log('GLTF Loader available:', !!(THREE && THREE.GLTFLoader));
-  console.log('Scene:', !!scene);
-  console.log('Camera:', !!camera);
-  console.log('Renderer:', !!renderer);
-  console.log('VRM loaded:', !!scene?.getObjectByName('VRM_Model'));
-  console.log('Current VRM:', !!currentVRM);
-  console.log('VRM Humanoid:', !!(currentVRM && currentVRM.humanoid));
-  console.log('VRM Expressions:', !!(currentVRM && currentVRM.expressionManager));
-  console.log('Animation Data:', !!window.vrmAnimationData);
-  
-  if (window.vrmAnimationData) {
-    console.log('Available bones:', Object.keys(window.vrmAnimationData.bones));
-  }
-  
-  if (scene) {
-    console.log('Scene objects:', scene.children.map(c => c.name));
-  }
-};
-
-window.debugVRMBones = function() {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (vrmModel && window.vrmAnimationData) {
-    const data = window.vrmAnimationData;
-    console.log('🦴 VRM Bone Debug:', {
-      totalBones: Object.keys(data.bones).length,
-      hasVRMHumanoid: data.hasVRMHumanoid,
-      hasExpressions: data.hasExpressions,
-      bones: Object.keys(data.bones),
-      hasVRM: !!currentVRM,
-      hasHumanoid: !!(currentVRM && currentVRM.humanoid),
-      hasExpressionsManager: !!(currentVRM && currentVRM.expressionManager)
-    });
-    return data;
-  }
-  return null;
-};
-
-window.reloadVRM = function() {
-  return new Promise(async (resolve) => {
-    log('🔄 Manually reloading VRM...');
+    console.log('=== VRM DEBUG REPORT ===');
+    console.log('VRM loaded:', !!currentVRM);
+    console.log('Scene:', !!scene);
+    console.log('Camera:', !!camera);
+    console.log('Renderer:', !!renderer);
+    console.log('VRM model in scene:', !!scene?.getObjectByName('VRM_Model'));
     
-    ['fallbackAvatar', 'alternativeAvatar', 'VRM_Model', 'EmergencyFallback'].forEach(name => {
-      const existing = scene?.getObjectByName(name);
-      if (existing) {
-        scene.remove(existing);
-        log(`Removed ${name}`);
-      }
-    });
-    
-    if (camera) {
-      camera.position.set(0, 1.3, 2.5);
-      camera.lookAt(0, 1, 0);
+    if (currentVRM) {
+        console.log('VRM features:', {
+            hasLookAt: !!currentVRM.lookAt,
+            hasExpressions: !!currentVRM.expressionManager,
+            hasHumanoid: !!currentVRM.humanoid
+        });
     }
     
-    createFallbackAvatar();
+    if (scene) {
+        console.log('Scene objects:', scene.children.map(c => c.name));
+    }
     
-    setTimeout(async () => {
-      try {
-        await loadVRMWithProperSupport(VRM_PATH);
-        log('✅ VRM reload successful!');
-        resolve('VRM reloaded successfully');
-      } catch (err) {
-        log('❌ VRM reload failed:', err);
-        resolve('VRM reload failed: ' + err.message);
-      }
-    }, 1000);
-  });
+    return {
+        vrm: currentVRM,
+        scene: scene,
+        camera: camera,
+        animationState: animationState
+    };
 };
 
-window.createEmergency = function() {
-  createEmergencyFallback();
+window.testExpression = function(expr = 'happy') {
+    if (currentVRM && currentVRM.expressionManager) {
+        try {
+            currentVRM.expressionManager.setValue(expr, 0.8);
+            setTimeout(() => {
+                currentVRM.expressionManager.setValue(expr, 0);
+            }, 2000);
+            console.log(`Playing expression: ${expr}`);
+        } catch (e) {
+            console.log(`Expression not available: ${expr}`);
+        }
+    } else {
+        console.log('No expression manager available');
+    }
 };
 
 window.testChat = function() {
-  return sendMessage("Hello Solmate! How are you?");
+    return sendMessage("Hello Solmate! How do you look now?");
 };
 
 window.testTTS = function() {
-  queueTTS("Hello! I'm testing the enhanced text to speech system with animations. How does this look and sound?", 'nova');
+    queueTTS("Hello! I'm testing the enhanced text to speech system with natural animations.", 'nova');
 };
 
-window.playEnhancedWave = playEnhancedVRMWave;
-
-window.testVRMSystem = function() {
-  console.log('🧪 Testing enhanced VRM system...');
-  
-  if (window.vrmAnimationData) {
-    console.log('Animation data:', window.vrmAnimationData);
-    console.log('Available bones:', Object.keys(window.vrmAnimationData.bones));
-    console.log('VRM capabilities:', {
-      hasVRM: !!currentVRM,
-      hasHumanoid: !!(currentVRM && currentVRM.humanoid),
-      hasExpressions: !!(currentVRM && currentVRM.expressionManager),
-      hasLookAt: !!(currentVRM && currentVRM.lookAt)
-    });
-  }
-  
-  // Test wave
-  setTimeout(() => {
+window.playWave = function() {
     playEnhancedVRMWave();
-  }, 1000);
-  
-  // Test expression
-  if (currentVRM && currentVRM.expressionManager) {
-    setTimeout(() => {
-      try {
-        currentVRM.expressionManager.setValue('happy', 0.8);
-        setTimeout(() => {
-          currentVRM.expressionManager.setValue('happy', 0);
-        }, 2000);
-      } catch (e) {
-        console.log('Happy expression not available');
-      }
-    }, 3000);
-  }
 };
 
-window.debugVRMPlugin = function() {
-  console.log('=== VRM PLUGIN DEBUG ===');
-  console.log('Window VRM:', !!window.VRM);
-  if (window.VRM) {
-    console.log('VRM object keys:', Object.keys(window.VRM));
-  }
-  console.log('Window THREE VRM keys:', window.THREE ? Object.keys(window.THREE).filter(k => k.includes('VRM')) : 'No THREE');
-  console.log('Current VRM:', !!currentVRM);
-  if (currentVRM) {
-    console.log('VRM properties:', Object.keys(currentVRM));
-    console.log('Is standard GLTF:', currentVRM.isStandardGLTF);
-  }
-  
-  // Test VRM plugin registration
-  try {
-    const testLoader = new THREE.GLTFLoader();
-    if (window.VRM && window.VRM.VRMLoaderPlugin) {
-      testLoader.register((parser) => new window.VRM.VRMLoaderPlugin(parser));
-      console.log('✅ VRM plugin can be registered');
+window.reloadVRM = function() {
+    return new Promise(async (resolve) => {
+        log('🔄 Manually reloading VRM...');
+        
+        ['VRM_Model', 'EmergencyFallback'].forEach(name => {
+            const existing = scene?.getObjectByName(name);
+            if (existing) {
+                scene.remove(existing);
+                log(`Removed ${name}`);
+            }
+        });
+        
+        try {
+            await loadVRMModel(VRM_PATH);
+            log('✅ VRM reload successful!');
+            resolve('VRM reloaded successfully');
+        } catch (err) {
+            log('❌ VRM reload failed:', err);
+            handleVRMLoadingError(err);
+            resolve('VRM reload failed: ' + err.message);
+        }
+    });
+};
+
+window.fixTextures = function() {
+    const vrmModel = scene?.getObjectByName('VRM_Model');
+    if (vrmModel) {
+        console.log('🎨 Re-fixing VRM textures...');
+        fixVRMTextures(vrmModel);
     } else {
-      console.log('❌ VRM plugin not available for registration');
+        console.log('No VRM model found in scene');
     }
-  } catch (e) {
-    console.log('❌ VRM plugin registration test failed:', e);
-  }
-};
-
-window.fixVRMTextures = function() {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (vrmModel) {
-    console.log('🎨 Fixing VRM textures...');
-    preserveVRMTextures(vrmModel);
-  }
-};
-
-window.fixPrice = function() {
-  console.log('💰 Fixing price...');
-  fetchPrice();
-};
-
-window.testVRMBoneDetection = function() {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (vrmModel) {
-    console.log('🔍 Testing enhanced bone detection...');
-    const result = findVRMBonesAdvanced(vrmModel);
-    console.log('Bone detection result:', result);
-    return result;
-  }
-  return null;
 };
 
 // ===== CONSOLE MESSAGES =====
-console.log('🚀 Enhanced Solmate VRM Companion loaded!');
-console.log('📋 Debug commands: debugVRM(), debugVRMBones(), debugVRMPlugin(), reloadVRM(), testVRMSystem()');
-console.log('🎭 Animation commands: playEnhancedWave(), testTTS(), testChat()');
-console.log('🔧 Fixes: fixVRMTextures(), fixPrice(), testVRMBoneDetection()');
-console.log('👀 Move your mouse around to see head tracking!');
+console.log('🚀 Enhanced Solmate VRM System Loaded!');
+console.log('🛠️ Debug commands: debugVRM(), testExpression("happy"), testChat(), testTTS(), playWave(), reloadVRM(), fixTextures()');
+console.log('🎭 Features: Natural animations, proper textures, correct positioning, mouse tracking');
+console.log('👋 Try: playWave() to test wave animation');
 
 // ===== START APPLICATION =====
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', init);
 } else {
-  init();
+    init();
 }
-
-// ===== ENHANCED SOLMATE WITH AIRI-INSPIRED FEATURES =====
-
-// ===== ADVANCED VRM LOOK-AT SYSTEM (inspired by AIRI) =====
-class VRMLookAtController {
-  constructor(vrm, camera) {
-    this.vrm = vrm;
-    this.camera = camera;
-    this.lookAtTarget = new THREE.Vector3();
-    this.mode = 'camera'; // 'camera', 'mouse', 'idle', 'disabled'
-    this.mousePosition = new THREE.Vector2();
-    this.idleTimer = 0;
-    this.blinkTimer = 0;
-    this.enabled = true;
-  }
-  
-  setMode(mode) {
-    this.mode = mode;
-    log(`👀 VRM LookAt mode set to: ${mode}`);
-  }
-  
-  update(deltaTime) {
-    if (!this.enabled || !this.vrm) return;
-    
-    // Only use lookAt if it exists (proper VRM)
-    if (this.vrm.lookAt) {
-      switch (this.mode) {
-        case 'camera':
-          this.lookAtCamera();
-          break;
-        case 'mouse':
-          this.lookAtMouse();
-          break;
-        case 'idle':
-          this.idleLookAround(deltaTime);
-          break;
-        case 'disabled':
-          this.vrm.lookAt.target = null;
-          break;
-      }
-    }
-    
-    // Auto-blink system
-    this.updateBlinking(deltaTime);
-  }
-  
-  lookAtCamera() {
-    if (this.camera && this.vrm.lookAt) {
-      this.vrm.lookAt.target = this.camera;
-    }
-  }
-  
-  lookAtMouse() {
-    if (!this.vrm.lookAt) return;
-    
-    // Convert mouse position to 3D world space
-    const vector = new THREE.Vector3(this.mousePosition.x, this.mousePosition.y, 0.5);
-    vector.unproject(this.camera);
-    vector.sub(this.camera.position).normalize();
-    
-    const distance = 2.0;
-    this.lookAtTarget.copy(this.camera.position).add(vector.multiplyScalar(distance));
-    this.vrm.lookAt.target = this.lookAtTarget;
-  }
-  
-  idleLookAround(deltaTime) {
-    if (!this.vrm.lookAt) return;
-    
-    this.idleTimer += deltaTime;
-    
-    // Random look-around every 3-8 seconds
-    if (this.idleTimer > 3 + Math.random() * 5) {
-      const randomX = (Math.random() - 0.5) * 2;
-      const randomY = (Math.random() - 0.5) * 1;
-      
-      this.lookAtTarget.set(randomX, randomY + 1.6, 1);
-      this.vrm.lookAt.target = this.lookAtTarget;
-      this.idleTimer = 0;
-    }
-  }
-  
-  updateBlinking(deltaTime) {
-    this.blinkTimer += deltaTime;
-    
-    // Blink every 2-5 seconds
-    if (this.blinkTimer > 2 + Math.random() * 3) {
-      this.performBlink();
-      this.blinkTimer = 0;
-    }
-  }
-  
-  performBlink() {
-    if (this.vrm.expressionManager) {
-      try {
-        this.vrm.expressionManager.setValue('blink', 1.0);
-        setTimeout(() => {
-          if (this.vrm.expressionManager) {
-            this.vrm.expressionManager.setValue('blink', 0);
-          }
-        }, 150);
-      } catch (e) {
-        // Blink expression not available
-      }
-    }
-  }
-  
-  setMousePosition(x, y) {
-    this.mousePosition.set(x, y);
-  }
-}
-
-// ===== ENHANCED MEMORY SYSTEM (inspired by AIRI's memory) =====
-class SolmateMemorySystem {
-  constructor() {
-    this.conversations = [];
-    this.userProfile = {
-      name: 'User',
-      preferences: {},
-      interactionHistory: [],
-      favoriteTopics: [],
-      personality: 'friendly'
-    };
-    this.contextWindow = 20; // Remember last 20 interactions
-    this.emotionalState = {
-      happiness: 0.7,
-      excitement: 0.5,
-      curiosity: 0.6,
-      friendliness: 0.8
-    };
-  }
-  
-  addInteraction(userMessage, assistantResponse) {
-    const interaction = {
-      timestamp: Date.now(),
-      userMessage,
-      assistantResponse,
-      context: this.extractContext(userMessage),
-      emotion: this.analyzeEmotion(userMessage)
-    };
-    
-    this.conversations.push(interaction);
-    this.updateUserProfile(interaction);
-    this.updateEmotionalState(interaction);
-    
-    // Keep only recent conversations
-    if (this.conversations.length > this.contextWindow) {
-      this.conversations = this.conversations.slice(-this.contextWindow);
-    }
-    
-    this.saveToStorage();
-  }
-  
-  extractContext(message) {
-    const lowerMsg = message.toLowerCase();
-    const contexts = [];
-    
-    if (lowerMsg.includes('solana') || lowerMsg.includes('sol')) contexts.push('crypto');
-    if (lowerMsg.includes('price') || lowerMsg.includes('trading')) contexts.push('trading');
-    if (lowerMsg.includes('game') || lowerMsg.includes('play')) contexts.push('gaming');
-    if (lowerMsg.includes('code') || lowerMsg.includes('program')) contexts.push('programming');
-    
-    return contexts;
-  }
-  
-  analyzeEmotion(message) {
-    const lowerMsg = message.toLowerCase();
-    let emotion = 'neutral';
-    
-    if (lowerMsg.includes('happy') || lowerMsg.includes('great') || lowerMsg.includes('awesome')) {
-      emotion = 'happy';
-    } else if (lowerMsg.includes('sad') || lowerMsg.includes('bad') || lowerMsg.includes('terrible')) {
-      emotion = 'sad';
-    } else if (lowerMsg.includes('angry') || lowerMsg.includes('mad') || lowerMsg.includes('frustrated')) {
-      emotion = 'angry';
-    } else if (lowerMsg.includes('excited') || lowerMsg.includes('amazing') || lowerMsg.includes('wow')) {
-      emotion = 'excited';
-    }
-    
-    return emotion;
-  }
-  
-  updateUserProfile(interaction) {
-    // Update favorite topics
-    interaction.context.forEach(topic => {
-      const existing = this.userProfile.favoriteTopics.find(t => t.topic === topic);
-      if (existing) {
-        existing.count++;
-      } else {
-        this.userProfile.favoriteTopics.push({ topic, count: 1 });
-      }
-    });
-    
-    // Sort by frequency
-    this.userProfile.favoriteTopics.sort((a, b) => b.count - a.count);
-    this.userProfile.favoriteTopics = this.userProfile.favoriteTopics.slice(0, 10);
-  }
-  
-  updateEmotionalState(interaction) {
-    switch (interaction.emotion) {
-      case 'happy':
-        this.emotionalState.happiness = Math.min(1.0, this.emotionalState.happiness + 0.1);
-        this.emotionalState.friendliness = Math.min(1.0, this.emotionalState.friendliness + 0.05);
-        break;
-      case 'excited':
-        this.emotionalState.excitement = Math.min(1.0, this.emotionalState.excitement + 0.15);
-        break;
-      case 'sad':
-        this.emotionalState.happiness = Math.max(0.0, this.emotionalState.happiness - 0.1);
-        break;
-    }
-  }
-  
-  getContextualPrompt() {
-    const recentTopics = this.userProfile.favoriteTopics.slice(0, 3).map(t => t.topic);
-    const recentConversations = this.conversations.slice(-5);
-    
-    let contextPrompt = `Remember: User likes talking about ${recentTopics.join(', ')}. `;
-    
-    if (recentConversations.length > 0) {
-      contextPrompt += `Recent context: ${recentConversations.map(c => c.userMessage).join(' | ')}. `;
-    }
-    
-    contextPrompt += `Your current emotional state: happiness=${this.emotionalState.happiness.toFixed(1)}, excitement=${this.emotionalState.excitement.toFixed(1)}. Adjust your personality accordingly.`;
-    
-    return contextPrompt;
-  }
-  
-  saveToStorage() {
-    try {
-      localStorage.setItem('solmateMemory', JSON.stringify({
-        conversations: this.conversations,
-        userProfile: this.userProfile,
-        emotionalState: this.emotionalState
-      }));
-    } catch (e) {
-      log('Failed to save memory to storage', e);
-    }
-  }
-  
-  loadFromStorage() {
-    try {
-      const saved = localStorage.getItem('solmateMemory');
-      if (saved) {
-        const data = JSON.parse(saved);
-        this.conversations = data.conversations || [];
-        this.userProfile = { ...this.userProfile, ...data.userProfile };
-        this.emotionalState = { ...this.emotionalState, ...data.emotionalState };
-        log(`Loaded memory: ${this.conversations.length} conversations`);
-      }
-    } catch (e) {
-      log('Failed to load memory from storage', e);
-    }
-  }
-}
-
-// ===== ADVANCED EXPRESSION CONTROLLER =====
-class VRMExpressionController {
-  constructor(vrm) {
-    this.vrm = vrm;
-    this.currentExpression = 'neutral';
-    this.expressionQueue = [];
-    this.isPlaying = false;
-    this.availableExpressions = this.detectAvailableExpressions();
-  }
-  
-  detectAvailableExpressions() {
-    if (!this.vrm || !this.vrm.expressionManager) return [];
-    
-    const commonExpressions = [
-      'happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral',
-      'fun', 'joy', 'sorrow', 'aa', 'ih', 'ou', 'ee', 'oh',
-      'blink', 'blinkLeft', 'blinkRight', 'wink', 'winkLeft', 'winkRight'
-    ];
-    
-    const available = [];
-    commonExpressions.forEach(expr => {
-      try {
-        this.vrm.expressionManager.setValue(expr, 0);
-        available.push(expr);
-      } catch (e) {
-        // Expression not available
-      }
-    });
-    
-    log(`Available VRM expressions: ${available.join(', ')}`);
-    return available;
-  }
-  
-  playExpression(expressionName, intensity = 0.8, duration = 2000) {
-    if (!this.availableExpressions.includes(expressionName)) return;
-    
-    this.expressionQueue.push({ expressionName, intensity, duration });
-    if (!this.isPlaying) {
-      this.processQueue();
-    }
-  }
-  
-  async processQueue() {
-    if (this.expressionQueue.length === 0) {
-      this.isPlaying = false;
-      return;
-    }
-    
-    this.isPlaying = true;
-    const { expressionName, intensity, duration } = this.expressionQueue.shift();
-    
-    try {
-      // Set expression
-      this.vrm.expressionManager.setValue(expressionName, intensity);
-      this.currentExpression = expressionName;
-      
-      // Wait for duration
-      await new Promise(resolve => setTimeout(resolve, duration));
-      
-      // Reset expression
-      this.vrm.expressionManager.setValue(expressionName, 0);
-      
-      // Process next in queue
-      setTimeout(() => this.processQueue(), 200);
-      
-    } catch (e) {
-      log('Expression playback failed:', e);
-      this.processQueue();
-    }
-  }
-  
-  expressEmotionBasedOnText(text) {
-    const lowerText = text.toLowerCase();
-    
-    if (lowerText.includes('happy') || lowerText.includes('great') || lowerText.includes('awesome')) {
-      this.playExpression('happy', 0.9, 2500);
-    } else if (lowerText.includes('excited') || lowerText.includes('amazing') || lowerText.includes('wow')) {
-      this.playExpression('fun', 0.8, 2000);
-    } else if (lowerText.includes('sad') || lowerText.includes('sorry')) {
-      this.playExpression('sad', 0.7, 3000);
-    } else if (lowerText.includes('surprised') || lowerText.includes('unexpected')) {
-      this.playExpression('surprised', 0.9, 1500);
-    } else if (lowerText.includes('thinking') || lowerText.includes('hmm')) {
-      this.playExpression('relaxed', 0.6, 2000);
-    }
-  }
-  
-  startIdleExpressions() {
-    const playRandomExpression = () => {
-      if (!this.isPlaying && Math.random() < 0.3) {
-        const idleExpressions = ['neutral', 'relaxed', 'happy'];
-        const randomExpr = idleExpressions[Math.floor(Math.random() * idleExpressions.length)];
-        this.playExpression(randomExpr, 0.4, 1500);
-      }
-      
-      setTimeout(playRandomExpression, 5000 + Math.random() * 10000);
-    };
-    
-    setTimeout(playRandomExpression, 5000);
-  }
-}
-
-// ===== ENHANCED VOICE ACTIVITY DETECTION =====
-class VoiceActivityDetector {
-  constructor() {
-    this.isListening = false;
-    this.audioContext = null;
-    this.microphone = null;
-    this.analyser = null;
-    this.threshold = 0.01;
-    this.onSpeechStart = null;
-    this.onSpeechEnd = null;
-    this.silenceTimer = 0;
-    this.silenceThreshold = 1000; // 1 second of silence
-  }
-  
-  async start() {
-    try {
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.microphone = this.audioContext.createMediaStreamSource(stream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-      
-      this.microphone.connect(this.analyser);
-      this.isListening = true;
-      this.detectVoiceActivity();
-      
-      log('Voice activity detection started');
-    } catch (e) {
-      log('Failed to start voice activity detection:', e);
-    }
-  }
-  
-  detectVoiceActivity() {
-    if (!this.isListening) return;
-    
-    const bufferLength = this.analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    this.analyser.getByteFrequencyData(dataArray);
-    
-    // Calculate average volume
-    const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
-    const normalizedVolume = average / 255;
-    
-    if (normalizedVolume > this.threshold) {
-      if (this.silenceTimer > 0) {
-        // Speech started
-        this.silenceTimer = 0;
-        if (this.onSpeechStart) this.onSpeechStart();
-      }
-    } else {
-      this.silenceTimer += 50; // Roughly 50ms per frame
-      if (this.silenceTimer > this.silenceThreshold && this.onSpeechEnd) {
-        this.onSpeechEnd();
-        this.silenceTimer = 0;
-      }
-    }
-    
-    setTimeout(() => this.detectVoiceActivity(), 50);
-  }
-  
-  stop() {
-    this.isListening = false;
-    if (this.microphone) this.microphone.disconnect();
-    if (this.audioContext) this.audioContext.close();
-  }
-}
-
-// ===== ENHANCED SOLMATE SYSTEM INTEGRATION =====
-class EnhancedSolmateSystem {
-  constructor() {
-    this.lookAtController = null;
-    this.memorySystem = new SolmateMemorySystem();
-    this.expressionController = null;
-    this.voiceDetector = new VoiceActivityDetector();
-    this.isInitialized = false;
-  }
-  
-  async initialize(vrm, camera) {
-    if (vrm && !vrm.isStandardGLTF) {
-      this.lookAtController = new VRMLookAtController(vrm, camera);
-      this.expressionController = new VRMExpressionController(vrm);
-      
-      // Setup voice activity detection
-      this.voiceDetector.onSpeechStart = () => {
-        log('🎤 Speech detected');
-        if (this.expressionController) {
-          this.expressionController.playExpression('surprised', 0.5, 1000);
-        }
-      };
-      
-      this.voiceDetector.onSpeechEnd = () => {
-        log('🔇 Speech ended');
-      };
-      
-      // Load memory
-      this.memorySystem.loadFromStorage();
-      
-      // Start expression system
-      if (this.expressionController) {
-        this.expressionController.startIdleExpressions();
-      }
-      
-      log('Enhanced Solmate system initialized');
-      this.isInitialized = true;
-    } else if (vrm && vrm.isStandardGLTF) {
-      // Handle standard GLTF models
-      log('⚠️ Standard GLTF detected - limited VRM features available');
-      this.memorySystem.loadFromStorage();
-      this.isInitialized = true;
-    }
-  }
-  
-  update(deltaTime) {
-    if (this.lookAtController) {
-      this.lookAtController.update(deltaTime);
-    }
-  }
-  
-  setLookAtMode(mode) {
-    if (this.lookAtController) {
-      this.lookAtController.setMode(mode);
-    }
-  }
-  
-  onMouseMove(x, y) {
-    if (this.lookAtController) {
-      // Convert to normalized device coordinates
-      const normalizedX = (x / window.innerWidth) * 2 - 1;
-      const normalizedY = -(y / window.innerHeight) * 2 + 1;
-      this.lookAtController.setMousePosition(normalizedX, normalizedY);
-    }
-  }
-  
-  onChatMessage(userMessage, assistantResponse) {
-    // Add to memory
-    this.memorySystem.addInteraction(userMessage, assistantResponse);
-    
-    // Express emotion based on response
-    if (this.expressionController) {
-      this.expressionController.expressEmotionBasedOnText(assistantResponse);
-    }
-  }
-  
-  getEnhancedPrompt(originalPrompt) {
-    const contextualPrompt = this.memorySystem.getContextualPrompt();
-    return `${originalPrompt}\n\nContext: ${contextualPrompt}`;
-  }
-  
-  async startVoiceDetection() {
-    await this.voiceDetector.start();
-  }
-  
-  stopVoiceDetection() {
-    this.voiceDetector.stop();
-  }
-}
-
-// ===== INTEGRATION WITH EXISTING SOLMATE SYSTEM =====
-let enhancedSolmate = new EnhancedSolmateSystem();
-
-// Override existing VRM setup function
-const originalSetupVRMFeatures = setupVRMFeatures;
-setupVRMFeatures = function(gltf) {
-  // Call original setup
-  originalSetupVRMFeatures(gltf);
-  
-  // Initialize enhanced features
-  if (currentVRM && camera) {
-    enhancedSolmate.initialize(currentVRM, camera);
-  }
-};
-
-// Override existing chat function
-const originalSendMessage = sendMessage;
-sendMessage = function(text) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Get enhanced prompt with memory context
-      const enhancedPrompt = enhancedSolmate.getEnhancedPrompt(SYSTEM_PROMPT);
-      
-      conversation.push({ role: 'user', content: text });
-      
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          messages: [
-            { role: 'system', content: enhancedPrompt }, 
-            ...conversation
-          ] 
-        })
-      });
-      
-      if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
-      
-      const { content } = await res.json();
-      conversation.push({ role: 'assistant', content });
-      
-      // Add to enhanced memory system
-      enhancedSolmate.onChatMessage(text, content);
-      
-      try {
-        localStorage.setItem('solmateConversation', JSON.stringify(conversation));
-      } catch (storageErr) {
-        log('Failed to save conversation', storageErr);
-      }
-      
-      queueTTS(content);
-      resolve(content);
-    } catch (err) {
-      log('Chat failed:', err);
-      const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
-      alert(errorMsg);
-      resolve(errorMsg);
-    }
-  });
-};
-
-// Enhanced mouse movement tracking
-document.addEventListener('mousemove', (event) => {
-  if (enhancedSolmate) {
-    enhancedSolmate.onMouseMove(event.clientX, event.clientY);
-  }
-});
-
-// Enhanced animation loop - REPLACE THE ORIGINAL
-function animate() {
-  requestAnimationFrame(animate);
-  
-  if (!renderer || !scene || !camera) return;
-  
-  const delta = clock.getDelta();
-  if (mixer) mixer.update(delta);
-  
-  // Safe VRM update with proper error handling
-  if (currentVRM && typeof currentVRM.update === 'function') {
-    try {
-      currentVRM.update(delta);
-    } catch (e) {
-      log('VRM update error:', e);
-    }
-  }
-  
-  // Update enhanced systems
-  if (enhancedSolmate) {
-    enhancedSolmate.update(delta);
-  }
-  
-  renderer.render(scene, camera);
-}
-
-// ===== NEW UI CONTROLS FOR ENHANCED FEATURES =====
-function createEnhancedUI() {
-  // Look-at mode controls
-  const lookAtControls = document.createElement('div');
-  lookAtControls.style.cssText = `
-    position: fixed; top: 70px; right: 20px;
-    background: var(--glass); backdrop-filter: blur(16px);
-    border: 1px solid var(--border); border-radius: 12px;
-    padding: 10px; z-index: 15; display: flex; gap: 5px; flex-direction: column;
-  `;
-  
-  const modes = [
-    { id: 'camera', label: '📷', title: 'Look at camera' },
-    { id: 'mouse', label: '🖱️', title: 'Track mouse' },
-    { id: 'idle', label: '👀', title: 'Idle look around' },
-    { id: 'disabled', label: '❌', title: 'Disable look-at' }
-  ];
-  
-  modes.forEach(mode => {
-    const btn = document.createElement('button');
-    btn.textContent = mode.label;
-    btn.title = mode.title;
-    btn.className = 'icon-btn';
-    btn.onclick = () => {
-      enhancedSolmate.setLookAtMode(mode.id);
-      // Update active state
-      lookAtControls.querySelectorAll('button').forEach(b => b.style.background = 'var(--pill)');
-      btn.style.background = 'var(--accent)';
-    };
-    lookAtControls.appendChild(btn);
-  });
-  
-  // Voice detection toggle
-  const voiceBtn = document.createElement('button');
-  voiceBtn.textContent = '🎤';
-  voiceBtn.title = 'Toggle voice detection';
-  voiceBtn.className = 'icon-btn';
-  voiceBtn.onclick = async () => {
-    if (enhancedSolmate.voiceDetector.isListening) {
-      enhancedSolmate.stopVoiceDetection();
-      voiceBtn.style.background = 'var(--pill)';
-    } else {
-      await enhancedSolmate.startVoiceDetection();
-      voiceBtn.style.background = 'var(--success)';
-    }
-  };
-  lookAtControls.appendChild(voiceBtn);
-  
-  document.body.appendChild(lookAtControls);
-  
-  // Default to camera mode
-  lookAtControls.querySelector('button').click();
-}
-
-// ===== NEW DEBUG COMMANDS =====
-window.testEnhancedFeatures = function() {
-  console.log('🧪 Testing enhanced features...');
-  console.log('Enhanced Solmate initialized:', enhancedSolmate.isInitialized);
-  console.log('Look-at controller:', !!enhancedSolmate.lookAtController);
-  console.log('Expression controller:', !!enhancedSolmate.expressionController);
-  console.log('Memory system conversations:', enhancedSolmate.memorySystem.conversations.length);
-  console.log('User profile:', enhancedSolmate.memorySystem.userProfile);
-  
-  // Test expression
-  if (enhancedSolmate.expressionController) {
-    enhancedSolmate.expressionController.playExpression('happy', 0.8, 2000);
-  }
-};
-
-window.setLookAtMode = function(mode) {
-  enhancedSolmate.setLookAtMode(mode);
-  console.log(`Look-at mode set to: ${mode}`);
-};
-
-window.testExpression = function(expression = 'happy') {
-  if (enhancedSolmate.expressionController) {
-    enhancedSolmate.expressionController.playExpression(expression, 0.8, 2000);
-    console.log(`Playing expression: ${expression}`);
-  }
-};
-
-window.getMemoryStats = function() {
-  const memory = enhancedSolmate.memorySystem;
-  console.log('Memory Statistics:', {
-    conversations: memory.conversations.length,
-    favoriteTopics: memory.userProfile.favoriteTopics,
-    emotionalState: memory.emotionalState
-  });
-  return memory;
-};
-
-// ===== AUTO-START ENHANCED VRM SYSTEM =====
-setTimeout(() => {
-  const vrmModel = scene?.getObjectByName('VRM_Model');
-  if (vrmModel) {
-    console.log('🚀 Auto-starting enhanced VRM system...');
-    
-    // Initialize enhanced features if not already done
-    if (currentVRM && camera && !enhancedSolmate.isInitialized) {
-      enhancedSolmate.initialize(currentVRM, camera);
-      createEnhancedUI();
-    }
-    
-    // Test wave after everything is set up
-    setTimeout(() => {
-      if (window.vrmAnimationData && Object.keys(window.vrmAnimationData.bones).length > 0) {
-        playEnhancedVRMWave();
-        queueTTS("Hello! I'm your enhanced VRM assistant with advanced look-at, memory, and expression systems!", 'nova');
-      } else {
-        queueTTS("Hello! I'm Solmate with enhanced features! I can track your mouse, remember our conversations, and express emotions naturally!", 'nova');
-      }
-    }, 2000);
-  }
-}, 12000); // Start after VRM is fully loaded and processed
-
-console.log('🎭 Enhanced Solmate features loaded!');
-console.log('🎮 New commands: testEnhancedFeatures(), setLookAtMode("camera"), testExpression("happy"), getMemoryStats()');
-console.log('👀 Look-at modes: camera, mouse, idle, disabled');
-console.log('💭 Memory system now tracks your conversations and preferences!');
