@@ -92,10 +92,10 @@ async function loadDependencies() {
   }
 }
 
-// ===== ENHANCED THREE.JS SETUP WITH RELIABLE GLTF LOADING =====
+// ===== ENHANCED THREE.JS SETUP WITH GROK COMPANION STYLE =====
 async function initThreeEnhanced() {
   try {
-    log('=== ENHANCED THREE.JS INITIALIZATION ===');
+    log('=== THREE.JS INITIALIZATION WITH GROK COMPANION STYLE ===');
     
     await loadDependencies();
     setupThreeJSScene();
@@ -106,13 +106,14 @@ async function initThreeEnhanced() {
       try {
         await loadVRMWithPlugin(VRM_PATH);
         setupVRMAnimationsAndExpressions();
+        applyGrokCompanionStyle();
       } catch (vrmError) {
         log('VRM loading failed, keeping fallback', vrmError);
       }
     }, 1000);
     
     document.getElementById('loading').style.display = 'none';
-    log('=== ENHANCED THREE.JS INITIALIZATION COMPLETE ===');
+    log('=== THREE.JS INITIALIZATION COMPLETE ===');
     
   } catch (err) {
     log('=== ENHANCED INITIALIZATION FAILED ===', err);
@@ -124,7 +125,7 @@ async function initThreeEnhanced() {
 // ===== SETUP SCENE =====
 function setupThreeJSScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
+  scene.background = new THREE.Color(0x1a1a2e); // Dark futuristic background
 
   camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 1.3, 2.5);
@@ -138,15 +139,15 @@ function setupThreeJSScene() {
   renderer.shadowMap.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+  const ambientLight = new THREE.AmbientLight(0x4a4a77, 0.7); // Subtle blue ambient
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  const directionalLight = new THREE.DirectionalLight(0x00d4ff, 1.0); // Cyan light for tech feel
   directionalLight.position.set(1, 2, 1);
   directionalLight.castShadow = true;
   scene.add(directionalLight);
 
-  const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  const fillLight = new THREE.DirectionalLight(0x00ffcc, 0.5); // Teal fill
   fillLight.position.set(-1, 1, -1);
   scene.add(fillLight);
 
@@ -219,18 +220,47 @@ function setupVRMAnimationsAndExpressions() {
 
   mixer = new THREE.AnimationMixer(currentVRM.scene);
 
+  // Grok-like idle animations
   const updateIdle = () => {
-    currentVRM.scene.position.y = Math.sin(clock.getElapsedTime()) * 0.01;
+    const time = clock.getElapsedTime();
+    currentVRM.scene.position.y = Math.sin(time) * 0.01; // Subtle breathing
+    currentVRM.scene.rotation.y = Math.sin(time * 0.2) * 0.1; // Gentle head tilt
     requestAnimationFrame(updateIdle);
   };
   updateIdle();
 
   if (currentVRM.expressionManager) {
-    currentVRM.expressionManager.setValue('happy', 0.5);
+    // Default expression
+    currentVRM.expressionManager.setValue('happy', 0.3);
     currentVRM.expressionManager.update();
   }
 
   log('✅ VRM animations and expressions initialized');
+}
+
+// ===== APPLY GROK COMPANION STYLE =====
+function applyGrokCompanionStyle() {
+  if (!currentVRM) return;
+
+  currentVRM.scene.traverse((child) => {
+    if (child.isMesh && child.material) {
+      const material = child.material;
+      if (material.isMToonMaterial) {
+        // Add holographic/tech effect
+        material.emissive.set(0x00d4ff); // Cyan glow
+        material.emissiveIntensity = 0.2;
+        material.shadeFactor.set(0.7, 0.7, 0.7); // Softer shading
+        material.needsUpdate = true;
+      }
+    }
+  });
+
+  // Enable spring bones for dynamic movement (if present in VRM)
+  if (currentVRM.springBoneManager) {
+    currentVRM.springBoneManager.update(clock.getDelta());
+  }
+
+  log('✅ Applied Grok companion style');
 }
 
 // ===== ANIMATION LOOP =====
@@ -242,6 +272,12 @@ function animate() {
 
   if (currentVRM) {
     currentVRM.update(delta);
+    if (currentVRM.expressionManager && conversation.length) {
+      const lastMsg = conversation[conversation.length - 1].content;
+      if (lastMsg.includes('fun')) currentVRM.expressionManager.setValue('happy', 0.8);
+      else if (lastMsg.includes('sad')) currentVRM.expressionManager.setValue('sorrow', 0.6);
+      currentVRM.expressionManager.update();
+    }
   }
 
   renderer.render(scene, camera);
