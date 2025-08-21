@@ -23,12 +23,11 @@
     "web3"
   ],
   "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "dev": "vercel dev --listen 3000",
-    "build": "echo 'No build step required for serverless'",
+    "build": "echo 'Static files only - no build needed'",
     "deploy": "vercel --prod",
     "deploy:preview": "vercel",
     "verify": "node web/verify-deploy.js",
@@ -59,15 +58,5 @@
         "memory": 1024
       }
     }
-  },
-  "browserslist": [
-    "last 2 Chrome versions",
-    "last 2 Firefox versions",
-    "last 2 Safari versions",
-    "last 2 Edge versions"
-  ],
-  "volta": {
-    "node": "20.11.0",
-    "npm": "10.2.4"
   }
 }
