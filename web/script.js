@@ -90,6 +90,33 @@ async function initializeVRMSystem() {
         
         log('✅ Three.js loaded successfully');
         
+        // Load GLTF Loader BEFORE VRM
+        const gltfSources = [
+            'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js',
+            'https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js'
+        ];
+        
+        let gltfLoaded = false;
+        for (const source of gltfSources) {
+            try {
+                log(`Trying GLTF source: ${source}`);
+                await loadScript(source);
+                
+                if (THREE.GLTFLoader) {
+                    log('✅ GLTF Loader found');
+                    gltfLoaded = true;
+                    break;
+                }
+            } catch (e) {
+                log(`GLTF source failed: ${source}`, e);
+            }
+        }
+        
+        if (!gltfLoaded) {
+            log('Creating embedded GLTF loader...');
+            createMinimalGLTFLoader();
+        }
+        
         // Try multiple VRM library sources
         const vrmSources = [
             'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
@@ -142,6 +169,12 @@ async function initializeVRMSystem() {
             return await createFallbackVRMLoader();
         }
         
+        // Verify GLTF Loader is available
+        if (!THREE.GLTFLoader) {
+            log('⚠️ GLTF Loader still not available, creating minimal version');
+            createMinimalGLTFLoader();
+        }
+        
         log('✅ VRM system initialized successfully');
         return true;
     } catch (error) {
@@ -155,11 +188,9 @@ async function createFallbackVRMLoader() {
     log('🔧 Creating fallback VRM loader...');
     
     try {
-        // Load GLTF loader first
-        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
-        
+        // Ensure GLTF loader exists
         if (!THREE.GLTFLoader) {
-            // Create minimal GLTF loader
+            log('Creating minimal GLTF loader for fallback...');
             createMinimalGLTFLoader();
         }
         
@@ -1944,28 +1975,79 @@ window.fixTextures = function() {
 window.checkVRMSystem = function() {
     console.log('=== VRM SYSTEM CHECK ===');
     console.log('THREE loaded:', !!window.THREE);
+    console.log('GLTF Loader:', !!(THREE && THREE.GLTFLoader));
     console.log('VRM object:', !!window.VRM);
     console.log('VRM plugin:', !!(window.VRM && window.VRM.VRMLoaderPlugin));
-    console.log('GLTF Loader:', !!(THREE && THREE.GLTFLoader));
     
     if (window.VRM) {
         console.log('VRM object keys:', Object.keys(window.VRM));
     }
     
+    if (THREE && THREE.GLTFLoader) {
+        console.log('GLTF Loader type:', typeof THREE.GLTFLoader);
+        try {
+            const testLoader = new THREE.GLTFLoader();
+            console.log('✅ GLTF Loader can be instantiated');
+        } catch (e) {
+            console.log('❌ GLTF Loader instantiation failed:', e);
+        }
+    }
+    
     return {
         three: !!window.THREE,
+        gltfLoader: !!(THREE && THREE.GLTFLoader),
         vrm: !!window.VRM,
-        plugin: !!(window.VRM && window.VRM.VRMLoaderPlugin),
-        gltfLoader: !!(THREE && THREE.GLTFLoader)
+        plugin: !!(window.VRM && window.VRM.VRMLoaderPlugin)
     };
+};
+
+window.testGLTFLoader = function() {
+    console.log('=== GLTF LOADER TEST ===');
+    
+    if (!THREE) {
+        console.log('❌ THREE.js not loaded');
+        return false;
+    }
+    
+    if (!THREE.GLTFLoader) {
+        console.log('❌ GLTFLoader not available, creating minimal version...');
+        createMinimalGLTFLoader();
+        
+        if (THREE.GLTFLoader) {
+            console.log('✅ Minimal GLTFLoader created');
+        } else {
+            console.log('❌ Failed to create GLTFLoader');
+            return false;
+        }
+    }
+    
+    try {
+        const loader = new THREE.GLTFLoader();
+        console.log('✅ GLTFLoader instantiated successfully');
+        
+        if (window.VRM && window.VRM.VRMLoaderPlugin) {
+            loader.register((parser) => {
+                return new window.VRM.VRMLoaderPlugin(parser);
+            });
+            console.log('✅ VRM plugin registered successfully');
+            return true;
+        } else {
+            console.log('❌ VRM plugin not available');
+            return false;
+        }
+    } catch (e) {
+        console.log('❌ GLTFLoader test failed:', e);
+        return false;
+    }
 };
 
 // ===== CONSOLE MESSAGES =====
 console.log('🚀 Enhanced Solmate VRM System Loaded!');
 console.log('🛠️ Debug commands: debugVRM(), testExpression("happy"), testChat(), testTTS(), playWave(), reloadVRM(), fixTextures()');
 console.log('🎭 Features: Natural animations, proper textures, correct positioning, mouse tracking, robust fallbacks');
-console.log('🔧 System check: checkVRMSystem()');
+console.log('🔧 System check: checkVRMSystem(), testGLTFLoader()');
 console.log('👋 Try: playWave() to test wave animation');
+console.log('💡 If VRM fails: Run testGLTFLoader() to diagnose issues');
 
 // ===== START APPLICATION =====
 if (document.readyState === 'loading') {
