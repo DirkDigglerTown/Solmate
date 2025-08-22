@@ -1,4 +1,9 @@
-directionalLight.position.set(1, 1, 1);
+// Lighting setup optimized for VRM
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight.position.set(1, 1, 1);
     directionalLight.castShadow = true;
     scene.add(directionalLight);
     
@@ -793,13 +798,16 @@ function fetchPrice() {
     return new Promise(async (resolve, reject) => {
         try {
             log('💰 Fetching SOL price...');
-            const url = `/api/price?ids=${SOL_MINT}`;
             
             const res = await fetch(url);
             if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
             
             const data = await res.json();
             
+            const solPrice = document.getElementById('solPrice');
+            if (!solPrice) {
+                resolve();
+                return;
             }
             
             let price = null;
@@ -1510,6 +1518,7 @@ if (document.readyState === 'loading') {
     init();
 }// web/script.js - Complete Solmate Implementation with VRM Fixes Only
 // Fixed: parser.getDependencies error, circular reference logging
+// NO DESIGN CHANGES - preserves original UI/UX
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
@@ -1878,7 +1887,7 @@ EnhancedGLTFParser.prototype = {
         }
     },
     
-    // CRITICAL FIX: Add missing getDependencies method (plural)
+    // CRITICAL FIX: Add missing getDependencies method (plural) - this fixes the main error!
     getDependencies: function(type) {
         if (!this.json || !this.json[type]) {
             return Promise.resolve([]);
@@ -2312,8 +2321,4 @@ function setupScene() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     
     // Lighting setup optimized for VRM
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    directionalLight.position.set(1,
+    const ambientLight = new THREE.AmbientLight(0xf
