@@ -119,6 +119,10 @@ async function initializeVRMSystem() {
         
         // Try multiple VRM library sources
         const vrmSources = [
+            // Try newer version first
+            'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.min.js',
+            'https://unpkg.com/@pixiv/three-vrm@3.0.0/lib/three-vrm.min.js',
+            // Fallback to working version
             'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
             'https://unpkg.com/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
             'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@latest/lib/three-vrm.min.js',
@@ -2001,42 +2005,53 @@ window.checkVRMSystem = function() {
     };
 };
 
-window.testGLTFLoader = function() {
-    console.log('=== GLTF LOADER TEST ===');
+window.testVRMLoad = function() {
+    console.log('=== VRM LOAD TEST ===');
     
-    if (!THREE) {
-        console.log('❌ THREE.js not loaded');
+    if (!THREE || !THREE.GLTFLoader) {
+        console.log('❌ GLTF Loader not available');
         return false;
     }
     
-    if (!THREE.GLTFLoader) {
-        console.log('❌ GLTFLoader not available, creating minimal version...');
-        createMinimalGLTFLoader();
-        
-        if (THREE.GLTFLoader) {
-            console.log('✅ Minimal GLTFLoader created');
-        } else {
-            console.log('❌ Failed to create GLTFLoader');
-            return false;
-        }
+    if (!window.VRM || !window.VRM.VRMLoaderPlugin) {
+        console.log('❌ VRM plugin not available');
+        return false;
     }
     
+    console.log('Testing VRM loading with current setup...');
+    
+    const loader = new THREE.GLTFLoader();
+    
     try {
-        const loader = new THREE.GLTFLoader();
-        console.log('✅ GLTFLoader instantiated successfully');
+        loader.register((parser) => {
+            console.log('Parser object:', parser);
+            console.log('Parser has getDependency:', typeof parser.getDependency);
+            console.log('Parser prototype:', Object.getOwnPropertyNames(Object.getPrototypeOf(parser)));
+            
+            const plugin = new window.VRM.VRMLoaderPlugin(parser);
+            console.log('VRM plugin created successfully');
+            return plugin;
+        });
         
-        if (window.VRM && window.VRM.VRMLoaderPlugin) {
-            loader.register((parser) => {
-                return new window.VRM.VRMLoaderPlugin(parser);
-            });
-            console.log('✅ VRM plugin registered successfully');
-            return true;
-        } else {
-            console.log('❌ VRM plugin not available');
-            return false;
-        }
+        console.log('✅ VRM plugin registered successfully');
+        
+        // Try to load the actual VRM file
+        loader.load('/assets/avatar/solmate.vrm', 
+            (gltf) => {
+                console.log('✅ VRM loaded successfully!', gltf);
+                console.log('VRM data:', gltf.userData.vrm);
+            },
+            (progress) => {
+                console.log('Loading progress:', progress);
+            },
+            (error) => {
+                console.log('❌ VRM loading failed:', error);
+            }
+        );
+        
+        return true;
     } catch (e) {
-        console.log('❌ GLTFLoader test failed:', e);
+        console.log('❌ VRM test failed:', e);
         return false;
     }
 };
@@ -2045,9 +2060,9 @@ window.testGLTFLoader = function() {
 console.log('🚀 Enhanced Solmate VRM System Loaded!');
 console.log('🛠️ Debug commands: debugVRM(), testExpression("happy"), testChat(), testTTS(), playWave(), reloadVRM(), fixTextures()');
 console.log('🎭 Features: Natural animations, proper textures, correct positioning, mouse tracking, robust fallbacks');
-console.log('🔧 System check: checkVRMSystem(), testGLTFLoader()');
+console.log('🔧 System check: checkVRMSystem(), testVRMLoad()');
 console.log('👋 Try: playWave() to test wave animation');
-console.log('💡 If VRM fails: Run testGLTFLoader() to diagnose issues');
+console.log('💡 If VRM fails: Run testVRMLoad() to diagnose VRM loading issues');
 
 // ===== START APPLICATION =====
 if (document.readyState === 'loading') {
