@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Solmate</title>
+  <title>Solmate - Enhanced VRM System</title>
+  <meta name="description" content="Solmate - Your enhanced Solana AI companion with improved 3D VRM avatar, chat, TTS, and live blockchain data">
   <link rel="apple-touch-icon" href="/assets/logo/solmatelogo.png">
   <link rel="icon" href="/assets/logo/solmatelogo.png">
   <link rel="stylesheet" href="/style.css">
@@ -11,7 +12,7 @@
 <body>
   <header class="hud">
     <div class="left">
-      <button id="themeToggle">🌙</button>
+      <button id="themeToggle" class="icon-btn">🌙</button>
       <div class="pill ws" id="wsLight">
         WS OFF
       </div>
@@ -23,10 +24,14 @@
       ❤️
     </div>
   </header>
-  <canvas id="vrmCanvas"></canvas>
+  
+  <main class="stage-wrap">
+    <canvas id="vrmCanvas"></canvas>
+  </main>
+  
   <div id="chatContainer" class="dock">
     <form id="chatForm">
-      <input id="promptInput" type="text" class="ask" placeholder="Ask anything about Solana, crypto, or just vibe...">
+      <input id="promptInput" type="text" class="ask" placeholder="Ask anything about Solana, crypto, or just vibe..." autocomplete="off">
       <select id="voiceSelect" class="sel">
         <option value="verse">Verse</option>
         <option value="alloy">Alloy</option>
@@ -37,27 +42,48 @@
         <option value="nova">Nova</option>
         <option value="shimmer">Shimmer</option>
       </select>
-      <button id="sendBtn" class="send icon-btn">▶</button>
-      <button id="clearBtn" class="send icon-btn">🔇</button>
+      <button id="sendBtn" class="send" type="submit" aria-label="Send message">▶</button>
+      <button id="clearBtn" class="send" type="button" aria-label="Clear audio queue">🔇</button>
     </form>
   </div>
-  <div id="debugOverlay" class="overlay hidden">
-    <h3>Debug</h3>
-    <ul>
-      <li>Press Ctrl+D to toggle logs overlay</li>
-      <li>Check browser console for detailed errors</li>
-      <li>VRM file should be ~21MB</li>
-      <li>Verify /api/health endpoint</li>
-      <li>OpenAI key must be set in Vercel env</li>
-    </ul>
-    <div id="overlayLogs"></div>
+  
+  <!-- VU Meter for audio visualization -->
+  <div class="vu-wrap hidden" id="vuMeter">
+    <div class="vu" id="vuBar"></div>
   </div>
   
-  <!-- Loading indicator -->
-  <div id="loadingStatus" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: Arial, sans-serif; z-index: 1000;">
-    Initializing Solmate...
+  <!-- Typing indicator -->
+  <div id="typingIndicator" class="typing hidden">
+    Solmate is thinking...
   </div>
+  
+  <!-- Debug overlay -->
+  <details id="debugTips" class="overlay hidden">
+    <summary>Debug Info</summary>
+    <div id="overlayLogs"></div>
+    <div style="margin-top: 12px; font-size: 10px; opacity: 0.7;">
+      <div>🔧 <kbd>Ctrl+D</kbd> - Toggle debug overlay</div>
+      <div>💡 Console commands:</div>
+      <div>• <code>debugVRMSystem()</code> - System diagnostics</div>
+      <div>• <code>analyzeVRMFile()</code> - VRM file analysis</div>
+      <div>• <code>forceVRMReload()</code> - Reload VRM</div>
+      <div>• <code>testChat()</code> - Test chat system</div>
+      <div>• <code>playWave()</code> - Test wave animation</div>
+    </div>
+  </details>
+  
+  <!-- Loading status -->
+  <div id="loadingStatus" class="loading-status">
+    🎭 Initializing Enhanced VRM System...
+  </div>
+  
+  <!-- Error notifications container -->
+  <div id="errorContainer" class="error-container"></div>
   
   <script src="/script.js"></script>
+  
+  <!-- Preload critical assets -->
+  <link rel="preload" href="/assets/avatar/solmate.vrm" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="/assets/logo/solmatelogo.png" as="image">
 </body>
 </html>
