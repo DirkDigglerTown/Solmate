@@ -1,5 +1,5 @@
 // web/script.js - Complete Solmate Implementation with AIRI-Inspired VRM Fixes
-// Fixed: Model direction, texture rendering, camera positioning, animations
+// Fixed: Model direction, texture rendering, camera positioning, animations, robust fallbacks
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
@@ -75,12 +75,12 @@ function loadScript(src) {
     });
 }
 
-// ===== VRM SYSTEM INITIALIZATION (AIRI APPROACH) =====
+// ===== VRM SYSTEM INITIALIZATION (MULTIPLE STRATEGIES) =====
 async function initializeVRMSystem() {
-    log('🎭 Initializing VRM system (AIRI approach)...');
+    log('🎭 Initializing VRM system (multiple strategies)...');
     
     try {
-        // Load Three.js core
+        // Load Three.js core first
         await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js');
         THREE = window.THREE;
         
@@ -88,20 +88,426 @@ async function initializeVRMSystem() {
             throw new Error('Three.js failed to load');
         }
         
-        // Load VRM loader
-        await loadScript('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js');
+        log('✅ Three.js loaded successfully');
         
-        if (!window.VRM || !window.VRM.VRMLoaderPlugin) {
-            throw new Error('VRM library not loaded properly');
+        // Try multiple VRM library sources
+        const vrmSources = [
+            'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
+            'https://unpkg.com/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
+            'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@latest/lib/three-vrm.min.js',
+            'https://unpkg.com/@pixiv/three-vrm@latest/lib/three-vrm.min.js'
+        ];
+        
+        let vrmLoaded = false;
+        for (const source of vrmSources) {
+            try {
+                log(`Trying VRM source: ${source}`);
+                await loadScript(source);
+                
+                // Check multiple possible locations for VRM
+                if (window.VRM && window.VRM.VRMLoaderPlugin) {
+                    log('✅ VRM found at window.VRM.VRMLoaderPlugin');
+                    vrmLoaded = true;
+                    break;
+                } else if (window.THREE && window.THREE.VRMLoaderPlugin) {
+                    window.VRM = { VRMLoaderPlugin: window.THREE.VRMLoaderPlugin };
+                    log('✅ VRM found at window.THREE.VRMLoaderPlugin');
+                    vrmLoaded = true;
+                    break;
+                } else if (window.VRMLoaderPlugin) {
+                    window.VRM = { VRMLoaderPlugin: window.VRMLoaderPlugin };
+                    log('✅ VRM found at window.VRMLoaderPlugin');
+                    vrmLoaded = true;
+                    break;
+                }
+                
+                // Wait a moment for the script to fully initialize
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Check again after delay
+                if (window.VRM && window.VRM.VRMLoaderPlugin) {
+                    log('✅ VRM loaded after delay');
+                    vrmLoaded = true;
+                    break;
+                }
+                
+            } catch (e) {
+                log(`VRM source failed: ${source}`, e);
+                continue;
+            }
+        }
+        
+        if (!vrmLoaded) {
+            log('⚠️ VRM library not found, creating fallback loader');
+            return await createFallbackVRMLoader();
         }
         
         log('✅ VRM system initialized successfully');
         return true;
     } catch (error) {
         log('❌ VRM system initialization failed:', error);
+        return await createFallbackVRMLoader();
+    }
+}
+
+// ===== FALLBACK VRM LOADER (FOR WHEN CDN FAILS) =====
+async function createFallbackVRMLoader() {
+    log('🔧 Creating fallback VRM loader...');
+    
+    try {
+        // Load GLTF loader first
+        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
+        
+        if (!THREE.GLTFLoader) {
+            // Create minimal GLTF loader
+            createMinimalGLTFLoader();
+        }
+        
+        // Create minimal VRM support
+        window.VRM = {
+            VRMLoaderPlugin: createMinimalVRMPlugin()
+        };
+        
+        log('✅ Fallback VRM loader created');
+        return true;
+    } catch (error) {
+        log('❌ Fallback VRM loader failed:', error);
         return false;
     }
 }
+
+// ===== MINIMAL GLTF LOADER =====
+function createMinimalGLTFLoader() {
+    THREE.GLTFLoader = function(manager) {
+        this.manager = manager || THREE.DefaultLoadingManager;
+        this.path = '';
+    };
+    
+    THREE.GLTFLoader.prototype = {
+        constructor: THREE.GLTFLoader,
+        
+        register: function(plugin) {
+            this.plugins = this.plugins || [];
+            this.plugins.push(plugin);
+            return this;
+        },
+        
+        load: function(url, onLoad, onProgress, onError) {
+            const scope = this;
+            const loader = new THREE.FileLoader(scope.manager);
+            loader.setPath(scope.path);
+            loader.setResponseType('arraybuffer');
+            
+            loader.load(url, function(data) {
+                try {
+                    scope.parse(data, onLoad, onError);
+                } catch (e) {
+                    if (onError) onError(e);
+                }
+            }, onProgress, onError);
+        },
+        
+        parse: function(data, onLoad, onError) {
+            try {
+                const parser = new GLTFParser(data);
+                parser.parse().then((gltf) => {
+                    // Apply plugins if any
+                    if (this.plugins) {
+                        this.plugins.forEach(plugin => {
+                            if (typeof plugin === 'function') {
+                                const pluginInstance = plugin(parser);
+                                if (pluginInstance && pluginInstance.afterRoot) {
+                                    pluginInstance.afterRoot(gltf);
+                                }
+                            }
+                        });
+                    }
+                    onLoad(gltf);
+                }).catch(onError);
+            } catch (error) {
+                if (onError) onError(error);
+            }
+        }
+    };
+}
+
+// ===== MINIMAL VRM PLUGIN =====
+function createMinimalVRMPlugin() {
+    return function(parser) {
+        return {
+            afterRoot: function(gltf) {
+                // Create minimal VRM object
+                const vrm = {
+                    scene: gltf.scene,
+                    userData: gltf.userData,
+                    isMinimalVRM: true,
+                    update: function(deltaTime) {
+                        // Basic update function
+                    }
+                };
+                
+                // Store VRM in userData
+                gltf.userData.vrm = vrm;
+                
+                log('✅ Minimal VRM object created');
+            }
+        };
+    };
+}
+
+// ===== MINIMAL GLTF PARSER =====
+function GLTFParser(data) {
+    this.json = {};
+    this.data = data;
+    this.textureLoader = new THREE.TextureLoader();
+    this.textureLoader.setCrossOrigin('anonymous');
+}
+
+GLTFParser.prototype = {
+    parse: function() {
+        return new Promise((resolve, reject) => {
+            try {
+                if (this.data instanceof ArrayBuffer) {
+                    this.parseGLB();
+                }
+                
+                this.buildScene().then(resolve).catch(reject);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    },
+    
+    parseGLB: function() {
+        const headerView = new DataView(this.data, 0, 12);
+        const magic = headerView.getUint32(0, true);
+        
+        if (magic !== 0x46546C67) {
+            throw new Error('Invalid GLB file');
+        }
+        
+        const length = headerView.getUint32(8, true);
+        let chunkIndex = 12;
+        
+        while (chunkIndex < length) {
+            const chunkHeaderView = new DataView(this.data, chunkIndex, 8);
+            const chunkLength = chunkHeaderView.getUint32(0, true);
+            const chunkType = chunkHeaderView.getUint32(4, true);
+            
+            if (chunkType === 0x4E4F534A) {
+                const jsonChunk = new Uint8Array(this.data, chunkIndex + 8, chunkLength);
+                this.json = JSON.parse(new TextDecoder().decode(jsonChunk));
+            } else if (chunkType === 0x004E4942) {
+                this.body = this.data.slice(chunkIndex + 8, chunkIndex + 8 + chunkLength);
+            }
+            
+            chunkIndex += 8 + chunkLength;
+        }
+    },
+    
+    buildScene: function() {
+        return new Promise((resolve) => {
+            const scene = new THREE.Group();
+            scene.name = 'VRM_Scene';
+            
+            if (this.json.meshes && this.json.nodes) {
+                try {
+                    const meshes = this.createMeshes();
+                    const nodes = this.createNodes(meshes);
+                    this.buildHierarchy(nodes);
+                    this.addToScene(scene, nodes);
+                } catch (e) {
+                    log('Mesh creation failed, using simple geometry');
+                    this.createSimpleGeometry(scene);
+                }
+            } else {
+                this.createSimpleGeometry(scene);
+            }
+            
+            resolve({
+                scene: scene,
+                animations: this.json.animations || [],
+                userData: { json: this.json }
+            });
+        });
+    },
+    
+    createSimpleGeometry: function(scene) {
+        // Create a simple humanoid figure
+        const group = new THREE.Group();
+        group.name = 'SimpleVRM';
+        
+        // Head
+        const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
+        const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.y = 1.6;
+        head.name = 'Head';
+        group.add(head);
+        
+        // Body
+        const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 1.1;
+        body.name = 'Body';
+        group.add(body);
+        
+        // Skirt
+        const skirtGeo = new THREE.CylinderGeometry(0.18, 0.25, 0.3, 12);
+        const skirtMat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
+        const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+        skirt.position.y = 0.75;
+        skirt.name = 'Skirt';
+        group.add(skirt);
+        
+        scene.add(group);
+    },
+    
+    createMeshes: function() {
+        const meshes = [];
+        const colors = [0x8B4513, 0xffdbac, 0xff6b6b, 0x4169E1, 0xffdbac, 0x000000];
+        
+        if (!this.json.meshes) return meshes;
+        
+        this.json.meshes.forEach((meshDef, index) => {
+            try {
+                const group = new THREE.Group();
+                group.name = meshDef.name || `Mesh_${index}`;
+                
+                if (meshDef.primitives) {
+                    meshDef.primitives.forEach((primitive, primitiveIndex) => {
+                        try {
+                            const geometry = this.createGeometry(primitive);
+                            const color = colors[index % colors.length];
+                            const material = new THREE.MeshLambertMaterial({ color });
+                            
+                            const mesh = new THREE.Mesh(geometry, material);
+                            mesh.name = `${group.name}_${primitiveIndex}`;
+                            group.add(mesh);
+                        } catch (err) {
+                            log('Failed to create mesh primitive:', err);
+                        }
+                    });
+                }
+                
+                meshes[index] = group;
+            } catch (err) {
+                log('Failed to create mesh:', err);
+            }
+        });
+        
+        return meshes;
+    },
+    
+    createGeometry: function(primitive) {
+        const geometry = new THREE.BufferGeometry();
+        
+        try {
+            if (primitive.attributes && primitive.attributes.POSITION !== undefined) {
+                const accessor = this.json.accessors[primitive.attributes.POSITION];
+                const bufferAttribute = this.createBufferAttribute(accessor);
+                geometry.setAttribute('position', bufferAttribute);
+            }
+            
+            if (primitive.indices !== undefined) {
+                const accessor = this.json.accessors[primitive.indices];
+                const bufferAttribute = this.createBufferAttribute(accessor);
+                geometry.setIndex(bufferAttribute);
+            }
+            
+            geometry.computeVertexNormals();
+        } catch (err) {
+            log('Geometry creation error:', err);
+            // Fallback geometry
+            const vertices = new Float32Array([
+                0, 1, 0,
+                -1, -1, 0,
+                1, -1, 0
+            ]);
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        }
+        
+        return geometry;
+    },
+    
+    createBufferAttribute: function(accessor) {
+        try {
+            const bufferView = this.json.bufferViews[accessor.bufferView];
+            const byteOffset = (accessor.byteOffset || 0) + (bufferView.byteOffset || 0);
+            const componentType = accessor.componentType;
+            const itemSize = this.getItemSize(accessor.type);
+            const TypedArray = this.getTypedArray(componentType);
+            
+            const array = new TypedArray(this.body, byteOffset, accessor.count * itemSize);
+            return new THREE.BufferAttribute(array, itemSize);
+        } catch (err) {
+            log('Buffer attribute creation failed:', err);
+            return new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3);
+        }
+    },
+    
+    createNodes: function(meshes) {
+        const nodes = [];
+        
+        if (!this.json.nodes) return nodes;
+        
+        this.json.nodes.forEach((nodeDef, index) => {
+            const node = new THREE.Object3D();
+            node.name = nodeDef.name || `Node_${index}`;
+            
+            if (nodeDef.mesh !== undefined && meshes[nodeDef.mesh]) {
+                node.add(meshes[nodeDef.mesh]);
+            }
+            
+            nodes[index] = node;
+        });
+        
+        return nodes;
+    },
+    
+    buildHierarchy: function(nodes) {
+        this.json.nodes.forEach((nodeDef, index) => {
+            if (nodeDef.children) {
+                nodeDef.children.forEach(childIndex => {
+                    if (nodes[childIndex]) {
+                        nodes[index].add(nodes[childIndex]);
+                    }
+                });
+            }
+        });
+    },
+    
+    addToScene: function(scene, nodes) {
+        nodes.forEach(node => {
+            if (!node.parent) {
+                scene.add(node);
+            }
+        });
+    },
+    
+    getItemSize: function(type) {
+        switch (type) {
+            case 'SCALAR': return 1;
+            case 'VEC2': return 2;
+            case 'VEC3': return 3;
+            case 'VEC4': return 4;
+            default: return 1;
+        }
+    },
+    
+    getTypedArray: function(componentType) {
+        switch (componentType) {
+            case 5120: return Int8Array;
+            case 5121: return Uint8Array;
+            case 5122: return Int16Array;
+            case 5123: return Uint16Array;
+            case 5125: return Uint32Array;
+            case 5126: return Float32Array;
+            default: return Float32Array;
+        }
+    }
+};
 
 // ===== SCENE SETUP (PROPER CAMERA POSITIONING) =====
 function setupScene() {
@@ -225,7 +631,7 @@ async function loadVRMModel(url, retryCount = 0) {
     }
 }
 
-// ===== PROPER VRM MODEL SETUP (FIXING DIRECTION & TEXTURES) =====
+// ===== PROPER VRM MODEL SETUP (HANDLES REAL VRM + FALLBACKS) =====
 async function setupVRMModel(vrm) {
     log('🎭 Setting up VRM model...');
     updateLoadingProgress('positioning');
@@ -272,7 +678,6 @@ async function setupVRMModel(vrm) {
     vrm.scene.position.z = -scaledCenter.z;
     
     // CRITICAL FIX: Check if model is facing away and rotate if needed
-    // Most VRM models need 180-degree rotation to face the camera
     const shouldRotate = await checkModelDirection(vrm.scene);
     if (shouldRotate) {
         vrm.scene.rotation.y = Math.PI; // Rotate 180 degrees
@@ -282,7 +687,7 @@ async function setupVRMModel(vrm) {
     // Setup camera to view model properly
     setupCameraForModel(scaledBox);
     
-    // Setup VRM features
+    // Setup VRM features (handles both real VRM and fallback)
     setupVRMFeatures(vrm);
     
     // Fix materials and textures
@@ -342,11 +747,40 @@ function setupCameraForModel(modelBox) {
     });
 }
 
-// ===== VRM FEATURES SETUP =====
+// ===== VRM FEATURES SETUP (HANDLES FALLBACK) =====
 function setupVRMFeatures(vrm) {
     log('🎯 Setting up VRM features...');
     
-    // Setup look-at
+    // Check if this is a real VRM or fallback
+    if (vrm.isMinimalVRM) {
+        log('⚠️ Using minimal VRM features');
+        
+        // Create basic bone structure for animations
+        vrm.bones = {};
+        vrm.scene.traverse((child) => {
+            if (child.name === 'Head') {
+                vrm.bones.head = child;
+            } else if (child.name === 'Body') {
+                vrm.bones.body = child;
+            }
+        });
+        
+        // Create basic expression system
+        vrm.expressionManager = {
+            setValue: function(expression, value) {
+                log(`Expression: ${expression} = ${value}`);
+                // Basic expression simulation
+                if (expression === 'blink' && vrm.bones.head) {
+                    const originalScale = vrm.bones.head.scale.y;
+                    vrm.bones.head.scale.y = value > 0.5 ? 0.8 : originalScale;
+                }
+            }
+        };
+        
+        return;
+    }
+    
+    // Setup real VRM features
     if (vrm.lookAt) {
         vrm.lookAt.target = camera;
         log('👀 Look-at enabled');
@@ -486,9 +920,9 @@ function fixVRMTextures(vrmScene) {
     log(`✅ Texture fix complete: ${texturesPreserved} preserved, ${materialsFixed} materials fixed`);
 }
 
-// ===== PROPER VRM ANIMATIONS (NO MORE FLOATING!) =====
+// ===== PROPER VRM ANIMATIONS (HANDLES FALLBACK) =====
 function startVRMAnimations(vrm) {
-    log('🎭 Starting natural VRM animations...');
+    log('🎭 Starting VRM animations...');
     
     let time = 0;
     let blinkTimer = 0;
@@ -507,72 +941,136 @@ function startVRMAnimations(vrm) {
             vrm.update(deltaTime);
         }
         
-        // Natural breathing animation - SUBTLE!
-        if (vrm.humanoid) {
-            const chest = vrm.humanoid.getNormalizedBoneNode('chest');
-            if (chest) {
-                const breatheScale = 1 + Math.sin(breathingPhase * 2) * 0.008; // Very subtle
-                chest.scale.y = breatheScale;
-            }
+        // Handle different VRM types
+        if (vrm.isMinimalVRM) {
+            animateMinimalVRM(vrm, time, breathingPhase);
+        } else {
+            animateRealVRM(vrm, time, breathingPhase);
         }
         
-        // Auto-blink
+        // Auto-blink for both types
         if (blinkTimer > 2 + Math.random() * 3) {
             performBlink();
             blinkTimer = 0;
-        }
-        
-        // Subtle idle movements - NO FLOATING, NO Y-POSITION CHANGES!
-        if (!animationState.isTalking && !animationState.isWaving) {
-            if (vrm.humanoid) {
-                const head = vrm.humanoid.getNormalizedBoneNode('head');
-                if (head) {
-                    // Very subtle head movements
-                    head.rotation.x = Math.sin(time * 0.8) * 0.015 + animationState.headTarget.x * 0.2;
-                    head.rotation.y = Math.sin(time * 0.6) * 0.02 + animationState.headTarget.y * 0.2;
-                    head.rotation.z = Math.sin(time * 0.4) * 0.006;
-                }
-                
-                // Subtle shoulder movement
-                const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
-                const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
-                
-                if (leftShoulder) {
-                    leftShoulder.rotation.z = Math.sin(time * 1.2) * 0.01;
-                }
-                if (rightShoulder) {
-                    rightShoulder.rotation.z = Math.sin(time * 1.4) * -0.01;
-                }
-            }
         }
         
         requestAnimationFrame(animateVRM);
     }
     
     animateVRM();
-    log('✅ Natural VRM animations started');
+    log('✅ VRM animations started');
 }
 
-// ===== BLINKING =====
-function performBlink() {
-    if (currentVRM && currentVRM.expressionManager) {
-        try {
-            currentVRM.expressionManager.setValue('blink', 1.0);
-            setTimeout(() => {
-                if (currentVRM && currentVRM.expressionManager) {
-                    currentVRM.expressionManager.setValue('blink', 0);
-                }
-            }, 150);
-        } catch (e) {
-            // Blink not available
+// ===== MINIMAL VRM ANIMATION =====
+function animateMinimalVRM(vrm, time, breathingPhase) {
+    if (!animationState.isTalking && !animationState.isWaving) {
+        // Simple head bobbing
+        if (vrm.bones && vrm.bones.head) {
+            vrm.bones.head.rotation.x = Math.sin(time * 0.8) * 0.02;
+            vrm.bones.head.rotation.y = Math.sin(time * 0.6) * 0.03;
+        }
+        
+        // Simple breathing
+        if (vrm.bones && vrm.bones.body) {
+            const breatheScale = 1 + Math.sin(breathingPhase * 2) * 0.01;
+            vrm.bones.body.scale.y = breatheScale;
         }
     }
 }
 
-// ===== ENHANCED WAVE ANIMATION =====
+// ===== REAL VRM ANIMATION =====
+function animateRealVRM(vrm, time, breathingPhase) {
+    // Natural breathing animation - SUBTLE!
+    if (vrm.humanoid) {
+        const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+        if (chest) {
+            const breatheScale = 1 + Math.sin(breathingPhase * 2) * 0.008; // Very subtle
+            chest.scale.y = breatheScale;
+        }
+    }
+    
+    // Subtle idle movements - NO FLOATING, NO Y-POSITION CHANGES!
+    if (!animationState.isTalking && !animationState.isWaving) {
+        if (vrm.humanoid) {
+            const head = vrm.humanoid.getNormalizedBoneNode('head');
+            if (head) {
+                // Very subtle head movements
+                head.rotation.x = Math.sin(time * 0.8) * 0.015 + animationState.headTarget.x * 0.2;
+                head.rotation.y = Math.sin(time * 0.6) * 0.02 + animationState.headTarget.y * 0.2;
+                head.rotation.z = Math.sin(time * 0.4) * 0.006;
+            }
+            
+            // Subtle shoulder movement
+            const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+            const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+            
+            if (leftShoulder) {
+                leftShoulder.rotation.z = Math.sin(time * 1.2) * 0.01;
+            }
+            if (rightShoulder) {
+                rightShoulder.rotation.z = Math.sin(time * 1.4) * -0.01;
+            }
+        }
+    }
+}
+
+// ===== ENHANCED WAVE ANIMATION (HANDLES FALLBACK) =====
 function playEnhancedVRMWave() {
-    if (!currentVRM || !currentVRM.humanoid) {
-        log('❌ No VRM humanoid available for waving');
+    if (!currentVRM) {
+        log('❌ No VRM available for waving');
+        return;
+    }
+    
+    log('👋 Playing VRM wave animation...');
+    animationState.isWaving = true;
+    
+    // Handle different VRM types
+    if (currentVRM.isMinimalVRM) {
+        playMinimalWave();
+    } else {
+        playRealVRMWave();
+    }
+}
+
+// ===== MINIMAL VRM WAVE =====
+function playMinimalWave() {
+    log('👋 Playing minimal wave animation...');
+    
+    const vrmModel = scene.getObjectByName('VRM_Model');
+    if (!vrmModel) return;
+    
+    // Simple rotation animation for the whole model
+    const originalRotation = vrmModel.rotation.y;
+    
+    let waveTime = 0;
+    const waveDuration = 2000; // 2 seconds
+    
+    function animateMinimalWave() {
+        waveTime += 16;
+        
+        if (waveTime >= waveDuration) {
+            vrmModel.rotation.y = originalRotation;
+            animationState.isWaving = false;
+            log('👋 Minimal wave complete');
+            return;
+        }
+        
+        // Simple side-to-side motion
+        const progress = waveTime / waveDuration;
+        const waveIntensity = Math.sin(progress * Math.PI * 6) * 0.2; // 6 waves
+        vrmModel.rotation.y = originalRotation + waveIntensity;
+        
+        requestAnimationFrame(animateMinimalWave);
+    }
+    
+    animateMinimalWave();
+}
+
+// ===== REAL VRM WAVE =====
+function playRealVRMWave() {
+    if (!currentVRM.humanoid) {
+        log('❌ No humanoid system available, using minimal wave');
+        playMinimalWave();
         return;
     }
     
@@ -581,12 +1079,12 @@ function playEnhancedVRMWave() {
     const rightHand = currentVRM.humanoid.getNormalizedBoneNode('rightHand');
     
     if (!rightArm) {
-        log('❌ No right arm bone available for waving');
+        log('❌ No right arm bone available, using minimal wave');
+        playMinimalWave();
         return;
     }
     
-    log('👋 Playing enhanced VRM wave...');
-    animationState.isWaving = true;
+    log('👋 Playing real VRM wave animation...');
     
     // Save original positions
     const originalRotations = {
@@ -609,7 +1107,7 @@ function playEnhancedVRMWave() {
     let frameIndex = 0;
     const startTime = Date.now();
     
-    function animateWave() {
+    function animateRealWave() {
         const elapsed = (Date.now() - startTime) / 1000;
         
         if (elapsed >= 2.2 || frameIndex >= waveFrames.length - 1) {
@@ -623,7 +1121,7 @@ function playEnhancedVRMWave() {
             }
             
             animationState.isWaving = false;
-            log('👋 Wave complete');
+            log('👋 Real VRM wave complete');
             return;
         }
         
@@ -648,10 +1146,26 @@ function playEnhancedVRMWave() {
             rightLowerArm.rotation.z = THREE.MathUtils.lerp(currentFrame.lower.z, nextFrame.lower.z, smoothProgress);
         }
         
-        requestAnimationFrame(animateWave);
+        requestAnimationFrame(animateRealWave);
     }
     
-    animateWave();
+    animateRealWave();
+}
+
+// ===== BLINKING (HANDLES FALLBACK) =====
+function performBlink() {
+    if (currentVRM && currentVRM.expressionManager) {
+        try {
+            currentVRM.expressionManager.setValue('blink', 1.0);
+            setTimeout(() => {
+                if (currentVRM && currentVRM.expressionManager) {
+                    currentVRM.expressionManager.setValue('blink', 0);
+                }
+            }, 150);
+        } catch (e) {
+            // Blink not available
+        }
+    }
 }
 
 // ===== ERROR HANDLING =====
@@ -1348,7 +1862,8 @@ window.debugVRM = function() {
         console.log('VRM features:', {
             hasLookAt: !!currentVRM.lookAt,
             hasExpressions: !!currentVRM.expressionManager,
-            hasHumanoid: !!currentVRM.humanoid
+            hasHumanoid: !!currentVRM.humanoid,
+            isMinimalVRM: !!currentVRM.isMinimalVRM
         });
     }
     
@@ -1426,10 +1941,30 @@ window.fixTextures = function() {
     }
 };
 
+window.checkVRMSystem = function() {
+    console.log('=== VRM SYSTEM CHECK ===');
+    console.log('THREE loaded:', !!window.THREE);
+    console.log('VRM object:', !!window.VRM);
+    console.log('VRM plugin:', !!(window.VRM && window.VRM.VRMLoaderPlugin));
+    console.log('GLTF Loader:', !!(THREE && THREE.GLTFLoader));
+    
+    if (window.VRM) {
+        console.log('VRM object keys:', Object.keys(window.VRM));
+    }
+    
+    return {
+        three: !!window.THREE,
+        vrm: !!window.VRM,
+        plugin: !!(window.VRM && window.VRM.VRMLoaderPlugin),
+        gltfLoader: !!(THREE && THREE.GLTFLoader)
+    };
+};
+
 // ===== CONSOLE MESSAGES =====
 console.log('🚀 Enhanced Solmate VRM System Loaded!');
 console.log('🛠️ Debug commands: debugVRM(), testExpression("happy"), testChat(), testTTS(), playWave(), reloadVRM(), fixTextures()');
-console.log('🎭 Features: Natural animations, proper textures, correct positioning, mouse tracking');
+console.log('🎭 Features: Natural animations, proper textures, correct positioning, mouse tracking, robust fallbacks');
+console.log('🔧 System check: checkVRMSystem()');
 console.log('👋 Try: playWave() to test wave animation');
 
 // ===== START APPLICATION =====
