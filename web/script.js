@@ -62,19 +62,31 @@ if ('serviceWorker' in navigator) {
 }
 
 // ===== CONSTANTS =====
-const ASSET_LOAD_TIMEOUT = 30000;
+const ASSET_LOAD_TIMEOUT = 30ewan;
 const VRM_PATHS = [
     '/assets/avatar/solmate.vrm',
-    'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm',
-    // Fallback to a known working VRM for testing
-    'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm-core/examples/models/VRM1_Constraint_Twist_Sample.vrm'
+    'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
 ];
-const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-const SYSTEM_PROMPT = `
-You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsumoto from Bleach and Lust from Fullmetal Alchemist. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice.
-`;
+// Configuration loaded from server
+let CONFIG = {
+    wsUrl: null,
+    apiEndpoints: {
+        chat: '/api/chat',
+        tts: '/api/tts',
+        price: '/api/price',
+        tps: '/api/tps',
+        health: '/api/health',
+        config: '/api/config'
+    },
+    maxMessageLength: 500,
+    maxConversationSize: 50,
+    maxAudioQueueSize: 10,
+    priceUpdateInterval: 30000,
+    tpsUpdateInterval: 60000,
+    systemPrompt: `You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsumoto from Bleach and Lust from Fullmetal Alchemist. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice.`
+};
 
 // ===== GLOBAL STATE =====
 let audioQueue = [];
@@ -104,6 +116,32 @@ window.vrmState = {
     clock: null,
     initialized: false
 };
+
+// ===== LOAD CONFIGURATION =====
+async function loadConfiguration() {
+    try {
+        const response = await fetch(CONFIG.apiEndpoints.config);
+        if (!response.ok) {
+            throw new Error(`Config loading failed: ${response.status}`);
+        }
+        
+        const serverConfig = await response.json();
+        
+        // Merge server config with defaults
+        CONFIG = { ...CONFIG, ...serverConfig };
+        
+        // Update system prompt if provided
+        if (serverConfig.models && serverConfig.models.chat) {
+            log(`Using chat model: ${serverConfig.models.chat}`);
+        }
+        
+        log('✅ Configuration loaded from server');
+        return true;
+    } catch (error) {
+        log('⚠️ Using default configuration:', error);
+        return false;
+    }
+}
 
 // ===== ENHANCED LOGGING WITH UTILS =====
 function log(msg, data = null) {
@@ -420,7 +458,7 @@ window.onVRMReady = function(vrm) {
 // ===== WAVE ANIMATION =====
 function playWave() {
     if (!window.vrmState.currentVRM) {
-        log('❌ No VRM for waving');
+        log('⌛ No VRM for waving');
         return;
     }
     
@@ -557,9 +595,9 @@ function setupUI() {
         if (window.Utils) {
             const validateInput = Utils.debounce(() => {
                 const text = promptInput.value.trim();
-                if (text.length > 1999) {
+                if (text.length > CONFIG.maxMessageLength) {
                     promptInput.classList.add('error');
-                    Utils.showNotification('Message too long (max 2000 chars)', 'warning', 3000);
+                    Utils.showNotification(`Message too long (max ${CONFIG.maxMessageLength} chars)`, 'warning', 3000);
                 } else {
                     promptInput.classList.remove('error');
                 }
@@ -575,7 +613,7 @@ function setupUI() {
             if (!text) return;
             
             // Validate input length
-            if (text.length > 2000) {
+            if (text.length > CONFIG.maxMessageLength) {
                 if (window.Utils) {
                     Utils.showNotification('Message too long. Please shorten it.', 'error');
                 }
@@ -663,6 +701,11 @@ function setupUI() {
         }
     }
     
+    // Limit conversation size
+    if (conversation.length > CONFIG.maxConversationSize) {
+        conversation = conversation.slice(-CONFIG.maxConversationSize);
+    }
+    
     // Enable audio context on user interaction
     document.addEventListener('click', enableAudio, { once: true });
     document.addEventListener('keydown', enableAudio, { once: true });
@@ -697,7 +740,7 @@ function setupUI() {
     // Update API status
     const apiStatus = document.getElementById('apiStatus');
     if (apiStatus) {
-        fetch('/api/health')
+        fetch(CONFIG.apiEndpoints.health)
             .then(res => res.ok ? 'online' : 'offline')
             .catch(() => 'offline')
             .then(status => {
@@ -742,10 +785,15 @@ function enableAudio() {
 
 // ===== WEBSOCKET SYSTEM =====
 function connectWebSocket() {
+    if (!CONFIG.wsUrl) {
+        log('WebSocket URL not configured');
+        return;
+    }
+    
     if (ws) ws.close();
     
     try {
-        ws = new WebSocket(HELIUS_WS);
+        ws = new WebSocket(CONFIG.wsUrl);
         
         ws.onopen = () => {
             log('WebSocket connected');
@@ -784,7 +832,7 @@ function connectWebSocket() {
         if (!tpsUpdateTimer) {
             tpsUpdateTimer = setInterval(() => {
                 fetchTPS().catch(e => log('TPS polling error:', e));
-            }, 10000);
+            }, CONFIG.tpsUpdateInterval);
         }
     }
 }
@@ -801,7 +849,7 @@ function updateTPS(tps) {
 async function fetchPrice() {
     try {
         log('💰 Fetching SOL price...');
-        const url = `/api/price?ids=${SOL_MINT}`;
+        const url = `${CONFIG.apiEndpoints.price}?ids=${SOL_MINT}`;
         
         // Use Utils enhanced fetch if available
         const res = window.Utils 
@@ -835,7 +883,7 @@ async function fetchPrice() {
             } else {
                 solPrice.textContent = 'SOL — N/A';
                 solPrice.style.color = '#ff6b6b';
-                log('❌ Price not found in response');
+                log('⌛ Price not found in response');
             }
         }
     } catch (err) {
@@ -854,8 +902,8 @@ async function fetchPrice() {
 async function fetchTPS() {
     try {
         const res = window.Utils
-            ? await Utils.fetchWithRetry('/api/tps', { method: 'GET' }, 2)
-            : await fetch('/api/tps');
+            ? await Utils.fetchWithRetry(CONFIG.apiEndpoints.tps, { method: 'GET' }, 2)
+            : await fetch(CONFIG.apiEndpoints.tps);
         
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         
@@ -886,24 +934,29 @@ async function sendMessage(text) {
     
     conversation.push({ role: 'user', content: text });
     
+    // Limit conversation size
+    if (conversation.length > CONFIG.maxConversationSize) {
+        conversation = conversation.slice(-CONFIG.maxConversationSize);
+    }
+    
     try {
         const res = window.Utils
-            ? await Utils.fetchWithRetry('/api/chat', {
+            ? await Utils.fetchWithRetry(CONFIG.apiEndpoints.chat, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     messages: [
-                        { role: 'system', content: SYSTEM_PROMPT }, 
+                        { role: 'system', content: CONFIG.systemPrompt || CONFIG.models?.systemPrompt }, 
                         ...conversation
                     ] 
                 })
             }, 2)
-            : await fetch('/api/chat', {
+            : await fetch(CONFIG.apiEndpoints.chat, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     messages: [
-                        { role: 'system', content: SYSTEM_PROMPT }, 
+                        { role: 'system', content: CONFIG.systemPrompt || CONFIG.models?.systemPrompt }, 
                         ...conversation
                     ] 
                 })
@@ -951,6 +1004,9 @@ async function sendMessage(text) {
 // ===== TTS SYSTEM =====
 function queueTTS(text, voice = 'nova') {
     audioQueue.push({ text, voice });
+    if (audioQueue.length > CONFIG.maxAudioQueueSize) {
+        audioQueue = audioQueue.slice(-CONFIG.maxAudioQueueSize);
+    }
     if (!isPlaying) playNextAudio();
 }
 
@@ -965,7 +1021,7 @@ async function playNextAudio() {
     const { text, voice } = audioQueue.shift();
     
     try {
-        const res = await fetch('/api/tts', {
+        const res = await fetch(CONFIG.apiEndpoints.tts, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, voice })
@@ -1052,7 +1108,10 @@ async function init() {
     }
     
     try {
-        // Setup UI first
+        // Load configuration from server first
+        await loadConfiguration();
+        
+        // Setup UI
         setupUI();
         
         // Check device capabilities
@@ -1078,11 +1137,11 @@ async function init() {
         // Start periodic updates
         priceUpdateTimer = setInterval(() => {
             fetchPrice().catch(err => log('Price update failed:', err));
-        }, 30000);
+        }, CONFIG.priceUpdateInterval);
         
         tpsUpdateTimer = setInterval(() => {
             fetchTPS().catch(err => log('TPS update failed:', err));
-        }, 60000);
+        }, CONFIG.tpsUpdateInterval);
         
         // Check WebGL support before initializing 3D
         if (window.Utils && !Utils.webgl.isSupported()) {
@@ -1090,7 +1149,9 @@ async function init() {
             document.getElementById('loadingStatus').style.display = 'none';
             
             // Still connect WebSocket for data
-            connectWebSocket();
+            if (CONFIG.wsUrl) {
+                connectWebSocket();
+            }
             
             // Welcome message for audio-only mode
             setTimeout(() => {
@@ -1121,7 +1182,9 @@ async function init() {
         }, 1000);
         
         // Connect WebSocket
-        connectWebSocket();
+        if (CONFIG.wsUrl) {
+            connectWebSocket();
+        }
         
         // Mark performance end
         if (window.Utils) {
@@ -1141,7 +1204,7 @@ async function init() {
         }, 3000);
         
     } catch (err) {
-        log('⌠Initialization failed:', err);
+        log('⌛ Initialization failed:', err);
         
         if (window.Utils) {
             Utils.handleError(
@@ -1160,11 +1223,11 @@ async function init() {
             
             priceUpdateTimer = setInterval(() => {
                 fetchPrice().catch(e => log('Price error:', e));
-            }, 30000);
+            }, CONFIG.priceUpdateInterval);
             
             tpsUpdateTimer = setInterval(() => {
                 fetchTPS().catch(e => log('TPS error:', e));
-            }, 60000);
+            }, CONFIG.tpsUpdateInterval);
         } catch (apiError) {
             log('API initialization failed:', apiError);
         }
@@ -1244,6 +1307,8 @@ window.debugVRM = function() {
         console.log('Scene children:', state.scene.children.length);
     }
     
+    console.log('Configuration:', CONFIG);
+    
     return state;
 };
 
@@ -1279,9 +1344,16 @@ window.reloadVRM = function() {
     return 'VRM loader not ready';
 };
 
+window.reloadConfig = function() {
+    console.log('🔄 Reloading configuration...');
+    loadConfiguration().then(() => {
+        console.log('Configuration reloaded:', CONFIG);
+    });
+};
+
 console.log('🚀 Enhanced Solmate VRM System Loaded!');
-console.log('🛠️ Debug commands: debugVRM(), testChat(), testTTS(), playWave(), testPrice(), testExpression(), reloadVRM()');
-console.log('📊 Features: Service Worker, Utils integration, ES Module VRM loading');
+console.log('🛠️ Debug commands: debugVRM(), testChat(), testTTS(), playWave(), testPrice(), testExpression(), reloadVRM(), reloadConfig()');
+console.log('📊 Features: Service Worker, Utils integration, ES Module VRM loading, Dynamic Config');
 console.log('💡 Press Ctrl+D for debug overlay');
 
 // ===== START APPLICATION =====
