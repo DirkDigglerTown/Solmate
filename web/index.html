@@ -11,10 +11,6 @@
     
     <title>Solmate - Your Solana AI Companion</title>
     
-    <!-- Preload critical resources -->
-    <link rel="preload" href="/style.css" as="style">
-    <link rel="preload" href="/script.js" as="script">
-    
     <!-- Icons and manifest -->
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/logo/solmatelogo.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/logo/solmatelogo.png">
@@ -26,8 +22,8 @@
     <!-- Stylesheet -->
     <link rel="stylesheet" href="/style.css">
     
-    <!-- No inline styles for better CSP -->
-    <style id="dynamic-styles"></style>
+    <!-- Module scripts -->
+    <script type="module" src="/js/main.js"></script>
 </head>
 <body>
     <!-- Loading Screen -->
@@ -127,37 +123,5 @@
             <p>Solmate requires JavaScript to run. Please enable JavaScript in your browser settings.</p>
         </div>
     </noscript>
-
-    <!-- Scripts -->
-    <script src="/script.js" defer></script>
-    
-    <!-- Error boundary for critical failures -->
-    <script>
-        window.addEventListener('error', function(e) {
-            const app = document.getElementById('app');
-            const loading = document.getElementById('loadingScreen');
-            if (loading && !app.style.display) {
-                loading.innerHTML = `
-                    <div class="loading-content error">
-                        <h2>Loading Error</h2>
-                        <p>Failed to initialize Solmate. Please refresh the page.</p>
-                        <button onclick="location.reload()">Reload</button>
-                    </div>
-                `;
-            }
-        });
-        
-        // Show app after load
-        window.addEventListener('load', function() {
-            setTimeout(function() {
-                const app = document.getElementById('app');
-                const loading = document.getElementById('loadingScreen');
-                if (app && loading) {
-                    app.style.display = '';
-                    loading.style.display = 'none';
-                }
-            }, 100);
-        });
-    </script>
 </body>
 </html>
