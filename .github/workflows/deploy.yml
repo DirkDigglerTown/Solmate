@@ -1,0 +1,415 @@
+# .github/workflows/deploy.yml
+# Automated testing and deployment workflow for Solmate
+
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20.11.0'
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  # Job 1: Validate environment and code quality
+  validate:
+    name: Validate Code & Environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check environment variables
+        run: |
+          echo "🔍 Checking required environment variables..."
+          
+          # Check for required secrets
+          required_secrets=(
+            "VERCEL_TOKEN"
+            "VERCEL_ORG_ID"
+            "VERCEL_PROJECT_ID"
+          )
+          
+          missing_secrets=()
+          for secret in "${required_secrets[@]}"; do
+            if [ -z "${!secret}" ]; then
+              missing_secrets+=("$secret")
+            fi
+          done
+          
+          if [ ${#missing_secrets[@]} -ne 0 ]; then
+            echo "❌ Missing required secrets: ${missing_secrets[*]}"
+            echo "Please add these secrets to your GitHub repository settings."
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are configured"
+
+      - name: Validate file structure
+        run: |
+          echo "📁 Validating project structure..."
+          
+          # Required files
+          required_files=(
+            "package.json"
+            "vercel.json"
+            "web/index.html"
+            "web/script.js"
+            "web/style.css"
+            "web/api/chat.js"
+            "web/api/tts.js"
+            "web/api/price.js"
+            "web/api/tps.js"
+            "web/api/health.js"
+            "web/api/_utils.js"
+            "web/assets/logo/solmatelogo.png"
+          )
+          
+          missing_files=()
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing_files+=("$file")
+            fi
+          done
+          
+          if [ ${#missing_files[@]} -ne 0 ]; then
+            echo "❌ Missing required files:"
+            printf '%s\n' "${missing_files[@]}"
+            exit 1
+          fi
+          
+          echo "✅ All required files present"
+
+      - name: Check VRM file size
+        run: |
+          echo "🎭 Checking VRM file..."
+          
+          vrm_file="web/assets/avatar/solmate.vrm"
+          if [ -f "$vrm_file" ]; then
+            size=$(stat -c%s "$vrm_file" 2>/dev/null || stat -f%z "$vrm_file" 2>/dev/null)
+            size_mb=$((size / 1048576))
+            echo "VRM file size: ${size_mb}MB"
+            
+            if [ $size_mb -gt 100 ]; then
+              echo "⚠️ Warning: VRM file is ${size_mb}MB (>100MB limit)"
+              echo "Consider optimizing the VRM file size"
+            else
+              echo "✅ VRM file size is acceptable"
+            fi
+          else
+            echo "⚠️ VRM file not found at $vrm_file"
+            echo "The application will use fallback avatar"
+          fi
+
+      - name: Lint JavaScript
+        run: |
+          echo "🔧 Running ESLint..."
+          npx eslint web/api/*.js web/*.js --max-warnings 10 || true
+
+      - name: Security audit
+        run: |
+          echo "🔒 Running security audit..."
+          npm audit --audit-level=moderate || true
+
+  # Job 2: Test API endpoints
+  test-api:
+    name: Test API Endpoints
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create test script
+        run: |
+          cat > test-endpoints.js << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          
+          console.log('🧪 Testing API endpoints...\n');
+          
+          const endpoints = [
+            'health',
+            'chat',
+            'tts',
+            'price',
+            'tps',
+            'validate'
+          ];
+          
+          let passed = 0;
+          let failed = 0;
+          
+          for (const endpoint of endpoints) {
+            const filePath = path.join('web', 'api', `${endpoint}.js`);
+            
+            try {
+              if (fs.existsSync(filePath)) {
+                const stats = fs.statSync(filePath);
+                if (stats.size > 0) {
+                  // Check if file exports a function
+                  const module = require(`./${filePath}`);
+                  if (typeof module === 'function' || typeof module === 'object') {
+                    console.log(`✅ ${endpoint}: Valid module structure`);
+                    passed++;
+                  } else {
+                    console.log(`❌ ${endpoint}: Invalid module export`);
+                    failed++;
+                  }
+                } else {
+                  console.log(`❌ ${endpoint}: File is empty`);
+                  failed++;
+                }
+              } else {
+                if (endpoint === 'validate') {
+                  console.log(`ℹ️ ${endpoint}: Optional file not found`);
+                } else {
+                  console.log(`❌ ${endpoint}: File not found`);
+                  failed++;
+                }
+              }
+            } catch (error) {
+              console.log(`❌ ${endpoint}: ${error.message}`);
+              failed++;
+            }
+          }
+          
+          console.log(`\n📊 Results: ${passed} passed, ${failed} failed`);
+          process.exit(failed > 0 ? 1 : 0);
+          EOF
+
+      - name: Run endpoint tests
+        run: node test-endpoints.js
+
+  # Job 3: Build and test assets
+  test-assets:
+    name: Test Assets & Frontend
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check asset availability
+        run: |
+          echo "🎨 Testing asset availability..."
+          
+          # Check critical assets
+          assets=(
+            "web/assets/logo/solmatelogo.png"
+            "web/manifest.webmanifest"
+            "web/service-worker.js"
+          )
+          
+          for asset in "${assets[@]}"; do
+            if [ -f "$asset" ]; then
+              echo "✅ Found: $asset"
+            else
+              echo "⚠️ Missing: $asset"
+            fi
+          done
+
+      - name: Validate manifest.json
+        run: |
+          echo "📱 Validating PWA manifest..."
+          
+          if [ -f "web/manifest.webmanifest" ]; then
+            node -e "
+              const manifest = require('./web/manifest.webmanifest');
+              const required = ['name', 'short_name', 'icons', 'start_url'];
+              const missing = required.filter(key => !manifest[key]);
+              
+              if (missing.length > 0) {
+                console.error('❌ Missing required manifest fields:', missing);
+                process.exit(1);
+              }
+              
+              console.log('✅ Manifest is valid');
+              console.log('App name:', manifest.name);
+            "
+          else
+            echo "⚠️ No manifest file found"
+          fi
+
+  # Job 4: Deploy to Vercel (Preview)
+  deploy-preview:
+    name: Deploy Preview
+    runs-on: ubuntu-latest
+    needs: [validate, test-api, test-assets]
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy to Vercel (Preview)
+        run: |
+          vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} > deployment-url.txt
+          
+          echo "🔗 Preview URL:"
+          cat deployment-url.txt
+
+      - name: Comment PR with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const url = fs.readFileSync('deployment-url.txt', 'utf8').trim();
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 Preview deployment ready!\n\n🔗 **Preview URL:** ${url}\n\n✨ This preview will be automatically updated with new commits.`
+            });
+
+  # Job 5: Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [validate, test-api, test-assets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy to Vercel (Production)
+        id: deploy
+        run: |
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} > deployment-url.txt
+          
+          echo "🚀 Production URL:"
+          cat deployment-url.txt
+          echo "url=$(cat deployment-url.txt)" >> $GITHUB_OUTPUT
+
+      - name: Create deployment record
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            
+            // Create a deployment
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              task: 'deploy',
+              auto_merge: false,
+              required_contexts: [],
+              payload: {
+                web_url: url,
+              },
+              environment: 'production',
+              description: 'Deploying to Vercel production',
+            });
+            
+            // Create deployment status
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'success',
+              target_url: url,
+              environment_url: url,
+              description: 'Deployment successful'
+            });
+
+  # Job 6: Post-deployment health check
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Wait for deployment
+        run: sleep 30
+
+      - name: Check deployment health
+        run: |
+          echo "🏥 Running health checks..."
+          
+          # Get the deployment URL (you'll need to pass this from the previous job)
+          # For now, we'll use a placeholder
+          URL="https://solmate.vercel.app"
+          
+          # Check main page
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+          if [ "$response" = "200" ]; then
+            echo "✅ Main page is accessible"
+          else
+            echo "❌ Main page returned $response"
+            exit 1
+          fi
+          
+          # Check API health endpoint
+          api_response=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/health")
+          if [ "$api_response" = "200" ]; then
+            echo "✅ API health endpoint is responsive"
+          else
+            echo "⚠️ API health endpoint returned $api_response"
+          fi
+          
+          echo "🎉 Deployment health check complete!"
+
+      - name: Notify success
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo "📍 Commit: ${{ github.sha }}"
+          echo "👤 Author: ${{ github.actor }}"
+          echo "📝 Message: ${{ github.event.head_commit.message }}"
