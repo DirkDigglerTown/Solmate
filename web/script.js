@@ -1,5 +1,65 @@
-// web/script.js - Solmate with Proper VRM Loading via ES Modules
-// This version actually loads and displays VRM files correctly
+// web/script.js - Complete Solmate with Service Worker, Utils, and ES Module VRM Loading
+// Features: Service worker, offline support, enhanced error handling, proper VRM via ES modules
+
+// ===== SERVICE WORKER REGISTRATION =====
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(registration => {
+                console.log('✅ Service Worker registered:', registration.scope);
+                
+                // Update UI
+                const swStatus = document.getElementById('swStatus');
+                if (swStatus) swStatus.textContent = 'active';
+                
+                // Handle updates
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New service worker available
+                            if (window.Utils) {
+                                Utils.showNotification('Update available! Refresh to get the latest version.', 'info', 10000);
+                            }
+                        }
+                    });
+                });
+                
+                // Check for updates periodically
+                setInterval(() => {
+                    registration.update();
+                }, 60000); // Check every minute
+            })
+            .catch(error => {
+                console.warn('Service Worker registration failed:', error);
+                const swStatus = document.getElementById('swStatus');
+                if (swStatus) swStatus.textContent = 'failed';
+            });
+    });
+    
+    // Handle offline/online events
+    window.addEventListener('online', () => {
+        document.body.classList.remove('offline');
+        if (window.Utils) {
+            Utils.showNotification('Back online!', 'success', 3000);
+        }
+        // Reconnect WebSocket if needed
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            connectWebSocket();
+        }
+    });
+    
+    window.addEventListener('offline', () => {
+        document.body.classList.add('offline');
+        if (window.Utils) {
+            Utils.showNotification('You are offline. Some features may be limited.', 'warning', 5000);
+        }
+    });
+} else {
+    console.warn('Service Workers not supported');
+    const swStatus = document.getElementById('swStatus');
+    if (swStatus) swStatus.textContent = 'unsupported';
+}
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
@@ -12,7 +72,9 @@ const VRM_PATHS = [
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-const SYSTEM_PROMPT = `You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsumoto from Bleach and Lust from Fullmetal Alchemist. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice.`;
+const SYSTEM_PROMPT = `
+You are Solmate, a helpful and witty Solana Companion, inspired by Rangiku Matsumoto from Bleach and Lust from Fullmetal Alchemist. Be maximally truthful, helpful, and add a touch of humor when appropriate. You're a Solana companion, so focus on Solana blockchain, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise, engaging, and fun. Always remind users: Not financial advice.
+`;
 
 // ===== GLOBAL STATE =====
 let audioQueue = [];
@@ -43,7 +105,7 @@ window.vrmState = {
     initialized: false
 };
 
-// ===== LOGGING =====
+// ===== ENHANCED LOGGING WITH UTILS =====
 function log(msg, data = null) {
     const time = new Date().toLocaleTimeString();
     const entry = `[${time}] ${msg}`;
@@ -63,6 +125,7 @@ function log(msg, data = null) {
     
     console.log(entry, logData || '');
     
+    // Update debug overlay if available
     const logs = document.getElementById('overlayLogs');
     if (logs) {
         const div = document.createElement('div');
@@ -70,9 +133,14 @@ function log(msg, data = null) {
         logs.appendChild(div);
         if (logs.children.length > 20) logs.removeChild(logs.firstChild);
     }
+    
+    // Track performance metrics if Utils is available
+    if (window.Utils && msg.includes('✅')) {
+        Utils.performance.mark(msg);
+    }
 }
 
-// ===== INJECT ES MODULE LOADER =====
+// ===== INJECT ES MODULE LOADER FOR VRM =====
 function injectVRMModule() {
     log('🎭 Injecting VRM ES module loader...');
     
@@ -205,6 +273,10 @@ function injectVRMModule() {
                         if (loadingEl) loadingEl.style.display = 'none';
                         loaded = true;
                         
+                        // Update status
+                        const vrmStatus = document.getElementById('vrmStatus');
+                        if (vrmStatus) vrmStatus.textContent = 'loaded';
+                        
                         // Trigger ready callback
                         if (window.onVRMReady) window.onVRMReady(vrm);
                     }
@@ -222,6 +294,10 @@ function injectVRMModule() {
                     }, 2000);
                 }
                 
+                // Update status
+                const vrmStatus = document.getElementById('vrmStatus');
+                if (vrmStatus) vrmStatus.textContent = 'fallback';
+                
                 // Create fallback
                 const geometry = new THREE.BoxGeometry(0.5, 1, 0.3);
                 const material = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
@@ -236,6 +312,11 @@ function injectVRMModule() {
                     update: () => {},
                     isFallback: true
                 };
+                
+                // Notify user if Utils available
+                if (window.Utils) {
+                    Utils.showNotification('Using fallback avatar', 'warning', 3000);
+                }
             }
         }
         
@@ -428,74 +509,225 @@ function stopSpeechAnimation() {
     }
 }
 
-// ===== UI SETUP =====
+// ===== ENHANCED UI SETUP =====
 function setupUI() {
     log('Setting up UI...');
+    
+    // Check WebGL support
+    if (window.Utils && !Utils.webgl.isSupported()) {
+        log('WebGL not supported, showing fallback');
+        const canvas = document.getElementById('vrmCanvas');
+        const fallback = document.querySelector('.webgl-fallback');
+        if (canvas) canvas.style.display = 'none';
+        if (fallback) fallback.style.display = 'block';
+        document.body.classList.add('no-webgl');
+    }
     
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) {
         themeBtn.addEventListener('click', () => {
             document.documentElement.classList.toggle('light');
             const isLight = document.documentElement.classList.contains('light');
-            themeBtn.textContent = isLight ? '☀️' : '🌙';
+            themeBtn.innerHTML = isLight 
+                ? '<span aria-hidden="true">☀️</span>' 
+                : '<span aria-hidden="true">🌙</span>';
+            
+            // Save preference
+            if (window.Utils) {
+                Utils.storage.set('theme', isLight ? 'light' : 'dark');
+            }
         });
+        
+        // Load saved theme
+        if (window.Utils) {
+            const savedTheme = Utils.storage.get('theme');
+            if (savedTheme === 'light') {
+                document.documentElement.classList.add('light');
+                themeBtn.innerHTML = '<span aria-hidden="true">☀️</span>';
+            }
+        }
     }
     
-    const form = document.getElementById('chatForm');
-    const input = document.getElementById('promptInput');
+    const chatForm = document.getElementById('chatForm');
+    const promptInput = document.getElementById('promptInput');
     const sendBtn = document.getElementById('sendBtn');
     
-    if (form && input) {
-        form.addEventListener('submit', async (e) => {
+    if (chatForm && promptInput && sendBtn) {
+        // Debounce input validation with Utils
+        if (window.Utils) {
+            const validateInput = Utils.debounce(() => {
+                const text = promptInput.value.trim();
+                if (text.length > 1999) {
+                    promptInput.classList.add('error');
+                    Utils.showNotification('Message too long (max 2000 chars)', 'warning', 3000);
+                } else {
+                    promptInput.classList.remove('error');
+                }
+            }, 300);
+            
+            promptInput.addEventListener('input', validateInput);
+        }
+        
+        chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const text = input.value.trim();
+            const text = promptInput.value.trim();
             if (!text) return;
             
-            input.value = '';
-            if (sendBtn) {
-                sendBtn.disabled = true;
-                sendBtn.textContent = '⏳';
+            // Validate input length
+            if (text.length > 2000) {
+                if (window.Utils) {
+                    Utils.showNotification('Message too long. Please shorten it.', 'error');
+                }
+                return;
             }
             
+            promptInput.value = '';
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span aria-hidden="true">🤔</span>';
+            sendBtn.classList.add('loading');
+            
             try {
+                if (window.Utils) Utils.performance.mark('chat-start');
                 await sendMessage(text);
-            } finally {
-                if (sendBtn) {
-                    sendBtn.disabled = false;
-                    sendBtn.textContent = '▶';
+                if (window.Utils) {
+                    Utils.performance.mark('chat-end');
+                    Utils.performance.measure('chat-response', 'chat-start', 'chat-end');
                 }
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<span aria-hidden="true">▶</span>';
+                sendBtn.classList.remove('loading');
             }
         });
     }
     
     const clearBtn = document.getElementById('clearBtn');
     if (clearBtn) {
-        clearBtn.addEventListener('click', clearAudioQueue);
+        clearBtn.addEventListener('click', () => {
+            clearAudioQueue();
+            if (window.Utils) {
+                Utils.showNotification('Audio stopped', 'info', 2000);
+            }
+        });
     }
     
-    // Debug overlay
+    // Window resize handler with throttling
+    const handleResize = window.Utils 
+        ? Utils.throttle(() => {
+            const state = window.vrmState;
+            if (state.camera && state.renderer) {
+                state.camera.aspect = window.innerWidth / window.innerHeight;
+                state.camera.updateProjectionMatrix();
+                state.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }, 100)
+        : () => {
+            const state = window.vrmState;
+            if (state.camera && state.renderer) {
+                state.camera.aspect = window.innerWidth / window.innerHeight;
+                state.camera.updateProjectionMatrix();
+                state.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        };
+    
+    window.addEventListener('resize', handleResize);
+    
+    // Debug overlay toggle
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'd') {
             e.preventDefault();
             const logs = document.getElementById('debugOverlay');
-            if (logs) logs.classList.toggle('hidden');
+            if (logs) {
+                logs.classList.toggle('hidden');
+                if (!logs.classList.contains('hidden')) {
+                    updateDebugInfo();
+                }
+            }
         }
     });
     
-    // Enable audio
+    // Load conversation history
+    if (window.Utils) {
+        conversation = Utils.storage.get('solmateConversation', []);
+        log(`Loaded ${conversation.length} conversation messages`);
+    } else {
+        try {
+            const saved = localStorage.getItem('solmateConversation');
+            if (saved) {
+                conversation = JSON.parse(saved);
+                log(`Loaded ${conversation.length} messages`);
+            }
+        } catch (err) {
+            log('Failed to load conversation history:', err);
+        }
+    }
+    
+    // Enable audio context on user interaction
     document.addEventListener('click', enableAudio, { once: true });
     document.addEventListener('keydown', enableAudio, { once: true });
     
-    // Mouse tracking
-    document.addEventListener('mousemove', (event) => {
-        if (!animationState.isTalking && !animationState.isWaving) {
-            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-            animationState.headTarget.x = mouseY * 0.1;
-            animationState.headTarget.y = mouseX * 0.2;
+    // Mouse tracking for head movement with throttling
+    const handleMouseMove = window.Utils
+        ? Utils.throttle((event) => {
+            if (!animationState.isTalking && !animationState.isWaving) {
+                const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+                const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+                animationState.headTarget.x = mouseY * 0.1;
+                animationState.headTarget.y = mouseX * 0.2;
+            }
+        }, 50)
+        : (event) => {
+            if (!animationState.isTalking && !animationState.isWaving) {
+                const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+                const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+                animationState.headTarget.x = mouseY * 0.1;
+                animationState.headTarget.y = mouseX * 0.2;
+            }
+        };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    
+    document.addEventListener('mouseleave', () => {
+        if (!animationState.isTalking) {
+            animationState.headTarget = { x: 0, y: 0 };
         }
     });
+    
+    // Update API status
+    const apiStatus = document.getElementById('apiStatus');
+    if (apiStatus) {
+        fetch('/api/health')
+            .then(res => res.ok ? 'online' : 'offline')
+            .catch(() => 'offline')
+            .then(status => {
+                apiStatus.textContent = status;
+                apiStatus.style.color = status === 'online' ? '#00ff88' : '#ff6b6b';
+            });
+    }
+    
+    log('UI setup complete');
+}
+
+// Update debug info
+function updateDebugInfo() {
+    const vrmStatus = document.getElementById('vrmStatus');
+    const cacheStatus = document.getElementById('cacheStatus');
+    
+    if (vrmStatus) {
+        const state = window.vrmState;
+        if (state.currentVRM) {
+            vrmStatus.textContent = state.currentVRM.isFallback ? 'fallback' : 'loaded';
+        } else {
+            vrmStatus.textContent = 'not loaded';
+        }
+    }
+    
+    if (cacheStatus && 'caches' in window) {
+        caches.keys().then(names => {
+            cacheStatus.textContent = `${names.length} caches active`;
+        });
+    }
 }
 
 function enableAudio() {
@@ -503,10 +735,12 @@ function enableAudio() {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         audioContext.resume();
         log('Audio enabled');
-    } catch (e) {}
+    } catch (e) {
+        log('Audio enable failed:', e);
+    }
 }
 
-// ===== WEBSOCKET =====
+// ===== WEBSOCKET SYSTEM =====
 function connectWebSocket() {
     if (ws) ws.close();
     
@@ -526,40 +760,55 @@ function connectWebSocket() {
             try {
                 const data = JSON.parse(e.data);
                 if (data.tps) updateTPS(data.tps);
-            } catch (err) {}
+            } catch (err) {
+                log('WebSocket message error', err);
+            }
         };
         
         ws.onclose = () => {
+            log('WebSocket closed, reconnecting...');
             const wsLight = document.getElementById('wsLight');
             if (wsLight) {
                 wsLight.textContent = 'WS OFF';
                 wsLight.style.color = '#ff6b6b';
             }
+            
+            if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
             wsReconnectTimer = setTimeout(connectWebSocket, 5000);
         };
         
+        ws.onerror = (err) => log('WebSocket error', err);
+        
     } catch (err) {
-        log('WebSocket failed:', err);
+        log('WebSocket connection failed', err);
+        if (!tpsUpdateTimer) {
+            tpsUpdateTimer = setInterval(() => {
+                fetchTPS().catch(e => log('TPS polling error:', e));
+            }, 10000);
+        }
     }
 }
 
 function updateTPS(tps) {
-    const el = document.getElementById('networkTPS');
-    if (el) {
-        el.textContent = `${tps} TPS`;
-        el.style.color = '#00ff88';
+    const networkTPS = document.getElementById('networkTPS');
+    if (networkTPS) {
+        networkTPS.textContent = `${tps} TPS`;
+        networkTPS.style.color = '#00ff88';
     }
 }
 
-// ===== API CALLS =====
+// ===== ENHANCED API CALLS WITH UTILS =====
 async function fetchPrice() {
     try {
         log('💰 Fetching SOL price...');
-        const res = await fetch(`/api/price?ids=${SOL_MINT}`);
+        const url = `/api/price?ids=${SOL_MINT}`;
         
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-        }
+        // Use Utils enhanced fetch if available
+        const res = window.Utils 
+            ? await Utils.fetchWithRetry(url, { method: 'GET' }, 2)
+            : await fetch(url);
+        
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         
         const data = await res.json();
         log('Price data received:', data);
@@ -575,75 +824,127 @@ async function fetchPrice() {
             price = data.data[SOL_MINT].price || data.data[SOL_MINT].usdPrice;
         }
         
-        const el = document.getElementById('solPrice');
-        if (el) {
+        const solPrice = document.getElementById('solPrice');
+        if (solPrice) {
             if (price && price > 0) {
-                el.textContent = `SOL — $${price.toFixed(2)}`;
-                el.style.color = '#00ff88';
+                solPrice.textContent = window.Utils 
+                    ? `SOL — ${Utils.formatCurrency(price)}` 
+                    : `SOL — $${price.toFixed(2)}`;
+                solPrice.style.color = '#00ff88';
                 log(`✅ Price updated: $${price.toFixed(2)}`);
             } else {
-                el.textContent = 'SOL — N/A';
-                el.style.color = '#ff6b6b';
+                solPrice.textContent = 'SOL — N/A';
+                solPrice.style.color = '#ff6b6b';
                 log('❌ Price not found in response');
             }
         }
     } catch (err) {
-        log('Price fetch failed:', err.message);
-        const el = document.getElementById('solPrice');
-        if (el) {
-            el.textContent = 'SOL — Error';
-            el.style.color = '#ff6b6b';
+        log('Price fetch failed:', err);
+        if (window.Utils) {
+            Utils.handleError(Utils.createError(Utils.ErrorTypes.API, 'Price fetch failed', err), false);
+        }
+        const solPrice = document.getElementById('solPrice');
+        if (solPrice) {
+            solPrice.textContent = 'SOL — Offline';
+            solPrice.style.color = '#ffaa00';
         }
     }
 }
 
 async function fetchTPS() {
     try {
-        const res = await fetch('/api/tps');
+        const res = window.Utils
+            ? await Utils.fetchWithRetry('/api/tps', { method: 'GET' }, 2)
+            : await fetch('/api/tps');
+        
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        
         const data = await res.json();
+        
         if (data.tps) {
             updateTPS(data.tps);
             log(`TPS updated: ${data.tps}`);
         }
     } catch (err) {
-        log('TPS fetch failed:', err.message);
+        log('TPS fetch failed:', err);
+        if (window.Utils) {
+            Utils.handleError(Utils.createError(Utils.ErrorTypes.API, 'TPS fetch failed', err), false);
+        }
+        const networkTPS = document.getElementById('networkTPS');
+        if (networkTPS) {
+            networkTPS.textContent = 'TPS Offline';
+            networkTPS.style.color = '#ffaa00';
+        }
     }
 }
 
-// ===== CHAT SYSTEM =====
+// ===== ENHANCED CHAT SYSTEM =====
 async function sendMessage(text) {
+    // Show typing indicator
+    const typingIndicator = document.getElementById('typingIndicator');
+    if (typingIndicator) typingIndicator.classList.remove('hidden');
+    
     conversation.push({ role: 'user', content: text });
     
     try {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                messages: [
-                    { role: 'system', content: SYSTEM_PROMPT }, 
-                    ...conversation
-                ] 
-            })
-        });
+        const res = window.Utils
+            ? await Utils.fetchWithRetry('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    messages: [
+                        { role: 'system', content: SYSTEM_PROMPT }, 
+                        ...conversation
+                    ] 
+                })
+            }, 2)
+            : await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    messages: [
+                        { role: 'system', content: SYSTEM_PROMPT }, 
+                        ...conversation
+                    ] 
+                })
+            });
         
-        if (!res.ok) throw new Error(`Chat failed: ${res.status}`);
+        if (!res.ok) throw new Error(`Chat API failed: ${res.status}`);
         
         const { content } = await res.json();
         conversation.push({ role: 'assistant', content });
         
-        // Save conversation
-        try {
-            localStorage.setItem('solmateConversation', JSON.stringify(conversation));
-        } catch (e) {}
+        // Save conversation with Utils storage wrapper
+        if (window.Utils) {
+            Utils.storage.set('solmateConversation', conversation);
+        } else {
+            try {
+                localStorage.setItem('solmateConversation', JSON.stringify(conversation));
+            } catch (storageErr) {
+                log('Failed to save conversation', storageErr);
+            }
+        }
         
-        // Animate
+        // Hide typing indicator
+        if (typingIndicator) typingIndicator.classList.add('hidden');
+        
+        // Start speech animation and queue TTS
         startSpeechAnimation(content);
         queueTTS(content);
         
         return content;
     } catch (err) {
-        log('Chat error:', err);
-        return 'Sorry, I had trouble processing that. Try again!';
+        log('Chat failed:', err);
+        
+        // Hide typing indicator
+        if (typingIndicator) typingIndicator.classList.add('hidden');
+        
+        if (window.Utils) {
+            Utils.handleError(Utils.createError(Utils.ErrorTypes.API, 'Chat service unavailable', err));
+        }
+        
+        const errorMsg = 'Sorry, chat is temporarily unavailable. Please try again!';
+        return errorMsg;
     }
 }
 
@@ -692,6 +993,7 @@ async function playNextAudio() {
         
         audio.play();
     } catch (err) {
+        log('TTS error:', err);
         fallbackTTS(text, voice);
     }
 }
@@ -723,7 +1025,9 @@ function fallbackTTS(text, voice) {
         
         speechSynthesis.speak(utterance);
         isPlaying = true;
+        log('Browser TTS playing');
     } catch (err) {
+        log('Fallback TTS failed:', err);
         isPlaying = false;
         stopSpeechAnimation();
         playNextAudio();
@@ -738,73 +1042,196 @@ function clearAudioQueue() {
     log('Audio cleared');
 }
 
-// ===== MAIN INIT =====
+// ===== ENHANCED MAIN INITIALIZATION =====
 async function init() {
-    log('🚀 Starting Solmate...');
+    log('🚀 Initializing Enhanced Solmate with VRM ES Modules...');
+    
+    // Mark performance start
+    if (window.Utils) {
+        Utils.performance.mark('init-start');
+    }
     
     try {
+        // Setup UI first
         setupUI();
         
-        // Start API calls
-        fetchPrice();
-        fetchTPS();
+        // Check device capabilities
+        if (window.Utils) {
+            log('Device info:', {
+                mobile: Utils.device.isMobile(),
+                touch: Utils.device.isTouchDevice(),
+                webgl: Utils.webgl.isSupported(),
+                webglVersion: Utils.webgl.getVersion()
+            });
+        }
         
-        // Set up periodic updates
-        priceUpdateTimer = setInterval(fetchPrice, 30000);
-        tpsUpdateTimer = setInterval(fetchTPS, 60000);
+        // Start API calls with better error handling
+        try {
+            await Promise.all([
+                fetchPrice().catch(err => log('Initial price fetch failed:', err)),
+                fetchTPS().catch(err => log('Initial TPS fetch failed:', err))
+            ]);
+        } catch (apiErr) {
+            log('Initial API calls failed:', apiErr);
+        }
         
-        // Inject VRM module loader
+        // Start periodic updates
+        priceUpdateTimer = setInterval(() => {
+            fetchPrice().catch(err => log('Price update failed:', err));
+        }, 30000);
+        
+        tpsUpdateTimer = setInterval(() => {
+            fetchTPS().catch(err => log('TPS update failed:', err));
+        }, 60000);
+        
+        // Check WebGL support before initializing 3D
+        if (window.Utils && !Utils.webgl.isSupported()) {
+            log('WebGL not supported, using audio-only mode');
+            document.getElementById('loadingStatus').style.display = 'none';
+            
+            // Still connect WebSocket for data
+            connectWebSocket();
+            
+            // Welcome message for audio-only mode
+            setTimeout(() => {
+                if (window.Utils) {
+                    Utils.showNotification('Welcome to Solmate! Using audio-only mode.', 'info');
+                }
+                queueTTS("Hello! I'm Solmate. WebGL isn't available, but I can still chat with you!");
+            }, 2000);
+            
+            return;
+        }
+        
+        // Inject VRM ES module loader
         injectVRMModule();
         
-        // Wait for module to initialize
+        // Wait for module to initialize then load VRM
         setTimeout(() => {
             if (window.loadVRMModel) {
                 window.loadVRMModel(VRM_PATHS);
+            } else {
+                log('VRM module not ready, retrying...');
+                setTimeout(() => {
+                    if (window.loadVRMModel) {
+                        window.loadVRMModel(VRM_PATHS);
+                    }
+                }, 2000);
             }
         }, 1000);
         
         // Connect WebSocket
         connectWebSocket();
         
-        // Load conversation history
-        try {
-            const saved = localStorage.getItem('solmateConversation');
-            if (saved) {
-                conversation = JSON.parse(saved);
-                log(`Loaded ${conversation.length} messages`);
-            }
-        } catch (err) {}
+        // Mark performance end
+        if (window.Utils) {
+            Utils.performance.mark('init-end');
+            Utils.performance.measure('initialization', 'init-start', 'init-end');
+        }
         
-        // Welcome message
+        log('✅ Solmate initialization complete!');
+        
+        // Welcome message with better timing
         setTimeout(() => {
+            if (window.Utils) {
+                Utils.showNotification('Welcome to Solmate!', 'success', 3000);
+            }
             queueTTS("Hello! I'm Solmate, your Solana companion. Ask me anything!");
             setTimeout(playWave, 1000);
         }, 3000);
         
     } catch (err) {
-        log('Init error:', err);
+        log('⌠Initialization failed:', err);
+        
+        if (window.Utils) {
+            Utils.handleError(
+                Utils.createError(Utils.ErrorTypes.UNKNOWN, 'Initialization failed', err)
+            );
+        }
+        
+        // Fallback initialization
+        setupUI();
+        
+        try {
+            await Promise.all([
+                fetchPrice().catch(e => log('Fallback price error:', e)),
+                fetchTPS().catch(e => log('Fallback TPS error:', e))
+            ]);
+            
+            priceUpdateTimer = setInterval(() => {
+                fetchPrice().catch(e => log('Price error:', e));
+            }, 30000);
+            
+            tpsUpdateTimer = setInterval(() => {
+                fetchTPS().catch(e => log('TPS error:', e));
+            }, 60000);
+        } catch (apiError) {
+            log('API initialization failed:', apiError);
+        }
+        
+        // Create simple fallback UI
+        const fallback = document.createElement('div');
+        fallback.style.cssText = `
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); text-align: center;
+            color: white; font-family: Arial, sans-serif;
+        `;
+        fallback.innerHTML = `
+            <img src="/assets/logo/solmatelogo.png" style="width: 200px; height: auto;" onerror="this.style.display='none'">
+            <div style="margin-top: 20px;">
+                <h2>Solmate</h2>
+                <p>Audio-only mode active</p>
+            </div>
+        `;
+        document.body.appendChild(fallback);
+        
+        // Hide loading status
+        const loadingStatus = document.getElementById('loadingStatus');
+        if (loadingStatus) loadingStatus.style.display = 'none';
     }
 }
 
-// ===== CLEANUP =====
+// ===== ENHANCED CLEANUP =====
 window.addEventListener('beforeunload', () => {
+    // Close WebSocket
     if (ws) ws.close();
+    
+    // Clear timers
     if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
     if (priceUpdateTimer) clearInterval(priceUpdateTimer);
     if (tpsUpdateTimer) clearInterval(tpsUpdateTimer);
+    
+    // Clear audio
     clearAudioQueue();
     
+    // Clean up Three.js resources
     const state = window.vrmState;
     if (state.renderer) state.renderer.dispose();
+    if (state.currentVRM && state.scene) {
+        state.scene.remove(state.currentVRM.scene);
+    }
+    
+    // Clear performance marks
+    if (window.Utils) {
+        Utils.performance.clearMarks();
+    }
+    
+    // Notify service worker
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'CLIENT_UNLOAD'
+        });
+    }
 });
 
 // ===== DEBUG COMMANDS =====
 window.debugVRM = function() {
     const state = window.vrmState;
-    console.log('=== VRM DEBUG ===');
+    console.log('=== VRM DEBUG REPORT ===');
     console.log('Scene initialized:', state.initialized);
     console.log('VRM loaded:', !!state.currentVRM);
     console.log('Is fallback:', state.currentVRM?.isFallback);
+    
     if (state.currentVRM && !state.currentVRM.isFallback) {
         console.log('VRM Features:', {
             hasHumanoid: !!state.currentVRM.humanoid,
@@ -812,14 +1239,20 @@ window.debugVRM = function() {
             hasLookAt: !!state.currentVRM.lookAt
         });
     }
+    
+    if (state.scene) {
+        console.log('Scene children:', state.scene.children.length);
+    }
+    
     return state;
 };
 
-window.testChat = () => sendMessage("Hello! How are you?");
-window.testTTS = () => queueTTS("Testing text to speech.", 'nova');
+window.testChat = () => sendMessage("Hello Solmate! How are you today?");
+window.testTTS = () => queueTTS("Testing the enhanced text to speech system with animations.", 'nova');
 window.playWave = playWave;
 window.testPrice = fetchPrice;
 window.testTPS = fetchTPS;
+
 window.testExpression = function(expr = 'happy') {
     const vrm = window.vrmState.currentVRM;
     if (vrm && vrm.expressionManager) {
@@ -837,8 +1270,19 @@ window.testExpression = function(expr = 'happy') {
     }
 };
 
-console.log('🚀 Solmate VRM System Loaded!');
-console.log('🛠️ Commands: debugVRM(), testChat(), testTTS(), playWave(), testPrice(), testExpression()');
+window.reloadVRM = function() {
+    if (window.loadVRMModel) {
+        console.log('🔄 Reloading VRM...');
+        window.loadVRMModel(VRM_PATHS);
+        return 'VRM reload initiated';
+    }
+    return 'VRM loader not ready';
+};
+
+console.log('🚀 Enhanced Solmate VRM System Loaded!');
+console.log('🛠️ Debug commands: debugVRM(), testChat(), testTTS(), playWave(), testPrice(), testExpression(), reloadVRM()');
+console.log('📊 Features: Service Worker, Utils integration, ES Module VRM loading');
+console.log('💡 Press Ctrl+D for debug overlay');
 
 // ===== START APPLICATION =====
 if (document.readyState === 'loading') {
