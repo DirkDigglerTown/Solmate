@@ -1,5 +1,11 @@
 {
   "version": 2,
+  
+  "buildCommand": "npm run build",
+  "outputDirectory": ".",
+  "installCommand": "npm ci",
+  "framework": null,
+  
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -14,6 +20,7 @@
       "destination": "/web/$1"
     }
   ],
+  
   "headers": [
     {
       "source": "/assets/avatar/(.*).vrm",
@@ -53,7 +60,7 @@
         },
         {
           "key": "Cache-Control",
-          "value": "public, max-age=604800"
+          "value": "public, max-age=604800, immutable"
         },
         {
           "key": "Access-Control-Allow-Origin",
@@ -118,11 +125,33 @@
       ]
     },
     {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://raw.githubusercontent.com 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://mainnet.helius-rpc.com https://lite-api.jup.ag https://raw.githubusercontent.com wss://mainnet.helius-rpc.com; frame-ancestors 'self'; media-src 'self' blob:; worker-src 'self' blob:;"
+          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://mainnet.helius-rpc.com https://lite-api.jup.ag https://raw.githubusercontent.com wss://mainnet.helius-rpc.com; frame-ancestors 'self'; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
         },
         {
           "key": "X-Content-Type-Options",
@@ -131,18 +160,47 @@
         {
           "key": "X-Frame-Options",
           "value": "SAMEORIGIN"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(self), geolocation=(), payment=()"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000; includeSubDomains"
         }
       ]
     }
   ],
+  
   "functions": {
     "web/api/**/*.js": {
       "memory": 1024,
       "maxDuration": 30
     }
   },
-  "outputDirectory": ".",
-  "buildCommand": "",
-  "installCommand": "npm install",
-  "framework": null
+  
+  "env": [
+    "OPENAI_API_KEY",
+    "HELIUS_RPC_URL",
+    "NODE_ENV",
+    "OPENAI_MODEL",
+    "MAX_MESSAGE_LENGTH",
+    "MAX_CONVERSATION_SIZE",
+    "MAX_TTS_LENGTH",
+    "PRICE_UPDATE_INTERVAL",
+    "TPS_UPDATE_INTERVAL"
+  ],
+  
+  "github": {
+    "silent": true
+  }
 }
