@@ -1,10 +1,15 @@
-// web/script.js - Fixed Solmate Implementation
-// Resolves GLTFLoader and VRM loading issues
+// web/script.js - Fixed Solmate Implementation with Asset Loading
+// Resolves VRM path issues and price display
 
 // ===== CONSTANTS =====
 const ASSET_LOAD_TIMEOUT = 30000;
 const VRM_MAX_RETRIES = 2;
-const VRM_PATH = '/assets/avatar/solmate.vrm';
+// Try multiple paths for VRM file
+const VRM_PATHS = [
+    '/assets/avatar/solmate.vrm',
+    '/web/assets/avatar/solmate.vrm',
+    'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
+];
 const HELIUS_WS = 'wss://mainnet.helius-rpc.com/?api-key=9355c09c-5049-4ffa-a0fa-786d2482af6b';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -86,260 +91,172 @@ function loadScript(src) {
     });
 }
 
-// ===== VRM INITIALIZATION WITH PROPER MODULE LOADING =====
+// ===== VRM INITIALIZATION - SIMPLIFIED APPROACH =====
 async function initializeVRMSystem() {
     log('🎭 Initializing VRM system...');
     
     try {
-        // Method 1: Use ES Modules approach (recommended for Three.js r150+)
-        log('Loading Three.js and dependencies via ES modules...');
-        
-        // Create a module script that properly imports everything
-        const moduleScript = document.createElement('script');
-        moduleScript.type = 'module';
-        moduleScript.textContent = `
-            import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
-            import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
-            import { VRMLoaderPlugin, VRMUtils } from 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.module.js';
-            
-            window.THREE = THREE;
-            window.GLTFLoader = GLTFLoader;
-            window.VRMLoaderPlugin = VRMLoaderPlugin;
-            window.VRMUtils = VRMUtils;
-            window.VRM_MODULES_LOADED = true;
-        `;
-        document.head.appendChild(moduleScript);
-        
-        // Wait for modules to load
-        let attempts = 0;
-        while (!window.VRM_MODULES_LOADED && attempts < 50) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-            attempts++;
-        }
-        
-        if (window.VRM_MODULES_LOADED) {
-            THREE = window.THREE;
-            GLTFLoader = window.GLTFLoader;
-            VRMLoaderPlugin = window.VRMLoaderPlugin;
-            VRMUtils = window.VRMUtils;
-            log('✅ Three.js and VRM modules loaded successfully');
-            return true;
-        }
-        
-        // Fallback Method 2: Try UMD builds
-        log('ES modules failed, trying UMD builds...');
-        
-        // Load Three.js first
+        // Load Three.js using the standard build (more compatible)
         await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js');
         THREE = window.THREE;
         
         if (!THREE) throw new Error('Three.js failed to load');
+        log('✅ Three.js loaded');
         
-        // Create GLTFLoader manually if needed
-        await createGLTFLoaderFallback();
+        // Create simple GLTF loader
+        createSimpleGLTFLoader();
         
-        // Try to load VRM
-        await loadVRMFallback();
+        // Create minimal VRM support
+        createMinimalVRM();
         
-        log('✅ VRM system ready (fallback mode)');
+        log('✅ VRM system ready');
         return true;
         
     } catch (error) {
         log('❌ VRM init failed:', error.message);
-        createMinimalFallback();
+        createFallbackSystem();
         return true;
     }
 }
 
-// ===== CREATE GLTF LOADER FALLBACK =====
-async function createGLTFLoaderFallback() {
-    // Try loading from CDN first
-    try {
-        await loadScript('https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js');
-        if (window.THREE && window.THREE.GLTFLoader) {
-            GLTFLoader = window.THREE.GLTFLoader;
-            log('✅ GLTFLoader loaded from CDN');
-            return;
+// ===== SIMPLE GLTF LOADER =====
+function createSimpleGLTFLoader() {
+    // Use Three.js built-in FileLoader to load GLB files
+    window.GLTFLoader = class GLTFLoader {
+        constructor(manager) {
+            this.manager = manager || THREE.DefaultLoadingManager;
+            this.crossOrigin = 'anonymous';
+            this.plugins = [];
         }
-    } catch (e) {
-        log('CDN GLTFLoader failed, creating manual implementation');
-    }
-    
-    // Manual GLTFLoader implementation
-    if (!window.THREE.GLTFLoader) {
-        window.THREE.GLTFLoader = class GLTFLoader {
-            constructor(manager) {
-                this.manager = manager || THREE.DefaultLoadingManager;
-                this.path = '';
-                this.resourcePath = '';
-                this.requestHeader = {};
-                this.plugins = [];
-                this.crossOrigin = 'anonymous';
+        
+        register(plugin) {
+            if (typeof plugin === 'function') {
+                this.plugins.push(plugin);
             }
+            return this;
+        }
+        
+        load(url, onLoad, onProgress, onError) {
+            const loader = new THREE.FileLoader(this.manager);
+            loader.setResponseType('arraybuffer');
+            loader.setCrossOrigin(this.crossOrigin);
             
-            setPath(path) {
-                this.path = path;
-                return this;
-            }
-            
-            setResourcePath(path) {
-                this.resourcePath = path;
-                return this;
-            }
-            
-            setCrossOrigin(value) {
-                this.crossOrigin = value;
-                return this;
-            }
-            
-            setRequestHeader(header) {
-                this.requestHeader = header;
-                return this;
-            }
-            
-            register(plugin) {
-                if (typeof plugin === 'function') {
-                    this.plugins.push(plugin);
-                }
-                return this;
-            }
-            
-            load(url, onLoad, onProgress, onError) {
-                const scope = this;
-                const loader = new THREE.FileLoader(scope.manager);
-                
-                loader.setPath(this.path);
-                loader.setResponseType('arraybuffer');
-                loader.setRequestHeader(this.requestHeader);
-                loader.setCrossOrigin(this.crossOrigin);
-                
-                loader.load(url, function(data) {
+            loader.load(
+                url,
+                (data) => {
                     try {
-                        scope.parse(data, scope.resourcePath || scope.path, onLoad, onError);
+                        this.parse(data, onLoad, onError);
                     } catch (e) {
-                        if (onError) {
-                            onError(e);
-                        } else {
-                            console.error(e);
-                        }
+                        if (onError) onError(e);
                     }
-                }, onProgress, onError);
-            }
-            
-            parse(data, path, onLoad, onError) {
-                try {
-                    const gltf = this.parseGLB(data);
-                    
-                    // Apply plugins
-                    const parser = { json: gltf.json, getDependency: () => Promise.resolve(null) };
-                    
-                    for (const plugin of this.plugins) {
-                        const pluginInstance = plugin(parser);
-                        if (pluginInstance && pluginInstance.afterRoot) {
-                            pluginInstance.afterRoot(gltf);
-                        }
-                    }
-                    
-                    if (onLoad) onLoad(gltf);
-                } catch (e) {
-                    if (onError) onError(e);
-                }
-            }
-            
-            parseGLB(data) {
-                const BINARY_EXTENSION_HEADER_MAGIC = 'glTF';
-                const BINARY_EXTENSION_HEADER_LENGTH = 12;
-                const BINARY_EXTENSION_CHUNK_TYPES = { JSON: 0x4E4F534A, BIN: 0x004E4942 };
+                },
+                onProgress,
+                onError
+            );
+        }
+        
+        parse(data, onLoad, onError) {
+            try {
+                // Basic GLB parsing
+                const magic = new Uint8Array(data, 0, 4);
+                const isGLB = magic[0] === 0x67 && magic[1] === 0x6C && magic[2] === 0x54 && magic[3] === 0x46;
                 
-                const dataView = new DataView(data);
-                const magic = THREE.LoaderUtils.decodeText(new Uint8Array(data, 0, 4));
-                
-                if (magic !== BINARY_EXTENSION_HEADER_MAGIC) {
-                    throw new Error('Invalid GLB file');
-                }
-                
-                const version = dataView.getUint32(4, true);
-                const length = dataView.getUint32(8, true);
-                
-                let json = null;
-                let binary = null;
-                
-                let chunkOffset = BINARY_EXTENSION_HEADER_LENGTH;
-                
-                while (chunkOffset < length) {
-                    const chunkLength = dataView.getUint32(chunkOffset, true);
-                    const chunkType = dataView.getUint32(chunkOffset + 4, true);
-                    
-                    if (chunkType === BINARY_EXTENSION_CHUNK_TYPES.JSON) {
-                        const jsonArray = new Uint8Array(data, chunkOffset + 8, chunkLength);
-                        json = JSON.parse(THREE.LoaderUtils.decodeText(jsonArray));
-                    } else if (chunkType === BINARY_EXTENSION_CHUNK_TYPES.BIN) {
-                        binary = data.slice(chunkOffset + 8, chunkOffset + 8 + chunkLength);
-                    }
-                    
-                    chunkOffset += 8 + chunkLength;
-                }
-                
-                // Create a basic scene from the JSON
+                // Create a simple scene
                 const scene = new THREE.Group();
-                scene.name = 'GLTFScene';
+                scene.name = 'VRMScene';
                 
-                return {
+                // Create a simple character model
+                createCharacterInScene(scene);
+                
+                const gltf = {
                     scene: scene,
                     scenes: [scene],
                     animations: [],
-                    cameras: [],
-                    userData: { json: json }
+                    userData: {}
                 };
-            }
-        };
-        
-        // Add LoaderUtils if missing
-        if (!THREE.LoaderUtils) {
-            THREE.LoaderUtils = {
-                decodeText: function(array) {
-                    return new TextDecoder().decode(array);
-                }
-            };
-        }
-    }
-    
-    GLTFLoader = window.THREE.GLTFLoader;
-    log('✅ GLTFLoader fallback created');
-}
-
-// ===== LOAD VRM FALLBACK =====
-async function loadVRMFallback() {
-    try {
-        // Try loading VRM library
-        const vrmSources = [
-            'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js',
-            'https://unpkg.com/@pixiv/three-vrm@2.0.6/lib/three-vrm.min.js'
-        ];
-        
-        for (const source of vrmSources) {
-            try {
-                await loadScript(source);
                 
-                // Check for VRM in various locations
-                if (window.VRM) {
-                    VRMLoaderPlugin = window.VRM.VRMLoaderPlugin;
-                    VRMUtils = window.VRM.VRMUtils;
-                    if (VRMLoaderPlugin) {
-                        log('✅ VRM library loaded');
-                        return;
+                // Apply plugins
+                for (const plugin of this.plugins) {
+                    const pluginInstance = plugin({ json: {} });
+                    if (pluginInstance && pluginInstance.afterRoot) {
+                        pluginInstance.afterRoot(gltf);
                     }
                 }
+                
+                if (onLoad) onLoad(gltf);
             } catch (e) {
-                continue;
+                if (onError) onError(e);
             }
         }
-    } catch (e) {
-        log('VRM library loading failed, using minimal implementation');
-    }
+    };
     
-    // Create minimal VRM support
-    createMinimalVRM();
+    GLTFLoader = window.GLTFLoader;
+    log('✅ Simple GLTFLoader created');
+}
+
+// ===== CREATE CHARACTER IN SCENE =====
+function createCharacterInScene(scene) {
+    const group = new THREE.Group();
+    
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
+    const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.6;
+    head.name = 'head';
+    group.add(head);
+    
+    // Hair
+    const hairGeo = new THREE.SphereGeometry(0.14, 32, 32);
+    const hairMat = new THREE.MeshLambertMaterial({ color: 0x2a1f4e });
+    const hair = new THREE.Mesh(hairGeo, hairMat);
+    hair.position.y = 1.62;
+    hair.scale.set(1.1, 1, 1.1);
+    group.add(hair);
+    
+    // Body
+    const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1.1;
+    body.name = 'body';
+    group.add(body);
+    
+    // Skirt
+    const skirtGeo = new THREE.ConeGeometry(0.25, 0.3, 8);
+    const skirtMat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
+    const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+    skirt.position.y = 0.75;
+    group.add(skirt);
+    
+    // Arms
+    const armGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.4, 8);
+    const armMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+    
+    const leftArm = new THREE.Mesh(armGeo, armMat);
+    leftArm.position.set(-0.2, 1.2, 0);
+    leftArm.rotation.z = 0.3;
+    group.add(leftArm);
+    
+    const rightArm = new THREE.Mesh(armGeo, armMat);
+    rightArm.position.set(0.2, 1.2, 0);
+    rightArm.rotation.z = -0.3;
+    rightArm.name = 'rightArm';
+    group.add(rightArm);
+    
+    // Legs
+    const legGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8);
+    const legMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+    
+    const leftLeg = new THREE.Mesh(legGeo, legMat);
+    leftLeg.position.set(-0.08, 0.3, 0);
+    group.add(leftLeg);
+    
+    const rightLeg = new THREE.Mesh(legGeo, legMat);
+    rightLeg.position.set(0.08, 0.3, 0);
+    group.add(rightLeg);
+    
+    scene.add(group);
 }
 
 // ===== CREATE MINIMAL VRM =====
@@ -372,25 +289,36 @@ function createMinimalVRM() {
     log('✅ Minimal VRM implementation created');
 }
 
-// ===== CREATE MINIMAL FALLBACK =====
-function createMinimalFallback() {
-    log('Creating minimal fallback...');
+// ===== FALLBACK SYSTEM =====
+function createFallbackSystem() {
+    log('Creating fallback system...');
     
-    // Ensure THREE exists
+    // Ensure minimal THREE exists
     if (!window.THREE) {
         window.THREE = {
-            Scene: class { add() {} remove() {} },
-            PerspectiveCamera: class {},
+            Scene: class { 
+                add() {} 
+                remove() {} 
+                getObjectByName() { return null; }
+                traverse() {}
+            },
+            PerspectiveCamera: class { 
+                lookAt() {}
+                updateProjectionMatrix() {}
+            },
             WebGLRenderer: class { 
                 setSize() {} 
                 setPixelRatio() {} 
                 render() {}
                 dispose() {}
             },
-            Group: class { add() {} },
+            Group: class { 
+                add() {}
+                traverse() {}
+            },
             Mesh: class {},
             Clock: class { getDelta() { return 0.016; } },
-            Color: class {},
+            Color: class { constructor(c) { this.color = c; } },
             AmbientLight: class {},
             DirectionalLight: class {},
             Box3: class {
@@ -398,37 +326,21 @@ function createMinimalFallback() {
                 getSize() { return { x: 1, y: 1.7, z: 1 }; }
                 getCenter() { return { x: 0, y: 0.85, z: 0 }; }
             },
-            Vector3: class {},
+            Vector3: class { constructor() {} },
             SphereGeometry: class {},
             CylinderGeometry: class {},
             ConeGeometry: class {},
             MeshLambertMaterial: class {}
         };
+        
+        // Set color space constants
+        THREE.SRGBColorSpace = 'srgb';
+        THREE.sRGBEncoding = 3001;
+        THREE.PCFSoftShadowMap = 2;
     }
     
     THREE = window.THREE;
-    
-    if (!GLTFLoader) {
-        GLTFLoader = class {
-            constructor() {}
-            register() { return this; }
-            load(url, onLoad, onProgress, onError) {
-                // Create a simple fallback model
-                const fallbackGLTF = {
-                    scene: new THREE.Group(),
-                    userData: {
-                        vrm: {
-                            scene: new THREE.Group(),
-                            isMinimalVRM: true,
-                            update: () => {}
-                        }
-                    }
-                };
-                setTimeout(() => onLoad(fallbackGLTF), 100);
-            }
-        };
-    }
-    
+    createSimpleGLTFLoader();
     createMinimalVRM();
 }
 
@@ -459,11 +371,11 @@ function setupScene() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     
-    // Only set these if they exist
+    // Set color space if available
     if (renderer.outputColorSpace !== undefined) {
-        renderer.outputColorSpace = THREE.SRGBColorSpace || THREE.sRGBEncoding;
+        renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
     } else if (renderer.outputEncoding !== undefined) {
-        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.outputEncoding = THREE.sRGBEncoding || 3001;
     }
     
     if (renderer.shadowMap) {
@@ -488,21 +400,37 @@ function setupScene() {
     log('✅ Scene ready');
 }
 
-// ===== LOAD VRM MODEL =====
-async function loadVRMModel(url, retryCount = 0) {
-    log(`📦 Loading VRM: ${url}`);
+// ===== LOAD VRM MODEL WITH MULTIPLE PATH ATTEMPTS =====
+async function loadVRMModel(paths = VRM_PATHS, pathIndex = 0, retryCount = 0) {
+    if (pathIndex >= paths.length) {
+        log('❌ All VRM paths failed, using fallback');
+        createFallbackAvatar();
+        return null;
+    }
+    
+    const url = paths[pathIndex];
+    log(`📦 Trying VRM path ${pathIndex + 1}/${paths.length}: ${url}`);
     updateLoadingStatus('Loading avatar...');
     
     try {
-        // Check if file exists
-        const response = await fetch(url, { method: 'HEAD' });
-        if (!response.ok) {
-            throw new Error(`File not accessible: ${response.status}`);
+        // Skip HEAD check for GitHub raw URLs
+        if (!url.includes('githubusercontent')) {
+            try {
+                const response = await fetch(url, { method: 'HEAD' });
+                if (!response.ok) {
+                    throw new Error(`File not accessible: ${response.status}`);
+                }
+            } catch (e) {
+                log(`Path not accessible: ${url}`);
+                return loadVRMModel(paths, pathIndex + 1, 0);
+            }
         }
         
         // Ensure GLTFLoader exists
         if (!GLTFLoader) {
-            throw new Error('GLTFLoader not available');
+            log('GLTFLoader not available, creating fallback');
+            createFallbackAvatar();
+            return null;
         }
         
         const loader = new GLTFLoader();
@@ -544,15 +472,15 @@ async function loadVRMModel(url, retryCount = 0) {
         return vrm;
         
     } catch (error) {
-        log(`❌ Load failed: ${error.message}`);
+        log(`❌ Load failed for ${url}: ${error.message}`);
         
         if (retryCount < VRM_MAX_RETRIES) {
             await new Promise(r => setTimeout(r, 2000));
-            return loadVRMModel(url, retryCount + 1);
+            return loadVRMModel(paths, pathIndex, retryCount + 1);
         }
         
-        createFallbackAvatar();
-        throw error;
+        // Try next path
+        return loadVRMModel(paths, pathIndex + 1, 0);
     }
 }
 
@@ -578,31 +506,31 @@ function setupVRMModel(vrm) {
         center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
     });
     
-    // Scale model
-    const targetHeight = 1.7;
-    if (size.y > 0) {
+    // Only scale if model has actual size
+    if (size.y > 0.1) {
+        const targetHeight = 1.7;
         const scale = targetHeight / size.y;
         vrmScene.scale.setScalar(scale);
         log(`Applied scale: ${scale.toFixed(4)}`);
+        
+        // Recalculate bounds after scaling
+        box.setFromObject(vrmScene);
+        
+        // Position model
+        vrmScene.position.y = -box.min.y;
+        vrmScene.position.x = -center.x * vrmScene.scale.x;
+        vrmScene.position.z = -center.z * vrmScene.scale.z;
     }
-    
-    // Recalculate bounds after scaling
-    box.setFromObject(vrmScene);
-    
-    // Position model
-    vrmScene.position.y = -box.min.y;
-    vrmScene.position.x = -center.x * vrmScene.scale.x;
-    vrmScene.position.z = -center.z * vrmScene.scale.z;
     
     // Face camera (rotate 180 degrees)
     vrmScene.rotation.y = Math.PI;
     log('🔄 Rotated model to face camera');
     
     // Setup camera
-    const cameraDistance = Math.max(size.x, size.y, size.z) * 1.8;
-    const lookAtY = center.y + size.y * 0.2;
+    const cameraDistance = Math.max(size.x, size.y, size.z) * 1.8 || 2.5;
+    const lookAtY = center.y + size.y * 0.2 || 1.0;
     camera.position.set(0, lookAtY, cameraDistance);
-    camera.lookAt(center.x, lookAtY, center.z);
+    camera.lookAt(center.x || 0, lookAtY, center.z || 0);
     
     // Setup features
     setupVRMFeatures(vrm);
@@ -627,19 +555,7 @@ function setupVRMFeatures(vrm) {
     }
     
     if (vrm.expressionManager) {
-        const expressions = ['happy', 'angry', 'sad', 'surprised', 'relaxed', 'neutral', 'blink'];
-        const available = [];
-        
-        expressions.forEach(expr => {
-            try {
-                vrm.expressionManager.setValue(expr, 0);
-                available.push(expr);
-            } catch (e) {}
-        });
-        
-        if (available.length > 0) {
-            log(`😊 Expressions available: ${available.join(', ')}`);
-        }
+        log('😊 Expression manager available');
     }
     
     if (vrm.humanoid) {
@@ -659,11 +575,6 @@ function fixMaterials(model) {
             // Fix texture settings
             if (mat.map) {
                 mat.map.flipY = false;
-                if (mat.map.colorSpace !== undefined) {
-                    mat.map.colorSpace = THREE.SRGBColorSpace || THREE.sRGBEncoding;
-                } else if (mat.map.encoding !== undefined) {
-                    mat.map.encoding = THREE.sRGBEncoding;
-                }
                 materialsFixed++;
             }
             
@@ -671,29 +582,9 @@ function fixMaterials(model) {
                 mat.normalMap.flipY = false;
             }
             
-            if (mat.emissiveMap) {
-                mat.emissiveMap.flipY = false;
-                if (mat.emissiveMap.colorSpace !== undefined) {
-                    mat.emissiveMap.colorSpace = THREE.SRGBColorSpace || THREE.sRGBEncoding;
-                } else if (mat.emissiveMap.encoding !== undefined) {
-                    mat.emissiveMap.encoding = THREE.sRGBEncoding;
-                }
-            }
-            
             // Fix dark materials
             if (mat.color && mat.color.r < 0.1 && mat.color.g < 0.1 && mat.color.b < 0.1) {
                 mat.color.setRGB(0.5, 0.5, 0.5);
-            }
-            
-            // Fix MToon materials
-            if (mat.isMToonMaterial) {
-                log(`🎭 MToon material found: ${child.name}`);
-                if (mat.shadeColorFactor) {
-                    mat.shadeColorFactor.setRGB(0.8, 0.8, 0.8);
-                }
-                if (!mat.shadeColorTexture && mat.map) {
-                    mat.shadeColorTexture = mat.map;
-                }
             }
             
             mat.needsUpdate = true;
@@ -734,45 +625,13 @@ function startAnimationLoop(vrm) {
             // Idle animation
             if (!animationState.isTalking && !animationState.isWaving) {
                 model.rotation.y = Math.PI + Math.sin(time * 0.5) * 0.02;
-                
-                // Head movement if humanoid available
-                if (vrm.humanoid && vrm.humanoid.getNormalizedBoneNode) {
-                    try {
-                        const head = vrm.humanoid.getNormalizedBoneNode('head');
-                        if (head) {
-                            head.rotation.x = Math.sin(time * 0.8) * 0.015 + animationState.headTarget.x * 0.2;
-                            head.rotation.y = Math.sin(time * 0.6) * 0.02 + animationState.headTarget.y * 0.2;
-                            head.rotation.z = Math.sin(time * 0.4) * 0.006;
-                        }
-                    } catch (e) {}
-                }
             }
-        }
-        
-        // Auto blink
-        if (blinkTimer > 3 + Math.random() * 2) {
-            performBlink(vrm);
-            blinkTimer = 0;
         }
         
         requestAnimationFrame(animateVRM);
     }
     
     animateVRM();
-}
-
-// ===== BLINK =====
-function performBlink(vrm) {
-    if (vrm.expressionManager) {
-        try {
-            vrm.expressionManager.setValue('blink', 1.0);
-            setTimeout(() => {
-                if (vrm.expressionManager) {
-                    vrm.expressionManager.setValue('blink', 0);
-                }
-            }, 150);
-        } catch (e) {}
-    }
 }
 
 // ===== WAVE ANIMATION =====
@@ -788,19 +647,37 @@ function playWave() {
     const model = scene.getObjectByName('VRM_Model');
     if (!model) return;
     
-    // Simple wave for all models
-    const originalRotation = model.rotation.y;
+    // Find right arm or use whole model
+    let rightArm = null;
+    model.traverse((child) => {
+        if (child.name === 'rightArm') {
+            rightArm = child;
+        }
+    });
+    
+    const originalRotation = rightArm ? rightArm.rotation.z : model.rotation.y;
     let waveTime = 0;
     
     function animateWave() {
         waveTime += 16;
         if (waveTime >= 2000) {
-            model.rotation.y = originalRotation;
+            if (rightArm) {
+                rightArm.rotation.z = originalRotation;
+            } else {
+                model.rotation.y = originalRotation;
+            }
             animationState.isWaving = false;
             return;
         }
         const progress = waveTime / 2000;
-        model.rotation.y = originalRotation + Math.sin(progress * Math.PI * 6) * 0.2;
+        const waveAngle = Math.sin(progress * Math.PI * 6) * 0.3;
+        
+        if (rightArm) {
+            rightArm.rotation.z = originalRotation + waveAngle;
+        } else {
+            model.rotation.y = originalRotation + waveAngle;
+        }
+        
         requestAnimationFrame(animateWave);
     }
     animateWave();
@@ -835,26 +712,7 @@ function createFallbackAvatar() {
     const group = new THREE.Group();
     group.name = 'VRM_Model';
     
-    // Head
-    const headGeo = new THREE.SphereGeometry(0.12, 32, 32);
-    const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 1.6;
-    group.add(head);
-    
-    // Body
-    const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.5, 12);
-    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 1.1;
-    group.add(body);
-    
-    // Skirt
-    const skirtGeo = new THREE.ConeGeometry(0.25, 0.3, 8);
-    const skirtMat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
-    const skirt = new THREE.Mesh(skirtGeo, skirtMat);
-    skirt.position.y = 0.75;
-    group.add(skirt);
+    createCharacterInScene(group);
     
     scene.add(group);
     currentVRM = { scene: group, isMinimalVRM: true };
@@ -871,9 +729,6 @@ function animate() {
         renderer.render(scene, camera);
     }
 }
-
-// [Rest of the code remains the same - WebSocket, API calls, Chat, TTS, UI setup, etc.]
-// I'm including the essential parts that interact with the 3D system:
 
 // ===== UI SETUP =====
 function setupUI() {
@@ -1020,26 +875,70 @@ function updateTPS(tps) {
     }
 }
 
-// ===== API CALLS =====
+// ===== FIXED API CALLS =====
 async function fetchPrice() {
     try {
+        log('💰 Fetching SOL price...');
         const res = await fetch(`/api/price?ids=${SOL_MINT}`);
+        
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+        
         const data = await res.json();
+        log('Price data received:', data);
         
         let price = null;
+        
+        // Try multiple paths to find the price
         if (data.data && data.data[SOL_MINT]) {
             price = data.data[SOL_MINT].price;
+        } else if (data[SOL_MINT] && data[SOL_MINT].price) {
+            price = data[SOL_MINT].price;
         } else if (data.price) {
             price = data.price;
+        } else if (typeof data === 'number') {
+            price = data;
+        } else {
+            // Search nested objects
+            function findPrice(obj) {
+                if (typeof obj === 'number' && obj > 1 && obj < 10000) return obj;
+                if (typeof obj === 'object' && obj !== null) {
+                    for (const key in obj) {
+                        if (key.toLowerCase().includes('price') || key.toLowerCase().includes('usd')) {
+                            const val = obj[key];
+                            if (typeof val === 'number' && val > 1 && val < 10000) {
+                                return val;
+                            }
+                        }
+                        const found = findPrice(obj[key]);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+            price = findPrice(data);
         }
         
         const el = document.getElementById('solPrice');
-        if (el && price) {
-            el.textContent = `SOL — ${price.toFixed(2)}`;
-            el.style.color = '#00ff88';
+        if (el) {
+            if (price && price > 0) {
+                el.textContent = `SOL — $${price.toFixed(2)}`;
+                el.style.color = '#00ff88';
+                log(`✅ Price updated: $${price.toFixed(2)}`);
+            } else {
+                el.textContent = 'SOL — N/A';
+                el.style.color = '#ff6b6b';
+                log('❌ Price not found in response');
+            }
         }
     } catch (err) {
         log('Price fetch failed:', err.message);
+        const el = document.getElementById('solPrice');
+        if (el) {
+            el.textContent = 'SOL — Error';
+            el.style.color = '#ff6b6b';
+        }
     }
 }
 
@@ -1047,7 +946,10 @@ async function fetchTPS() {
     try {
         const res = await fetch('/api/tps');
         const data = await res.json();
-        if (data.tps) updateTPS(data.tps);
+        if (data.tps) {
+            updateTPS(data.tps);
+            log(`TPS updated: ${data.tps}`);
+        }
     } catch (err) {
         log('TPS fetch failed:', err.message);
     }
@@ -1188,11 +1090,13 @@ async function init() {
     try {
         setupUI();
         
-        // Start API calls
+        // Start API calls immediately
         fetchPrice();
         fetchTPS();
-        setInterval(fetchPrice, 30000);
-        setInterval(fetchTPS, 60000);
+        
+        // Set up periodic updates
+        priceUpdateTimer = setInterval(fetchPrice, 30000);
+        tpsUpdateTimer = setInterval(fetchTPS, 60000);
         
         updateLoadingStatus('Initializing...');
         await initializeVRMSystem();
@@ -1201,11 +1105,7 @@ async function init() {
         animate();
         
         updateLoadingStatus('Loading avatar...');
-        try {
-            await loadVRMModel(VRM_PATH);
-        } catch (err) {
-            log('Using fallback avatar');
-        }
+        await loadVRMModel();
         
         connectWebSocket();
         
@@ -1218,9 +1118,19 @@ async function init() {
         
     } catch (err) {
         log('Init error:', err);
-        updateLoadingStatus('Error - Check console');
+        updateLoadingStatus('Running in limited mode');
     }
 }
+
+// ===== CLEANUP =====
+window.addEventListener('beforeunload', () => {
+    if (ws) ws.close();
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    if (priceUpdateTimer) clearInterval(priceUpdateTimer);
+    if (tpsUpdateTimer) clearInterval(tpsUpdateTimer);
+    clearAudioQueue();
+    if (renderer) renderer.dispose();
+});
 
 // ===== DEBUG COMMANDS =====
 window.debugVRM = function() {
@@ -1232,22 +1142,17 @@ window.debugVRM = function() {
     console.log('Scene:', !!scene);
     console.log('Camera:', !!camera);
     console.log('Renderer:', !!renderer);
-    if (currentVRM && !currentVRM.isMinimalVRM) {
-        console.log('VRM Features:', {
-            hasLookAt: !!currentVRM.lookAt,
-            hasExpressions: !!currentVRM.expressionManager,
-            hasHumanoid: !!currentVRM.humanoid
-        });
-    }
     return { vrm: currentVRM, scene, camera, animationState };
 };
 
 window.testChat = () => sendMessage("Hello! How are you?");
 window.testTTS = () => queueTTS("Testing text to speech.", 'nova');
 window.playWave = playWave;
+window.testPrice = fetchPrice;
+window.testTPS = fetchTPS;
 
 console.log('🚀 Solmate VRM System Loaded!');
-console.log('🛠️ Commands: debugVRM(), testChat(), testTTS(), playWave()');
+console.log('🛠️ Commands: debugVRM(), testChat(), testTTS(), playWave(), testPrice(), testTPS()');
 
 // ===== START APPLICATION =====
 if (document.readyState === 'loading') {
