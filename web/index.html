@@ -1,794 +1,163 @@
-// web/script.js - Secure Solmate Implementation
-// Refactored with proper security, state management, and error handling
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Solmate - Your AI-powered Solana companion for crypto, DeFi, and web3">
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+    
+    <title>Solmate - Your Solana AI Companion</title>
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="/style.css" as="style">
+    <link rel="preload" href="/script.js" as="script">
+    
+    <!-- Icons and manifest -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/logo/solmatelogo.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/logo/solmatelogo.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    
+    <!-- Theme color -->
+    <meta name="theme-color" content="#0a0e17">
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/style.css">
+    
+    <!-- No inline styles for better CSP -->
+    <style id="dynamic-styles"></style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-content">
+            <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" class="loading-logo" onerror="this.style.display='none'">
+            <div id="loadingStatus" class="loading-status">Initializing Solmate...</div>
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
 
-(function() {
-    'use strict';
+    <!-- Main App Container -->
+    <div id="app" style="display: none;">
+        <!-- Header HUD -->
+        <header class="hud">
+            <div class="left">
+                <button id="themeToggle" class="icon-btn" aria-label="Toggle theme">🌙</button>
+                <div class="pill ws" id="wsLight" aria-live="polite">
+                    WS OFF
+                </div>
+            </div>
+            <div class="center">
+                <div class="pill sol" id="solPrice" aria-live="polite">
+                    SOL — Loading...
+                </div>
+            </div>
+            <div class="right">
+                <div class="pill tps" id="networkTPS" aria-live="polite">
+                    — TPS
+                </div>
+            </div>
+        </header>
 
-    // ===== APPLICATION NAMESPACE =====
-    const SolmateApp = {
-        // Configuration (loaded from server)
-        config: {
-            wsUrl: null,
-            apiEndpoints: {
-                chat: '/api/chat',
-                tts: '/api/tts',
-                price: '/api/price',
-                tps: '/api/tps',
-                config: '/api/config'
-            },
-            maxMessageLength: 500,
-            maxConversationSize: 50
-        },
+        <!-- 3D Canvas Container -->
+        <main class="stage-wrap">
+            <canvas id="vrmCanvas" aria-label="3D Avatar Display"></canvas>
+        </main>
 
-        // Application state
-        state: {
-            initialized: false,
-            conversation: [],
-            audioQueue: [],
-            isPlaying: false,
-            ws: null,
-            timers: {
-                wsReconnect: null,
-                priceUpdate: null,
-                tpsUpdate: null
-            },
-            animation: {
-                isWaving: false,
-                isTalking: false,
-                headTarget: { x: 0, y: 0 }
+        <!-- VU Meter -->
+        <div class="vu-wrap" aria-hidden="true">
+            <div class="vu" id="vuMeter"></div>
+        </div>
+
+        <!-- Chat Dock -->
+        <div class="dock" id="chatDock">
+            <form id="chatForm" class="chat-form">
+                <input 
+                    id="promptInput" 
+                    type="text" 
+                    class="ask" 
+                    placeholder="Ask anything about Solana, crypto, or just vibe..."
+                    maxlength="500"
+                    aria-label="Chat input"
+                    autocomplete="off"
+                >
+                <select id="voiceSelect" class="sel" aria-label="Voice selection">
+                    <option value="nova">Nova</option>
+                    <option value="verse">Verse</option>
+                    <option value="alloy">Alloy</option>
+                    <option value="aria">Aria</option>
+                    <option value="echo">Echo</option>
+                    <option value="fable">Fable</option>
+                    <option value="onyx">Onyx</option>
+                    <option value="shimmer">Shimmer</option>
+                </select>
+                <button type="submit" id="sendBtn" class="send icon-btn" aria-label="Send message">▶</button>
+                <button type="button" id="clearBtn" class="icon-btn" aria-label="Clear audio">🔇</button>
+            </form>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div id="typingIndicator" class="typing hidden" aria-live="polite">
+            Solmate is thinking...
+        </div>
+
+        <!-- Debug Overlay -->
+        <aside id="debugOverlay" class="overlay hidden" aria-hidden="true">
+            <details id="debugTips">
+                <summary>Debug Info</summary>
+                <div id="overlayLogs"></div>
+                <div class="debug-controls">
+                    <kbd>Ctrl+D</kbd> Toggle debug
+                    <br>
+                    <small>Check console for detailed logs</small>
+                </div>
+            </details>
+        </aside>
+
+        <!-- Error Container -->
+        <div id="errorContainer" class="error-container" aria-live="assertive"></div>
+    </div>
+
+    <!-- Noscript fallback -->
+    <noscript>
+        <div class="noscript-message">
+            <h1>JavaScript Required</h1>
+            <p>Solmate requires JavaScript to run. Please enable JavaScript in your browser settings.</p>
+        </div>
+    </noscript>
+
+    <!-- Scripts -->
+    <script src="/script.js" defer></script>
+    
+    <!-- Error boundary for critical failures -->
+    <script>
+        window.addEventListener('error', function(e) {
+            const app = document.getElementById('app');
+            const loading = document.getElementById('loadingScreen');
+            if (loading && !app.style.display) {
+                loading.innerHTML = `
+                    <div class="loading-content error">
+                        <h2>Loading Error</h2>
+                        <p>Failed to initialize Solmate. Please refresh the page.</p>
+                        <button onclick="location.reload()">Reload</button>
+                    </div>
+                `;
             }
-        },
-
-        // VRM state (managed by ES module)
-        vrm: {
-            scene: null,
-            camera: null,
-            renderer: null,
-            currentVRM: null,
-            clock: null,
-            initialized: false
-        },
-
-        // ===== INITIALIZATION =====
-        async init() {
-            try {
-                // Load configuration from server
-                await this.loadConfig();
-                
-                // Setup UI event handlers
-                this.setupUI();
-                
-                // Initialize VRM system
-                await this.initializeVRM();
-                
-                // Start data connections
-                this.connectWebSocket();
-                this.startDataUpdates();
-                
-                // Load saved conversation
-                this.loadConversation();
-                
-                // Mark as initialized
-                this.state.initialized = true;
-                this.log('✅ Solmate initialized successfully');
-                
-                // Welcome message
-                setTimeout(() => {
-                    this.queueTTS("Hello! I'm Solmate, your Solana companion. Ask me anything!");
-                    setTimeout(() => this.playWave(), 1000);
-                }, 2000);
-                
-            } catch (error) {
-                this.handleError('Initialization failed', error);
-                this.showUserError('Failed to initialize. Please refresh the page.');
-            }
-        },
-
-        // ===== CONFIGURATION LOADING =====
-        async loadConfig() {
-            try {
-                const response = await fetch(this.config.apiEndpoints.config);
-                if (!response.ok) throw new Error(`Config load failed: ${response.status}`);
-                
-                const serverConfig = await response.json();
-                
-                // Merge server config with defaults
-                this.config = { ...this.config, ...serverConfig };
-                this.log('Configuration loaded');
-                
-            } catch (error) {
-                this.log('Failed to load config, using defaults', error);
-                // Continue with default configuration
-            }
-        },
-
-        // ===== VRM INITIALIZATION =====
-        async initializeVRM() {
-            return new Promise((resolve) => {
-                // Inject import map for ES modules
-                const importMap = document.createElement('script');
-                importMap.type = 'importmap';
-                importMap.textContent = JSON.stringify({
-                    imports: {
-                        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-                        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
-                        "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js"
-                    }
-                });
-                document.head.appendChild(importMap);
-
-                // Create VRM loader module
-                const moduleScript = document.createElement('script');
-                moduleScript.type = 'module';
-                moduleScript.textContent = this.getVRMModuleCode();
-                document.head.appendChild(moduleScript);
-
-                // Wait for initialization
-                let attempts = 0;
-                const checkInit = setInterval(() => {
-                    if (window.SolmateVRM && window.SolmateVRM.initialized) {
-                        clearInterval(checkInit);
-                        this.vrm = window.SolmateVRM;
-                        resolve();
-                    } else if (attempts++ > 50) {
-                        clearInterval(checkInit);
-                        this.log('VRM initialization timeout');
-                        resolve(); // Continue without VRM
-                    }
-                }, 100);
-            });
-        },
-
-        // ===== VRM MODULE CODE =====
-        getVRMModuleCode() {
-            return `
-                import * as THREE from 'three';
-                import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-                import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-                
-                window.SolmateVRM = {
-                    scene: null,
-                    camera: null,
-                    renderer: null,
-                    currentVRM: null,
-                    clock: null,
-                    initialized: false,
-                    
-                    async init() {
-                        try {
-                            // Setup scene
-                            this.scene = new THREE.Scene();
-                            this.scene.background = new THREE.Color(0x0a0e17);
-                            
-                            // Setup camera
-                            this.camera = new THREE.PerspectiveCamera(
-                                30,
-                                window.innerWidth / window.innerHeight,
-                                0.1,
-                                20
-                            );
-                            this.camera.position.set(0, 1.4, 3);
-                            
-                            // Setup renderer
-                            const canvas = document.getElementById('vrmCanvas');
-                            if (!canvas) throw new Error('Canvas not found');
-                            
-                            this.renderer = new THREE.WebGLRenderer({
-                                canvas,
-                                antialias: true,
-                                alpha: false
-                            });
-                            this.renderer.setSize(window.innerWidth, window.innerHeight);
-                            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-                            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-                            
-                            // Add lights
-                            const directionalLight = new THREE.DirectionalLight(0xffffff, Math.PI);
-                            directionalLight.position.set(1, 1, 1);
-                            this.scene.add(directionalLight);
-                            
-                            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-                            this.scene.add(ambientLight);
-                            
-                            // Clock for animations
-                            this.clock = new THREE.Clock();
-                            
-                            // Handle resize
-                            window.addEventListener('resize', () => {
-                                this.camera.aspect = window.innerWidth / window.innerHeight;
-                                this.camera.updateProjectionMatrix();
-                                this.renderer.setSize(window.innerWidth, window.innerHeight);
-                            });
-                            
-                            this.initialized = true;
-                            
-                            // Load VRM
-                            await this.loadVRM();
-                            
-                            // Start render loop
-                            this.animate();
-                            
-                        } catch (error) {
-                            console.error('VRM init error:', error);
-                            this.createFallback();
-                        }
-                    },
-                    
-                    async loadVRM() {
-                        const loader = new GLTFLoader();
-                        loader.register((parser) => new VRMLoaderPlugin(parser));
-                        
-                        const urls = [
-                            '/assets/avatar/solmate.vrm',
-                            'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
-                        ];
-                        
-                        for (const url of urls) {
-                            try {
-                                const gltf = await loader.loadAsync(url);
-                                const vrm = gltf.userData.vrm;
-                                
-                                if (vrm) {
-                                    vrm.scene.rotation.y = Math.PI;
-                                    this.scene.add(vrm.scene);
-                                    this.currentVRM = vrm;
-                                    this.camera.lookAt(0, 1, 0);
-                                    console.log('VRM loaded from:', url);
-                                    return;
-                                }
-                            } catch (e) {
-                                console.error('Failed to load VRM from:', url);
-                            }
-                        }
-                        
-                        this.createFallback();
-                    },
-                    
-                    createFallback() {
-                        const geometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
-                        const material = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
-                        const mesh = new THREE.Mesh(geometry, material);
-                        mesh.position.y = 1;
-                        this.scene.add(mesh);
-                        this.currentVRM = { scene: mesh, isFallback: true };
-                    },
-                    
-                    animate() {
-                        requestAnimationFrame(() => this.animate());
-                        
-                        const deltaTime = this.clock.getDelta();
-                        
-                        if (this.currentVRM) {
-                            if (this.currentVRM.update) {
-                                this.currentVRM.update(deltaTime);
-                            }
-                            
-                            // Apply animations from main app
-                            if (window.SolmateApp && window.SolmateApp.applyAnimations) {
-                                window.SolmateApp.applyAnimations(this.currentVRM, deltaTime);
-                            }
-                        }
-                        
-                        this.renderer.render(this.scene, this.camera);
-                    }
-                };
-                
-                // Initialize
-                window.SolmateVRM.init();
-            `;
-        },
-
-        // ===== ANIMATIONS =====
-        applyAnimations(vrm, deltaTime) {
-            if (!vrm) return;
-            
-            const time = Date.now() / 1000;
-            const state = this.state.animation;
-            
-            // Idle animation
-            if (!state.isTalking && !state.isWaving) {
-                if (vrm.scene) {
-                    vrm.scene.rotation.y = Math.PI + Math.sin(time * 0.5) * 0.02;
+        });
+        
+        // Show app after load
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                const app = document.getElementById('app');
+                const loading = document.getElementById('loadingScreen');
+                if (app && loading) {
+                    app.style.display = '';
+                    loading.style.display = 'none';
                 }
-                
-                if (vrm.humanoid && !vrm.isFallback) {
-                    const head = vrm.humanoid.getNormalizedBoneNode('head');
-                    if (head) {
-                        head.rotation.x = Math.sin(time * 0.8) * 0.015 + state.headTarget.x * 0.2;
-                        head.rotation.y = Math.sin(time * 0.6) * 0.02 + state.headTarget.y * 0.2;
-                    }
-                }
-            }
-            
-            // Breathing
-            if (vrm.scene && !state.isTalking) {
-                const breathe = 1 + Math.sin(time * 2) * 0.01;
-                vrm.scene.scale.y = breathe;
-            }
-        },
-
-        playWave() {
-            const vrm = this.vrm.currentVRM;
-            if (!vrm) return;
-            
-            this.state.animation.isWaving = true;
-            
-            if (vrm.humanoid && !vrm.isFallback) {
-                const rightArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
-                if (rightArm) {
-                    const originalRotation = rightArm.rotation.clone();
-                    let waveTime = 0;
-                    
-                    const waveInterval = setInterval(() => {
-                        waveTime += 0.016;
-                        if (waveTime >= 2) {
-                            rightArm.rotation.copy(originalRotation);
-                            this.state.animation.isWaving = false;
-                            clearInterval(waveInterval);
-                            return;
-                        }
-                        rightArm.rotation.z = -0.5 - Math.sin(waveTime * Math.PI * 3) * 0.5;
-                    }, 16);
-                }
-            } else {
-                // Fallback wave
-                let waveTime = 0;
-                const waveInterval = setInterval(() => {
-                    waveTime += 0.016;
-                    if (waveTime >= 2) {
-                        this.state.animation.isWaving = false;
-                        clearInterval(waveInterval);
-                        return;
-                    }
-                    if (vrm.scene) {
-                        vrm.scene.rotation.z = Math.sin(waveTime * Math.PI * 3) * 0.1;
-                    }
-                }, 16);
-            }
-        },
-
-        // ===== UI SETUP =====
-        setupUI() {
-            // Theme toggle
-            const themeBtn = document.getElementById('themeToggle');
-            if (themeBtn) {
-                themeBtn.addEventListener('click', () => {
-                    document.documentElement.classList.toggle('light');
-                    const isLight = document.documentElement.classList.contains('light');
-                    themeBtn.textContent = isLight ? '☀️' : '🌙';
-                });
-            }
-
-            // Chat form
-            const form = document.getElementById('chatForm');
-            const input = document.getElementById('promptInput');
-            const sendBtn = document.getElementById('sendBtn');
-            
-            if (form && input) {
-                form.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    
-                    const text = input.value.trim();
-                    if (!text) return;
-                    
-                    // Validate message length
-                    if (text.length > this.config.maxMessageLength) {
-                        this.showUserError(`Message too long. Max ${this.config.maxMessageLength} characters.`);
-                        return;
-                    }
-                    
-                    input.value = '';
-                    if (sendBtn) {
-                        sendBtn.disabled = true;
-                        sendBtn.textContent = '⏳';
-                    }
-                    
-                    try {
-                        await this.sendMessage(text);
-                    } finally {
-                        if (sendBtn) {
-                            sendBtn.disabled = false;
-                            sendBtn.textContent = '▶';
-                        }
-                    }
-                });
-            }
-
-            // Clear audio button
-            const clearBtn = document.getElementById('clearBtn');
-            if (clearBtn) {
-                clearBtn.addEventListener('click', () => this.clearAudioQueue());
-            }
-
-            // Debug overlay
-            document.addEventListener('keydown', (e) => {
-                if (e.ctrlKey && e.key === 'd') {
-                    e.preventDefault();
-                    const logs = document.getElementById('debugOverlay');
-                    if (logs) logs.classList.toggle('hidden');
-                }
-            });
-
-            // Enable audio on interaction
-            ['click', 'keydown'].forEach(event => {
-                document.addEventListener(event, () => this.enableAudio(), { once: true });
-            });
-
-            // Mouse tracking
-            document.addEventListener('mousemove', (e) => {
-                if (!this.state.animation.isTalking && !this.state.animation.isWaving) {
-                    const mouseX = (e.clientX / window.innerWidth) * 2 - 1;
-                    const mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
-                    this.state.animation.headTarget.x = mouseY * 0.1;
-                    this.state.animation.headTarget.y = mouseX * 0.2;
-                }
-            });
-        },
-
-        // ===== WEBSOCKET CONNECTION =====
-        connectWebSocket() {
-            if (!this.config.wsUrl) {
-                this.log('WebSocket URL not configured');
-                return;
-            }
-            
-            if (this.state.ws) {
-                this.state.ws.close();
-            }
-            
-            try {
-                this.state.ws = new WebSocket(this.config.wsUrl);
-                
-                this.state.ws.onopen = () => {
-                    this.log('WebSocket connected');
-                    this.updateWSStatus(true);
-                };
-                
-                this.state.ws.onmessage = (e) => {
-                    try {
-                        const data = JSON.parse(e.data);
-                        if (data.tps) this.updateTPS(data.tps);
-                    } catch (err) {
-                        this.handleError('WebSocket message error', err);
-                    }
-                };
-                
-                this.state.ws.onclose = () => {
-                    this.updateWSStatus(false);
-                    // Exponential backoff for reconnection
-                    const delay = Math.min(5000 * Math.pow(2, this.state.wsReconnectAttempts || 0), 60000);
-                    this.state.wsReconnectAttempts = (this.state.wsReconnectAttempts || 0) + 1;
-                    this.state.timers.wsReconnect = setTimeout(() => this.connectWebSocket(), delay);
-                };
-                
-                this.state.ws.onerror = (err) => {
-                    this.handleError('WebSocket error', err);
-                };
-                
-            } catch (err) {
-                this.handleError('WebSocket connection failed', err);
-            }
-        },
-
-        updateWSStatus(connected) {
-            const el = document.getElementById('wsLight');
-            if (el) {
-                el.textContent = connected ? 'WS ON' : 'WS OFF';
-                el.style.color = connected ? '#00ff88' : '#ff6b6b';
-            }
-        },
-
-        // ===== DATA UPDATES =====
-        startDataUpdates() {
-            // Initial fetch
-            this.fetchPrice();
-            this.fetchTPS();
-            
-            // Set up periodic updates
-            this.state.timers.priceUpdate = setInterval(() => this.fetchPrice(), 30000);
-            this.state.timers.tpsUpdate = setInterval(() => this.fetchTPS(), 60000);
-        },
-
-        async fetchPrice() {
-            try {
-                const response = await fetch(`${this.config.apiEndpoints.price}?ids=So11111111111111111111111111111111111111112`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                
-                const data = await response.json();
-                let price = null;
-                
-                // Extract price from various response formats
-                const solMint = 'So11111111111111111111111111111111111111112';
-                if (data[solMint]?.usdPrice) {
-                    price = data[solMint].usdPrice;
-                } else if (data[solMint]?.price) {
-                    price = data[solMint].price;
-                }
-                
-                const el = document.getElementById('solPrice');
-                if (el && price) {
-                    el.textContent = `SOL — $${price.toFixed(2)}`;
-                    el.style.color = '#00ff88';
-                }
-            } catch (err) {
-                this.handleError('Price fetch failed', err);
-            }
-        },
-
-        async fetchTPS() {
-            try {
-                const response = await fetch(this.config.apiEndpoints.tps);
-                const data = await response.json();
-                if (data.tps) this.updateTPS(data.tps);
-            } catch (err) {
-                this.handleError('TPS fetch failed', err);
-            }
-        },
-
-        updateTPS(tps) {
-            const el = document.getElementById('networkTPS');
-            if (el) {
-                el.textContent = `${tps} TPS`;
-                el.style.color = '#00ff88';
-            }
-        },
-
-        // ===== CHAT SYSTEM =====
-        async sendMessage(text) {
-            // Sanitize input
-            text = this.sanitizeInput(text);
-            
-            // Add to conversation
-            this.state.conversation.push({ role: 'user', content: text });
-            
-            // Limit conversation size
-            if (this.state.conversation.length > this.config.maxConversationSize) {
-                this.state.conversation = this.state.conversation.slice(-this.config.maxConversationSize);
-            }
-            
-            try {
-                const response = await fetch(this.config.apiEndpoints.chat, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        messages: [
-                            { 
-                                role: 'system', 
-                                content: this.getSystemPrompt()
-                            },
-                            ...this.state.conversation
-                        ]
-                    })
-                });
-                
-                if (!response.ok) throw new Error(`Chat failed: ${response.status}`);
-                
-                const { content } = await response.json();
-                
-                // Sanitize response
-                const sanitizedContent = this.sanitizeOutput(content);
-                
-                this.state.conversation.push({ role: 'assistant', content: sanitizedContent });
-                this.saveConversation();
-                
-                // Trigger animations
-                this.startSpeechAnimation(sanitizedContent);
-                this.queueTTS(sanitizedContent);
-                
-                return sanitizedContent;
-                
-            } catch (err) {
-                this.handleError('Chat error', err);
-                const errorMsg = 'Sorry, I had trouble processing that. Please try again.';
-                this.queueTTS(errorMsg);
-                return errorMsg;
-            }
-        },
-
-        getSystemPrompt() {
-            return `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
-        },
-
-        sanitizeInput(text) {
-            // Remove potential XSS attempts
-            return text.replace(/<[^>]*>/g, '').trim();
-        },
-
-        sanitizeOutput(text) {
-            // Escape HTML entities
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        },
-
-        // ===== TTS SYSTEM =====
-        queueTTS(text, voice = 'nova') {
-            this.state.audioQueue.push({ text, voice });
-            if (!this.state.isPlaying) this.playNextAudio();
-        },
-
-        async playNextAudio() {
-            if (this.state.audioQueue.length === 0) {
-                this.state.isPlaying = false;
-                this.stopSpeechAnimation();
-                return;
-            }
-            
-            this.state.isPlaying = true;
-            const { text, voice } = this.state.audioQueue.shift();
-            
-            try {
-                const response = await fetch(this.config.apiEndpoints.tts, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, voice })
-                });
-                
-                if (!response.ok || response.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
-                    this.fallbackTTS(text, voice);
-                    return;
-                }
-                
-                const blob = await response.blob();
-                const audio = new Audio(URL.createObjectURL(blob));
-                
-                audio.onended = () => {
-                    this.state.isPlaying = false;
-                    this.stopSpeechAnimation();
-                    this.playNextAudio();
-                };
-                
-                audio.onerror = () => {
-                    this.state.isPlaying = false;
-                    this.stopSpeechAnimation();
-                    this.fallbackTTS(text, voice);
-                };
-                
-                await audio.play();
-            } catch (err) {
-                this.fallbackTTS(text, voice);
-            }
-        },
-
-        fallbackTTS(text, voice) {
-            try {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.9;
-                utterance.pitch = 1.1;
-                utterance.volume = 0.8;
-                
-                utterance.onend = () => {
-                    this.state.isPlaying = false;
-                    this.stopSpeechAnimation();
-                    this.playNextAudio();
-                };
-                
-                speechSynthesis.speak(utterance);
-                this.state.isPlaying = true;
-            } catch (err) {
-                this.state.isPlaying = false;
-                this.stopSpeechAnimation();
-                this.playNextAudio();
-            }
-        },
-
-        clearAudioQueue() {
-            this.state.audioQueue = [];
-            speechSynthesis.cancel();
-            this.state.isPlaying = false;
-            this.stopSpeechAnimation();
-        },
-
-        startSpeechAnimation(text) {
-            this.state.animation.isTalking = true;
-            const duration = Math.min(text.length * 50, 10000);
-            setTimeout(() => this.stopSpeechAnimation(), duration);
-        },
-
-        stopSpeechAnimation() {
-            this.state.animation.isTalking = false;
-        },
-
-        enableAudio() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                ctx.resume();
-            } catch (e) {}
-        },
-
-        // ===== CONVERSATION MANAGEMENT =====
-        saveConversation() {
-            try {
-                localStorage.setItem('solmateConversation', JSON.stringify(this.state.conversation));
-            } catch (e) {
-                this.handleError('Failed to save conversation', e);
-            }
-        },
-
-        loadConversation() {
-            try {
-                const saved = localStorage.getItem('solmateConversation');
-                if (saved) {
-                    this.state.conversation = JSON.parse(saved);
-                    // Limit loaded conversation size
-                    if (this.state.conversation.length > this.config.maxConversationSize) {
-                        this.state.conversation = this.state.conversation.slice(-this.config.maxConversationSize);
-                    }
-                }
-            } catch (e) {
-                this.handleError('Failed to load conversation', e);
-            }
-        },
-
-        // ===== ERROR HANDLING =====
-        handleError(context, error) {
-            console.error(`[Solmate] ${context}:`, error);
-            // Could send to error tracking service here
-        },
-
-        showUserError(message) {
-            const errorEl = document.createElement('div');
-            errorEl.style.cssText = `
-                position: fixed;
-                bottom: 100px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: rgba(255, 90, 122, 0.9);
-                color: white;
-                padding: 12px 20px;
-                border-radius: 8px;
-                z-index: 1000;
-                animation: fadeIn 0.3s;
-            `;
-            errorEl.textContent = message;
-            document.body.appendChild(errorEl);
-            
-            setTimeout(() => errorEl.remove(), 5000);
-        },
-
-        // ===== LOGGING =====
-        log(message, data = null) {
-            const timestamp = new Date().toLocaleTimeString();
-            console.log(`[${timestamp}] ${message}`, data || '');
-        },
-
-        // ===== CLEANUP =====
-        cleanup() {
-            // Clear timers
-            Object.values(this.state.timers).forEach(timer => {
-                if (timer) clearInterval(timer);
-            });
-            
-            // Close WebSocket
-            if (this.state.ws) {
-                this.state.ws.close();
-            }
-            
-            // Clear audio
-            this.clearAudioQueue();
-            
-            // Dispose Three.js resources
-            if (this.vrm.renderer) {
-                this.vrm.renderer.dispose();
-            }
-            
-            this.log('Cleanup complete');
-        }
-    };
-
-    // ===== STARTUP =====
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => SolmateApp.init());
-    } else {
-        SolmateApp.init();
-    }
-
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => SolmateApp.cleanup());
-
-    // Expose for debugging only in development
-    if (window.location.hostname === 'localhost') {
-        window.SolmateApp = SolmateApp;
-    }
-
-})();
+            }, 100);
+        });
+    </script>
+</body>
+</html>
