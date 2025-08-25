@@ -1,127 +1,220 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Solmate - Your AI-powered Solana companion for crypto, DeFi, and web3">
-    
-    <!-- Security Headers -->
-    <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
-    
-    <title>Solmate - Your Solana AI Companion</title>
-    
-    <!-- Icons and manifest -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/assets/logo/solmatelogo.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/logo/solmatelogo.png">
-    <link rel="manifest" href="/manifest.webmanifest">
-    
-    <!-- Theme color -->
-    <meta name="theme-color" content="#0a0e17">
-    
-    <!-- Stylesheet -->
-    <link rel="stylesheet" href="/style.css">
-    
-    <!-- Module scripts -->
-    <script type="module" src="/js/main.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Solmate - Your AI-powered Solana companion with 3D avatar, chat, and real-time blockchain data">
+  <meta name="theme-color" content="#4a90e2">
+  
+  <!-- PWA Meta Tags -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  
+  <title>Solmate - Your Solana AI Companion</title>
+  
+  <!-- Preconnect to external domains -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://mainnet.helius-rpc.com">
+  <link rel="preconnect" href="https://lite-api.jup.ag">
+  
+  <!-- Icons and Manifest -->
+  <link rel="apple-touch-icon" href="/assets/logo/solmatelogo.png">
+  <link rel="icon" type="image/png" href="/assets/logo/solmatelogo.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="/style.css">
+  
+  <!-- Preload critical assets -->
+  <link rel="preload" href="/js/utils.js" as="script">
+  <link rel="preload" href="/script.js" as="script">
+  
+  <!-- Fallback for no JavaScript -->
+  <noscript>
+    <style>
+      .requires-js { display: none !important; }
+      .no-js-message {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: white;
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 20px;
+      }
+    </style>
+  </noscript>
 </head>
 <body>
-    <!-- Loading Screen -->
-    <div id="loadingScreen" class="loading-screen">
-        <div class="loading-content">
-            <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" class="loading-logo" onerror="this.style.display='none'">
-            <div id="loadingStatus" class="loading-status">Initializing Solmate...</div>
-            <div class="loading-spinner"></div>
+  <!-- Skip to main content for accessibility -->
+  <a href="#chatContainer" class="skip-link">Skip to chat</a>
+  
+  <!-- Offline indicator -->
+  <div class="offline-banner" role="alert" aria-live="polite">
+    <span>🔌 You're offline - Some features may be limited</span>
+  </div>
+  
+  <!-- Main Header -->
+  <header class="hud" role="banner">
+    <div class="left">
+      <button id="themeToggle" class="icon-btn tooltip" data-tooltip="Toggle theme" aria-label="Toggle theme">
+        <span aria-hidden="true">🌙</span>
+      </button>
+      <div class="pill ws" id="wsLight" role="status" aria-live="polite">
+        <span class="sr-only">WebSocket status:</span>
+        <span aria-hidden="true">WS OFF</span>
+      </div>
+      <details id="debugTips" style="display: inline-block;">
+        <summary style="cursor: pointer;">Debug</summary>
+        <div style="position: absolute; background: var(--glass); padding: 8px; border-radius: 8px; margin-top: 4px; font-size: 12px; min-width: 200px;">
+          <div>Press <kbd>Ctrl+D</kbd> for debug overlay</div>
+          <div>Check console for commands</div>
+          <div>Service Worker: <span id="swStatus">checking...</span></div>
         </div>
+      </details>
     </div>
-
-    <!-- Main App Container -->
-    <div id="app" style="display: none;">
-        <!-- Header HUD -->
-        <header class="hud">
-            <div class="left">
-                <button id="themeToggle" class="icon-btn" aria-label="Toggle theme">🌙</button>
-                <div class="pill ws" id="wsLight" aria-live="polite">
-                    WS OFF
-                </div>
-            </div>
-            <div class="center">
-                <div class="pill sol" id="solPrice" aria-live="polite">
-                    SOL — Loading...
-                </div>
-            </div>
-            <div class="right">
-                <div class="pill tps" id="networkTPS" aria-live="polite">
-                    — TPS
-                </div>
-            </div>
-        </header>
-
-        <!-- 3D Canvas Container -->
-        <main class="stage-wrap">
-            <canvas id="vrmCanvas" aria-label="3D Avatar Display"></canvas>
-        </main>
-
-        <!-- VU Meter -->
-        <div class="vu-wrap" aria-hidden="true">
-            <div class="vu" id="vuMeter"></div>
-        </div>
-
-        <!-- Chat Dock -->
-        <div class="dock" id="chatDock">
-            <form id="chatForm" class="chat-form">
-                <input 
-                    id="promptInput" 
-                    type="text" 
-                    class="ask" 
-                    placeholder="Ask anything about Solana, crypto, or just vibe..."
-                    maxlength="500"
-                    aria-label="Chat input"
-                    autocomplete="off"
-                >
-                <select id="voiceSelect" class="sel" aria-label="Voice selection">
-                    <option value="nova">Nova</option>
-                    <option value="verse">Verse</option>
-                    <option value="alloy">Alloy</option>
-                    <option value="aria">Aria</option>
-                    <option value="echo">Echo</option>
-                    <option value="fable">Fable</option>
-                    <option value="onyx">Onyx</option>
-                    <option value="shimmer">Shimmer</option>
-                </select>
-                <button type="submit" id="sendBtn" class="send icon-btn" aria-label="Send message">▶</button>
-                <button type="button" id="clearBtn" class="icon-btn" aria-label="Clear audio">🔇</button>
-            </form>
-        </div>
-
-        <!-- Typing Indicator -->
-        <div id="typingIndicator" class="typing hidden" aria-live="polite">
-            Solmate is thinking...
-        </div>
-
-        <!-- Debug Overlay -->
-        <aside id="debugOverlay" class="overlay hidden" aria-hidden="true">
-            <details id="debugTips">
-                <summary>Debug Info</summary>
-                <div id="overlayLogs"></div>
-                <div class="debug-controls">
-                    <kbd>Ctrl+D</kbd> Toggle debug
-                    <br>
-                    <small>Check console for detailed logs</small>
-                </div>
-            </details>
-        </aside>
-
-        <!-- Error Container -->
-        <div id="errorContainer" class="error-container" aria-live="assertive"></div>
+    <div class="right">
+      <div class="pill sol" id="solPrice" role="status" aria-live="polite">
+        <span class="sr-only">Solana price:</span>
+        <span aria-hidden="true">SOL —</span>
+      </div>
+      <div class="pill tps" id="networkTPS" role="status" aria-live="polite">
+        <span class="sr-only">Network TPS:</span>
+        <span aria-hidden="true">❤️</span>
+      </div>
     </div>
-
-    <!-- Noscript fallback -->
-    <noscript>
-        <div class="noscript-message">
-            <h1>JavaScript Required</h1>
-            <p>Solmate requires JavaScript to run. Please enable JavaScript in your browser settings.</p>
-        </div>
-    </noscript>
+  </header>
+  
+  <!-- Main 3D Stage -->
+  <main class="stage-wrap requires-js" role="main">
+    <canvas id="vrmCanvas" aria-label="3D avatar display"></canvas>
+    
+    <!-- WebGL Fallback -->
+    <div class="webgl-fallback" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white;">
+      <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" style="width: 200px; height: auto;">
+      <h2>Solmate</h2>
+      <p>3D view requires WebGL support</p>
+      <p>Chat features are still available below!</p>
+    </div>
+  </main>
+  
+  <!-- Debug Overlay -->
+  <div id="debugOverlay" class="overlay hidden" role="complementary" aria-label="Debug information">
+    <h3>Debug Info</h3>
+    <ul>
+      <li>Press <kbd>Ctrl+D</kbd> to toggle</li>
+      <li>VRM Status: <span id="vrmStatus">loading...</span></li>
+      <li>API Status: <span id="apiStatus">checking...</span></li>
+      <li>Cache Status: <span id="cacheStatus">checking...</span></li>
+    </ul>
+    <div id="overlayLogs" aria-live="off"></div>
+  </div>
+  
+  <!-- VU Meter -->
+  <div class="vu-wrap requires-js" aria-hidden="true">
+    <div class="vu" id="vuMeter"></div>
+  </div>
+  
+  <!-- Typing Indicator -->
+  <div id="typingIndicator" class="typing hidden" role="status" aria-live="polite">
+    <span>Solmate is thinking...</span>
+  </div>
+  
+  <!-- Chat Interface -->
+  <div id="chatContainer" class="dock requires-js" role="region" aria-label="Chat interface">
+    <form id="chatForm" role="form" aria-label="Send message">
+      <input 
+        id="promptInput" 
+        type="text" 
+        class="ask" 
+        placeholder="Ask anything about Solana, crypto, or just vibe..."
+        aria-label="Message input"
+        autocomplete="off"
+        maxlength="2000"
+      >
+      <select id="voiceSelect" class="sel" aria-label="Select voice">
+        <option value="verse">Verse</option>
+        <option value="alloy">Alloy</option>
+        <option value="aria">Aria</option>
+        <option value="echo">Echo</option>
+        <option value="fable">Fable</option>
+        <option value="onyx">Onyx</option>
+        <option value="nova" selected>Nova</option>
+        <option value="shimmer">Shimmer</option>
+      </select>
+      <button 
+        id="sendBtn" 
+        type="submit"
+        class="send icon-btn tooltip" 
+        data-tooltip="Send message"
+        aria-label="Send message"
+      >
+        <span aria-hidden="true">▶</span>
+      </button>
+      <button 
+        id="clearBtn" 
+        type="button"
+        class="send icon-btn tooltip" 
+        data-tooltip="Stop audio"
+        aria-label="Stop audio"
+      >
+        <span aria-hidden="true">🔇</span>
+      </button>
+    </form>
+  </div>
+  
+  <!-- Loading Status -->
+  <div id="loadingStatus" class="loading-status" role="status" aria-live="polite">
+    <div class="loading-spinner"></div>
+    <span>Initializing Solmate...</span>
+  </div>
+  
+  <!-- No JavaScript Fallback -->
+  <noscript>
+    <div class="no-js-message">
+      <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" style="width: 150px;">
+      <h1>Solmate requires JavaScript</h1>
+      <p>Please enable JavaScript to use this application.</p>
+    </div>
+  </noscript>
+  
+  <!-- Scripts -->
+  <script src="/js/utils.js"></script>
+  <script src="/script.js"></script>
+  
+  <!-- Loading Status Styles -->
+  <style>
+    .loading-status {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: system-ui, -apple-system, sans-serif;
+      z-index: 1000;
+      text-align: center;
+    }
+    
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 10px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #00f0ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    body.offline #chatContainer {
+      background: rgba(255, 170, 0, 0.1);
+      border-color: var(--warning);
+    }
+  </style>
 </body>
 </html>
