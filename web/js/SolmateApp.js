@@ -1,5 +1,5 @@
 // web/js/SolmateApp.js
-// Main application class with VRMController integration
+// Main application class with event-driven architecture
 
 import { EventEmitter } from './EventEmitter.js';
 import { VRMController } from './VRMController.js';
@@ -15,18 +15,15 @@ export class SolmateApp extends EventEmitter {
                 tts: '/api/tts',
                 price: '/api/price',
                 tps: '/api/tps',
-                config: '/api/config',
-                health: '/api/health'
+                config: '/api/config'
             },
             maxMessageLength: 500,
             maxConversationSize: 50,
-            maxAudioQueueSize: 10,
             updateIntervals: {
                 price: 30000,
                 tps: 60000
             },
-            systemPrompt: `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`,
-            wsUrl: null // Will be loaded from config
+            systemPrompt: `You are Solmate, a helpful and witty Solana Companion. Be helpful and add humor when appropriate. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise and engaging. Always remind users: Not financial advice.`
         };
         
         this.state = {
@@ -51,16 +48,27 @@ export class SolmateApp extends EventEmitter {
         try {
             this.emit('init:start');
             
-            // Load configuration from server
+            // Load configuration
             await this.loadConfiguration();
             
-            // Initialize VRM Controller
-            await this.initializeVRM();
+            // Initialize components with proper error handling
+            try {
+                this.components.vrmController = new VRMController();
+                console.log('✅ VRMController initialized');
+            } catch (error) {
+                console.error('Failed to initialize VRMController:', error);
+                this.emit('error', { context: 'vrm-init', error });
+            }
             
-            // Initialize Audio Manager
-            this.components.audioManager = new AudioManager();
+            try {
+                this.components.audioManager = new AudioManager();
+                console.log('✅ AudioManager initialized');
+            } catch (error) {
+                console.error('Failed to initialize AudioManager:', error);
+                this.emit('error', { context: 'audio-init', error });
+            }
             
-            // Setup component event listeners
+            // Setup component event listeners only if components exist
             this.setupComponentListeners();
             
             // Initialize UI
@@ -72,13 +80,15 @@ export class SolmateApp extends EventEmitter {
             // Load saved state
             this.loadSavedState();
             
-            // Check API health
-            await this.checkAPIHealth();
+            // Initialize VRM only if controller exists
+            if (this.components.vrmController) {
+                await this.components.vrmController.init();
+            }
             
             this.state.initialized = true;
             this.emit('init:complete');
             
-            // Welcome sequence
+            // Welcome message with better timing
             this.scheduleWelcomeMessage();
             
         } catch (error) {
@@ -95,98 +105,50 @@ export class SolmateApp extends EventEmitter {
             }
             
             const serverConfig = await response.json();
-            
-            // Merge server config with defaults
             this.config = { ...this.config, ...serverConfig };
-            
-            // Extract WebSocket URL if available
-            if (serverConfig.wsUrl) {
-                this.config.wsUrl = serverConfig.wsUrl;
-            }
-            
-            console.log('✅ Configuration loaded from server');
             this.emit('config:loaded', this.config);
+            console.log('✅ Configuration loaded from server');
             
         } catch (error) {
-            console.warn('⚠️ Using default configuration:', error);
+            console.warn('Using default configuration:', error);
             this.emit('config:default');
         }
     }
     
-    async initializeVRM() {
-        try {
-            // Get canvas element
-            const canvas = document.getElementById('vrmCanvas');
-            if (!canvas) {
-                throw new Error('Canvas element not found');
-            }
-            
-            // Create and initialize VRM controller
-            this.components.vrmController = new VRMController(canvas);
-            await this.components.vrmController.init();
-            
-            // Load VRM model - try multiple sources
-            const vrmPaths = [
-                '/assets/avatar/solmate.vrm',
-                'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
-            ];
-            
-            let loaded = false;
-            for (const path of vrmPaths) {
-                try {
-                    await this.components.vrmController.loadVRM(path);
-                    loaded = true;
-                    console.log('✅ VRM loaded from:', path);
-                    
-                    // Update UI status
-                    const vrmStatus = document.getElementById('vrmStatus');
-                    if (vrmStatus) vrmStatus.textContent = 'loaded';
-                    
-                    break;
-                } catch (error) {
-                    console.warn('Failed to load VRM from:', path, error);
-                }
-            }
-            
-            if (!loaded) {
-                console.error('❌ Failed to load VRM from all sources');
-                const vrmStatus = document.getElementById('vrmStatus');
-                if (vrmStatus) vrmStatus.textContent = 'fallback';
-                this.emit('error', { context: 'vrm', error: new Error('VRM load failed') });
-            }
-            
-        } catch (error) {
-            console.error('VRM initialization failed:', error);
-            this.emit('error', { context: 'vrm:init', error });
-        }
-    }
-    
     setupComponentListeners() {
-        // Audio Manager events
+        // VRM Controller events - only if component exists
+        if (this.components.vrmController) {
+            this.components.vrmController.on('load:start', () => {
+                this.updateLoadingStatus('Loading avatar...');
+            });
+            
+            this.components.vrmController.on('load:complete', (vrm) => {
+                this.updateLoadingStatus('');
+                this.emit('vrm:loaded', vrm);
+                console.log('✅ VRM loaded from:', this.components.vrmController.getLoadedPath());
+            });
+            
+            this.components.vrmController.on('error', (error) => {
+                this.emit('error', { context: 'vrm', error });
+            });
+        }
+        
+        // Audio Manager events - only if component exists
         if (this.components.audioManager) {
             this.components.audioManager.on('play:start', (item) => {
                 this.emit('speech:start', item);
-                
-                // Start speaking animation with VRM
-                if (this.components.vrmController) {
-                    const sentiment = this.analyzeSentiment(item.text);
-                    this.components.vrmController.startSpeaking(item.text, sentiment);
+                if (this.components.vrmController && 
+                    typeof this.components.vrmController.startSpeechAnimation === 'function') {
+                    this.components.vrmController.startSpeechAnimation(item.text);
                 }
-                
-                // Update VU meter
-                this.animateVUMeter(true);
             });
             
             this.components.audioManager.on('play:end', () => {
                 this.emit('speech:end');
-                
-                // Stop speaking animation
-                if (this.components.vrmController) {
-                    this.components.vrmController.stopSpeaking();
+                if (this.components.vrmController && 
+                    typeof this.components.vrmController.stopSpeechAnimation === 'function') {
+                    this.components.vrmController.stopSpeechAnimation();
                 }
-                
-                // Stop VU meter
-                this.animateVUMeter(false);
             });
             
             this.components.audioManager.on('error', (error) => {
@@ -202,14 +164,10 @@ export class SolmateApp extends EventEmitter {
         // Chat form
         this.bindElement('#chatForm', 'submit', (e) => this.handleChatSubmit(e));
         
-        // Clear audio button
-        this.bindElement('#clearBtn', 'click', () => {
-            if (this.components.audioManager) {
-                this.components.audioManager.clear();
-            }
-        });
+        // Clear audio
+        this.bindElement('#clearBtn', 'click', () => this.components.audioManager.clear());
         
-        // Debug toggle (Ctrl+D)
+        // Debug toggle
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'd') {
                 e.preventDefault();
@@ -217,19 +175,12 @@ export class SolmateApp extends EventEmitter {
             }
         });
         
-        // Mouse tracking for VRM look-at
+        // Mouse tracking for animations
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         
-        // Enable audio context on first interaction
+        // Audio enable on interaction
         ['click', 'keydown'].forEach(event => {
             document.addEventListener(event, () => this.enableAudioContext(), { once: true });
-        });
-        
-        // Voice selection
-        this.bindElement('#voiceSelect', 'change', (e) => {
-            if (this.components.audioManager) {
-                this.components.audioManager.config.defaultVoice = e.target.value;
-            }
         });
     }
     
@@ -241,15 +192,15 @@ export class SolmateApp extends EventEmitter {
     }
     
     async initializeDataConnections() {
-        // Connect WebSocket if URL available
+        // WebSocket
         if (this.config.wsUrl) {
             this.connectWebSocket();
         }
         
         // Initial data fetch
         await Promise.all([
-            this.fetchPrice().catch(err => console.warn('Price fetch failed:', err)),
-            this.fetchTPS().catch(err => console.warn('TPS fetch failed:', err))
+            this.fetchPrice(),
+            this.fetchTPS()
         ]);
         
         // Setup periodic updates
@@ -258,8 +209,6 @@ export class SolmateApp extends EventEmitter {
     }
     
     connectWebSocket() {
-        if (!this.config.wsUrl) return;
-        
         if (this.state.wsConnection) {
             this.state.wsConnection.close();
         }
@@ -268,12 +217,10 @@ export class SolmateApp extends EventEmitter {
             this.state.wsConnection = new WebSocket(this.config.wsUrl);
             
             this.state.wsConnection.onopen = () => {
-                console.log('✅ WebSocket connected');
                 this.state.wsReconnectAttempts = 0;
-                this.updateElement('#wsLight', 'WS ON');
-                const wsLight = document.getElementById('wsLight');
-                if (wsLight) wsLight.style.color = '#00ff88';
+                this.updateElement('#wsLight', 'WS ON', { color: '#00ff88' });
                 this.emit('ws:connected');
+                console.log('✅ WebSocket connected');
             };
             
             this.state.wsConnection.onmessage = (event) => {
@@ -286,21 +233,16 @@ export class SolmateApp extends EventEmitter {
             };
             
             this.state.wsConnection.onclose = () => {
-                console.log('❌ WebSocket disconnected');
-                this.updateElement('#wsLight', 'WS OFF');
-                const wsLight = document.getElementById('wsLight');
-                if (wsLight) wsLight.style.color = '#ff6b6b';
+                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b' });
                 this.scheduleWebSocketReconnect();
                 this.emit('ws:disconnected');
             };
             
             this.state.wsConnection.onerror = (error) => {
-                console.error('WebSocket error:', error);
                 this.emit('error', { context: 'websocket', error });
             };
             
         } catch (error) {
-            console.error('WebSocket connection failed:', error);
             this.emit('error', { context: 'websocket:connect', error });
         }
     }
@@ -309,7 +251,6 @@ export class SolmateApp extends EventEmitter {
         const delay = Math.min(5000 * Math.pow(2, this.state.wsReconnectAttempts), 60000);
         this.state.wsReconnectAttempts++;
         
-        console.log(`Reconnecting WebSocket in ${delay}ms...`);
         this.startTimer('wsReconnect', () => this.connectWebSocket(), delay, false);
     }
     
@@ -317,90 +258,44 @@ export class SolmateApp extends EventEmitter {
         if (data.tps) {
             this.updateTPS(data.tps);
         }
-        if (data.price) {
-            this.updatePrice(data.price);
-        }
         this.emit('ws:message', data);
     }
     
     async fetchPrice() {
         try {
             const response = await fetch(`${this.config.apiEndpoints.price}?ids=So11111111111111111111111111111111111111112`);
-            if (!response.ok) {
-                throw new Error(`Price fetch failed: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`Price fetch failed: ${response.status}`);
             
             const data = await response.json();
             const solMint = 'So11111111111111111111111111111111111111112';
             const price = data[solMint]?.usdPrice || data[solMint]?.price;
             
             if (price) {
-                this.updatePrice(price);
+                this.updateElement('#solPrice', `SOL — $${price.toFixed(2)}`, { color: '#00ff88' });
+                this.emit('price:updated', price);
             }
         } catch (error) {
-            console.error('Price fetch error:', error);
-            this.updateElement('#solPrice', 'SOL — Error');
-            const solPrice = document.getElementById('solPrice');
-            if (solPrice) solPrice.style.color = '#ff6b6b';
+            this.updateElement('#solPrice', 'SOL — Error', { color: '#ff6b6b' });
             this.emit('error', { context: 'price', error });
         }
-    }
-    
-    updatePrice(price) {
-        this.updateElement('#solPrice', `SOL — $${price.toFixed(2)}`);
-        const solPrice = document.getElementById('solPrice');
-        if (solPrice) solPrice.style.color = '#00ff88';
-        this.emit('price:updated', price);
     }
     
     async fetchTPS() {
         try {
             const response = await fetch(this.config.apiEndpoints.tps);
-            if (!response.ok) {
-                throw new Error(`TPS fetch failed: ${response.status}`);
-            }
-            
             const data = await response.json();
+            
             if (data.tps) {
                 this.updateTPS(data.tps);
             }
         } catch (error) {
-            console.error('TPS fetch error:', error);
-            this.updateElement('#networkTPS', 'TPS Error');
-            const networkTPS = document.getElementById('networkTPS');
-            if (networkTPS) networkTPS.style.color = '#ff6b6b';
             this.emit('error', { context: 'tps', error });
         }
     }
     
     updateTPS(tps) {
-        this.updateElement('#networkTPS', `${tps} TPS`);
-        const networkTPS = document.getElementById('networkTPS');
-        if (networkTPS) networkTPS.style.color = '#00ff88';
+        this.updateElement('#networkTPS', `${tps} TPS`, { color: '#00ff88' });
         this.emit('tps:updated', tps);
-    }
-    
-    async checkAPIHealth() {
-        try {
-            const response = await fetch(this.config.apiEndpoints.health);
-            const data = await response.json();
-            
-            const apiStatus = document.getElementById('apiStatus');
-            if (apiStatus) {
-                apiStatus.textContent = data.ok ? 'online' : 'offline';
-                apiStatus.style.color = data.ok ? '#00ff88' : '#ff6b6b';
-            }
-            
-            return data;
-        } catch (error) {
-            console.error('Health check failed:', error);
-            const apiStatus = document.getElementById('apiStatus');
-            if (apiStatus) {
-                apiStatus.textContent = 'offline';
-                apiStatus.style.color = '#ff6b6b';
-            }
-            return { ok: false };
-        }
     }
     
     async handleChatSubmit(event) {
@@ -414,20 +309,8 @@ export class SolmateApp extends EventEmitter {
         
         if (text.length > this.config.maxMessageLength) {
             this.showError(`Message too long. Maximum ${this.config.maxMessageLength} characters.`);
-            input.classList.add('error');
             return;
         }
-        
-        input.classList.remove('error');
-        
-        // React to user input with VRM
-        if (this.components.vrmController) {
-            this.components.vrmController.nod(); // Acknowledge input
-        }
-        
-        // Show typing indicator
-        const typingIndicator = document.getElementById('typingIndicator');
-        if (typingIndicator) typingIndicator.classList.remove('hidden');
         
         input.value = '';
         this.setButtonState('#sendBtn', true, '⏳');
@@ -436,7 +319,6 @@ export class SolmateApp extends EventEmitter {
             await this.sendMessage(text);
         } finally {
             this.setButtonState('#sendBtn', false, '▶');
-            if (typingIndicator) typingIndicator.classList.add('hidden');
         }
     }
     
@@ -458,7 +340,7 @@ export class SolmateApp extends EventEmitter {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: [
-                        { role: 'system', content: this.config.systemPrompt },
+                        { role: 'system', content: this.getSystemPrompt() },
                         ...this.state.conversation
                     ]
                 })
@@ -474,59 +356,31 @@ export class SolmateApp extends EventEmitter {
             this.state.conversation.push({ role: 'assistant', content: sanitizedContent });
             this.saveState();
             
-            // Analyze sentiment and update VRM mood
-            const sentiment = this.analyzeSentiment(sanitizedContent);
-            if (this.components.vrmController) {
-                this.components.vrmController.setMood(sentiment);
-            }
-            
-            // Queue audio with selected voice
-            const voiceSelect = document.getElementById('voiceSelect');
-            const voice = voiceSelect ? voiceSelect.value : 'nova';
-            
-            if (this.components.audioManager) {
-                this.components.audioManager.queue(sanitizedContent, voice);
+            // Queue audio and trigger animations - with safety checks
+            if (this.components.audioManager && 
+                typeof this.components.audioManager.queue === 'function') {
+                this.components.audioManager.queue(sanitizedContent);
+            } else {
+                console.warn('AudioManager not available for TTS');
             }
             
             this.emit('message:sent', { user: sanitizedText, assistant: sanitizedContent });
             
         } catch (error) {
-            console.error('Chat error:', error);
             this.emit('error', { context: 'chat', error });
-            
-            // Show confused expression on error
-            if (this.components.vrmController) {
-                this.components.vrmController.setMood('confused');
-            }
-            
-            const errorMessage = "I'm having trouble processing that. Please try again.";
-            if (this.components.audioManager) {
-                this.components.audioManager.queue(errorMessage);
+            // Fallback error message with safety check
+            const errorMsg = "I'm having trouble processing that. Please try again.";
+            if (this.components.audioManager && 
+                typeof this.components.audioManager.queue === 'function') {
+                this.components.audioManager.queue(errorMsg);
+            } else {
+                console.warn('Cannot play error message - AudioManager not available');
             }
         }
     }
     
-    analyzeSentiment(text) {
-        const lower = text.toLowerCase();
-        
-        if (lower.includes('happy') || lower.includes('great') || lower.includes('awesome') || 
-            lower.includes('good') || lower.includes('excellent') || lower.includes('wonderful')) {
-            return 'positive';
-        } else if (lower.includes('sorry') || lower.includes('unfortunately') || 
-                   lower.includes('bad') || lower.includes('sad') || lower.includes('terrible')) {
-            return 'negative';
-        } else if (lower.includes('wow') || lower.includes('amazing') || 
-                   lower.includes('incredible') || lower.includes('!')) {
-            return 'excited';
-        } else if (lower.includes('hmm') || lower.includes('maybe') || 
-                   lower.includes('perhaps') || lower.includes('?')) {
-            return 'confused';
-        } else if (lower.includes('think') || lower.includes('consider') || 
-                   lower.includes('analyze') || lower.includes('understand')) {
-            return 'thoughtful';
-        }
-        
-        return 'neutral';
+    getSystemPrompt() {
+        return this.config.systemPrompt || `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
     }
     
     sanitizeInput(text) {
@@ -545,7 +399,6 @@ export class SolmateApp extends EventEmitter {
         
         this.state.ui.theme = isLight ? 'light' : 'dark';
         this.updateElement('#themeToggle', isLight ? '☀️' : '🌙');
-        this.saveState();
         this.emit('theme:changed', this.state.ui.theme);
     }
     
@@ -554,85 +407,38 @@ export class SolmateApp extends EventEmitter {
         const debugOverlay = document.querySelector('#debugOverlay');
         if (debugOverlay) {
             debugOverlay.classList.toggle('hidden');
-            
-            // Update debug info when shown
-            if (!debugOverlay.classList.contains('hidden')) {
-                this.updateDebugInfo();
-            }
         }
         this.emit('debug:toggled', this.state.ui.debugMode);
     }
     
-    updateDebugInfo() {
-        // Update VRM status
-        const vrmStatus = document.getElementById('vrmStatus');
-        if (vrmStatus && this.components.vrmController) {
-            vrmStatus.textContent = this.components.vrmController.state.loaded ? 'loaded' : 'loading';
-        }
-        
-        // Update cache status
-        const cacheStatus = document.getElementById('cacheStatus');
-        if (cacheStatus && 'caches' in window) {
-            caches.keys().then(names => {
-                cacheStatus.textContent = `${names.length} caches active`;
-            });
-        }
-    }
-    
     handleMouseMove(event) {
-        // Update VRM look-at target based on mouse position
-        if (this.components.vrmController && this.components.vrmController.vrm) {
-            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-            
-            // Create a target position for the VRM to look at
-            if (window.THREE) {
-                const target = new window.THREE.Vector3(mouseX * 2, mouseY * 2, 5);
-                this.components.vrmController.lookAt(target);
-            }
-        }
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
     }
     
     enableAudioContext() {
-        if (this.components.audioManager) {
-            this.components.audioManager.enableContext();
-        }
-    }
-    
-    animateVUMeter(active) {
-        const vuMeter = document.getElementById('vuMeter');
-        if (!vuMeter) return;
-        
-        if (active) {
-            // Animate VU meter during speech
-            const animate = () => {
-                if (this.components.audioManager?.isPlaying()) {
-                    const intensity = Math.random() * 100;
-                    vuMeter.style.width = `${intensity}%`;
-                    requestAnimationFrame(animate);
-                } else {
-                    vuMeter.style.width = '0%';
-                }
-            };
-            animate();
-        } else {
-            vuMeter.style.width = '0%';
-        }
+        this.components.audioManager.enableContext();
     }
     
     scheduleWelcomeMessage() {
         setTimeout(() => {
-            // Play welcome animation sequence
-            if (this.components.vrmController) {
-                this.components.vrmController.wave();
-                this.components.vrmController.setMood('happy');
-            }
-            
-            // Queue welcome audio
-            if (this.components.audioManager) {
+            // Ensure AudioManager is properly initialized before calling queue
+            if (this.components.audioManager && 
+                typeof this.components.audioManager.queue === 'function') {
                 this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
+            } else {
+                console.warn('AudioManager not ready for welcome message');
             }
             
+            // Ensure VRMController is ready before calling playWave
+            setTimeout(() => {
+                if (this.components.vrmController && 
+                    typeof this.components.vrmController.playWave === 'function') {
+                    this.components.vrmController.playWave();
+                }
+            }, 1000);
         }, 2000);
     }
     
@@ -645,11 +451,21 @@ export class SolmateApp extends EventEmitter {
         }
     }
     
+    updateLoadingStatus(message) {
+        this.updateElement('#loadingStatus span', message);
+        const loadingEl = document.querySelector('#loadingStatus');
+        if (!message && loadingEl) {
+            setTimeout(() => {
+                loadingEl.style.display = 'none';
+            }, 500);
+        }
+    }
+    
     setButtonState(selector, disabled, text) {
         const button = document.querySelector(selector);
         if (button) {
             button.disabled = disabled;
-            if (text) button.textContent = text;
+            if (text) button.innerHTML = `<span aria-hidden="true">${text}</span>`;
         }
     }
     
@@ -660,7 +476,6 @@ export class SolmateApp extends EventEmitter {
         const errorEl = document.createElement('div');
         errorEl.className = 'error-message';
         errorEl.textContent = message;
-        errorEl.onclick = () => errorEl.remove();
         container.appendChild(errorEl);
         
         setTimeout(() => errorEl.remove(), 5000);
@@ -692,7 +507,7 @@ export class SolmateApp extends EventEmitter {
     saveState() {
         try {
             localStorage.setItem('solmateState', JSON.stringify({
-                conversation: this.state.conversation.slice(-10), // Save last 10 messages
+                conversation: this.state.conversation,
                 theme: this.state.ui.theme
             }));
         } catch (error) {
@@ -706,7 +521,7 @@ export class SolmateApp extends EventEmitter {
             if (saved) {
                 const state = JSON.parse(saved);
                 
-                if (state.conversation && Array.isArray(state.conversation)) {
+                if (state.conversation) {
                     this.state.conversation = state.conversation.slice(-this.config.maxConversationSize);
                 }
                 
@@ -723,6 +538,72 @@ export class SolmateApp extends EventEmitter {
         }
     }
     
+    // Debug methods
+    getAppState() {
+        return {
+            initialized: this.state.initialized,
+            conversationLength: this.state.conversation.length,
+            vrmLoaded: this.components.vrmController?.isLoaded() || false,
+            audioQueueLength: this.components.audioManager?.getQueueLength() || 0,
+            wsConnected: this.state.wsConnection?.readyState === WebSocket.OPEN,
+            timersActive: this.state.timers.size,
+            config: this.config
+        };
+    }
+    
+    // Test methods
+    testChat() {
+        return this.sendMessage("Hello! How are you today?");
+    }
+    
+    testTTS() {
+        if (this.components.audioManager) {
+            this.components.audioManager.queue("Testing the text to speech system with Solmate!");
+        }
+    }
+    
+    testWave() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playWave();
+        }
+    }
+    
+    testNod() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playNod();
+        }
+    }
+    
+    testThink() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playThink();
+        }
+    }
+    
+    testExcited() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playExcited();
+        }
+    }
+    
+    testExpression(name = 'happy', intensity = 0.8) {
+        if (this.components.vrmController) {
+            this.components.vrmController.setExpression(name, intensity);
+        }
+    }
+    
+    testMood(mood = 'happy') {
+        if (this.components.vrmController) {
+            this.components.vrmController.setMood(mood);
+        }
+    }
+    
+    reloadVRM() {
+        if (this.components.vrmController) {
+            return this.components.vrmController.reload();
+        }
+    }
+    
     destroy() {
         // Stop all timers
         this.state.timers.forEach((timer, name) => this.stopTimer(name));
@@ -730,24 +611,15 @@ export class SolmateApp extends EventEmitter {
         // Close WebSocket
         if (this.state.wsConnection) {
             this.state.wsConnection.close();
-            this.state.wsConnection = null;
         }
         
         // Destroy components
-        if (this.components.vrmController) {
-            this.components.vrmController.dispose();
-            this.components.vrmController = null;
-        }
-        
-        if (this.components.audioManager) {
-            this.components.audioManager.destroy();
-            this.components.audioManager = null;
-        }
+        this.components.vrmController?.destroy();
+        this.components.audioManager?.destroy();
         
         // Clear event listeners
         this.removeAllListeners();
         
         this.emit('destroyed');
-        console.log('✅ App destroyed');
     }
 }
