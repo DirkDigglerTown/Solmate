@@ -26,29 +26,16 @@
   <!-- Styles -->
   <link rel="stylesheet" href="/style.css">
   
-  <!-- Preload critical assets -->
-  <link rel="preload" href="/js/utils.js" as="script">
-  <link rel="preload" href="/script.js" as="script">
-  
-  <!-- Fallback for no JavaScript -->
-  <noscript>
-    <style>
-      .requires-js { display: none !important; }
-      .no-js-message {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        text-align: center;
-        color: white;
-        font-family: system-ui, -apple-system, sans-serif;
-        padding: 20px;
-        background: rgba(10, 14, 23, 0.9);
-        border-radius: 12px;
-        border: 1px solid var(--border);
-      }
-    </style>
-  </noscript>
+  <!-- Import Map for ES Modules -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js"
+    }
+  }
+  </script>
 </head>
 <body>
   <!-- Skip to main content for accessibility -->
@@ -188,8 +175,8 @@
   <div id="errorContainer" aria-live="assertive" aria-atomic="true"></div>
   
   <!-- Scripts -->
+  <script type="module" src="/js/main.js"></script>
   <script src="/js/utils.js"></script>
-  <script src="/script.js"></script>
   
   <!-- Loading Status Styles -->
   <style>
@@ -318,12 +305,10 @@
       50% { opacity: 1; }
     }
     
-    /* Ensure debug panel stays on top */
     #debugTips > div {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
     
-    /* Accessibility improvements */
     button:focus-visible,
     input:focus-visible,
     select:focus-visible {
@@ -331,7 +316,6 @@
       outline-offset: 2px;
     }
     
-    /* High contrast mode support */
     @media (prefers-contrast: high) {
       :root {
         --accent: #00ffff;
@@ -341,7 +325,6 @@
       }
     }
     
-    /* Reduced motion support */
     @media (prefers-reduced-motion: reduce) {
       * {
         animation-duration: 0.01ms !important;
