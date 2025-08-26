@@ -1,5 +1,5 @@
 // web/js/SolmateApp.js
-// Main application class with event-driven architecture
+// Main application class updated for new VRMController architecture
 
 import { EventEmitter } from './EventEmitter.js';
 import { VRMController } from './VRMController.js';
@@ -15,15 +15,17 @@ export class SolmateApp extends EventEmitter {
                 tts: '/api/tts',
                 price: '/api/price',
                 tps: '/api/tps',
-                config: '/api/config'
+                config: '/api/config',
+                health: '/api/health'
             },
             maxMessageLength: 500,
             maxConversationSize: 50,
+            maxAudioQueueSize: 10,
             updateIntervals: {
                 price: 30000,
                 tps: 60000
             },
-            systemPrompt: `You are Solmate, a helpful and witty Solana Companion. Be helpful and add humor when appropriate. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise and engaging. Always remind users: Not financial advice.`
+            systemPrompt: `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice.`
         };
         
         this.state = {
@@ -53,8 +55,20 @@ export class SolmateApp extends EventEmitter {
             
             // Initialize components with proper error handling
             try {
-                this.components.vrmController = new VRMController();
+                const canvas = document.getElementById('vrmCanvas');
+                if (!canvas) {
+                    throw new Error('VRM Canvas element not found');
+                }
+                
+                this.components.vrmController = new VRMController(canvas);
                 console.log('✅ VRMController initialized');
+                
+                // Initialize VRM controller
+                await this.components.vrmController.init();
+                
+                // Load the VRM model
+                await this.loadVRMModel();
+                
             } catch (error) {
                 console.error('Failed to initialize VRMController:', error);
                 this.emit('error', { context: 'vrm-init', error });
@@ -68,7 +82,7 @@ export class SolmateApp extends EventEmitter {
                 this.emit('error', { context: 'audio-init', error });
             }
             
-            // Setup component event listeners only if components exist
+            // Setup component event listeners
             this.setupComponentListeners();
             
             // Initialize UI
@@ -80,11 +94,6 @@ export class SolmateApp extends EventEmitter {
             // Load saved state
             this.loadSavedState();
             
-            // Initialize VRM only if controller exists
-            if (this.components.vrmController) {
-                await this.components.vrmController.init();
-            }
-            
             this.state.initialized = true;
             this.emit('init:complete');
             
@@ -94,6 +103,31 @@ export class SolmateApp extends EventEmitter {
         } catch (error) {
             this.emit('error', { context: 'initialization', error });
             throw error;
+        }
+    }
+    
+    async loadVRMModel() {
+        const vrmPaths = [
+            '/assets/avatar/solmate.vrm',
+            'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
+        ];
+        
+        let loaded = false;
+        for (const path of vrmPaths) {
+            try {
+                console.log(`Attempting to load VRM from: ${path}`);
+                await this.components.vrmController.loadVRM(path);
+                console.log(`✅ VRM loaded successfully from: ${path}`);
+                loaded = true;
+                break;
+            } catch (error) {
+                console.error(`Failed to load VRM from ${path}:`, error);
+            }
+        }
+        
+        if (!loaded) {
+            console.warn('Failed to load VRM from all sources, using fallback');
+            // The VRMController should handle fallback internally
         }
     }
     
@@ -116,44 +150,21 @@ export class SolmateApp extends EventEmitter {
     }
     
     setupComponentListeners() {
-        // VRM Controller events - check if it has EventEmitter capabilities
-        if (this.components.vrmController && typeof this.components.vrmController.on === 'function') {
-            this.components.vrmController.on('load:start', () => {
-                this.updateLoadingStatus('Loading avatar...');
-            });
-            
-            this.components.vrmController.on('load:complete', (vrm) => {
-                this.updateLoadingStatus('');
-                this.emit('vrm:loaded', vrm);
-                if (typeof this.components.vrmController.getLoadedPath === 'function') {
-                    console.log('✅ VRM loaded from:', this.components.vrmController.getLoadedPath());
-                }
-            });
-            
-            this.components.vrmController.on('error', (error) => {
-                this.emit('error', { context: 'vrm', error });
-            });
-        } else if (this.components.vrmController) {
-            // VRMController exists but doesn't extend EventEmitter
-            // Set up alternative event handling or polling if needed
-            console.log('✅ VRMController initialized (no EventEmitter support)');
-        }
-        
         // Audio Manager events - only if component exists and has EventEmitter capabilities
         if (this.components.audioManager && typeof this.components.audioManager.on === 'function') {
             this.components.audioManager.on('play:start', (item) => {
                 this.emit('speech:start', item);
-                if (this.components.vrmController && 
-                    typeof this.components.vrmController.startSpeechAnimation === 'function') {
-                    this.components.vrmController.startSpeechAnimation(item.text);
+                // Start speech animation with sentiment analysis
+                if (this.components.vrmController) {
+                    const sentiment = this.analyzeSentiment(item.text);
+                    this.components.vrmController.startSpeaking(item.text, sentiment);
                 }
             });
             
             this.components.audioManager.on('play:end', () => {
                 this.emit('speech:end');
-                if (this.components.vrmController && 
-                    typeof this.components.vrmController.stopSpeechAnimation === 'function') {
-                    this.components.vrmController.stopSpeechAnimation();
+                if (this.components.vrmController) {
+                    this.components.vrmController.stopSpeaking();
                 }
             });
             
@@ -163,6 +174,42 @@ export class SolmateApp extends EventEmitter {
         } else if (this.components.audioManager) {
             console.log('✅ AudioManager initialized (no EventEmitter support)');
         }
+        
+        // VRM Controller doesn't use EventEmitter in new architecture
+        // Instead we can monitor its state if needed
+        console.log('✅ Component listeners setup complete');
+    }
+    
+    analyzeSentiment(text) {
+        const lowerText = text.toLowerCase();
+        
+        if (lowerText.includes('happy') || lowerText.includes('great') || 
+            lowerText.includes('awesome') || lowerText.includes('excellent') ||
+            lowerText.includes('wonderful')) {
+            return 'positive';
+        }
+        
+        if (lowerText.includes('excited') || lowerText.includes('amazing') || 
+            lowerText.includes('wow') || lowerText.includes('incredible')) {
+            return 'excited';
+        }
+        
+        if (lowerText.includes('sorry') || lowerText.includes('unfortunately') ||
+            lowerText.includes('sad') || lowerText.includes('disappointed')) {
+            return 'negative';
+        }
+        
+        if (lowerText.includes('confused') || lowerText.includes('unclear') ||
+            lowerText.includes('don\'t understand')) {
+            return 'confused';
+        }
+        
+        if (lowerText.includes('thinking') || lowerText.includes('consider') ||
+            lowerText.includes('hmm') || lowerText.includes('let me think')) {
+            return 'thoughtful';
+        }
+        
+        return 'neutral';
     }
     
     initializeUI() {
@@ -173,7 +220,12 @@ export class SolmateApp extends EventEmitter {
         this.bindElement('#chatForm', 'submit', (e) => this.handleChatSubmit(e));
         
         // Clear audio
-        this.bindElement('#clearBtn', 'click', () => this.components.audioManager.clear());
+        this.bindElement('#clearBtn', 'click', () => {
+            if (this.components.audioManager && 
+                typeof this.components.audioManager.clear === 'function') {
+                this.components.audioManager.clear();
+            }
+        });
         
         // Debug toggle
         document.addEventListener('keydown', (e) => {
@@ -183,7 +235,7 @@ export class SolmateApp extends EventEmitter {
             }
         });
         
-        // Mouse tracking for animations
+        // Mouse tracking for head movement (simplified for new VRM controller)
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         
         // Audio enable on interaction
@@ -323,10 +375,18 @@ export class SolmateApp extends EventEmitter {
         input.value = '';
         this.setButtonState('#sendBtn', true, '⏳');
         
+        // Trigger listening animation
+        if (this.components.vrmController) {
+            this.components.vrmController.context.isListening = true;
+        }
+        
         try {
             await this.sendMessage(text);
         } finally {
             this.setButtonState('#sendBtn', false, '▶');
+            if (this.components.vrmController) {
+                this.components.vrmController.context.isListening = false;
+            }
         }
     }
     
@@ -420,17 +480,22 @@ export class SolmateApp extends EventEmitter {
     }
     
     handleMouseMove(event) {
-        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-        
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.updateHeadTarget === 'function') {
-            this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
+        // Simplified mouse tracking for new VRM controller
+        if (this.components.vrmController) {
+            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Create target position for lookAt
+            const target = new THREE.Vector3(mouseX * 2, mouseY + 1, 3);
+            this.components.vrmController.lookAt(target);
         }
     }
     
     enableAudioContext() {
-        this.components.audioManager.enableContext();
+        if (this.components.audioManager && 
+            typeof this.components.audioManager.enableContext === 'function') {
+            this.components.audioManager.enableContext();
+        }
     }
     
     scheduleWelcomeMessage() {
@@ -443,13 +508,12 @@ export class SolmateApp extends EventEmitter {
                 console.warn('AudioManager not ready for welcome message');
             }
             
-            // Ensure VRMController is ready before calling playWave
+            // Welcome wave animation
             setTimeout(() => {
-                if (this.components.vrmController && 
-                    typeof this.components.vrmController.playWave === 'function') {
-                    this.components.vrmController.playWave();
+                if (this.components.vrmController) {
+                    this.components.vrmController.wave();
                 } else {
-                    console.warn('VRMController.playWave not available');
+                    console.warn('VRMController not available for welcome wave');
                 }
             }, 1000);
         }, 2000);
@@ -556,9 +620,7 @@ export class SolmateApp extends EventEmitter {
         return {
             initialized: this.state.initialized,
             conversationLength: this.state.conversation.length,
-            vrmLoaded: this.components.vrmController && 
-                      typeof this.components.vrmController.isLoaded === 'function' ? 
-                      this.components.vrmController.isLoaded() : 'unknown',
+            vrmLoaded: !!(this.components.vrmController && this.components.vrmController.vrm),
             audioQueueLength: this.components.audioManager && 
                             typeof this.components.audioManager.getQueueLength === 'function' ? 
                             this.components.audioManager.getQueueLength() : 'unknown',
@@ -567,9 +629,9 @@ export class SolmateApp extends EventEmitter {
             componentsStatus: {
                 vrmController: {
                     exists: !!this.components.vrmController,
-                    hasEventEmitter: !!(this.components.vrmController && 
-                                      typeof this.components.vrmController.on === 'function'),
-                    methods: this.components.vrmController ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.components.vrmController)) : []
+                    hasVRM: !!(this.components.vrmController && this.components.vrmController.vrm),
+                    currentAnimation: this.components.vrmController?.state?.currentAnimation || 'unknown',
+                    emotionalState: this.components.vrmController?.emotion?.current || 'unknown'
                 },
                 audioManager: {
                     exists: !!this.components.audioManager,
@@ -582,7 +644,7 @@ export class SolmateApp extends EventEmitter {
         };
     }
     
-    // Test methods
+    // Test methods updated for new VRM controller
     testChat() {
         return this.sendMessage("Hello! How are you today?");
     }
@@ -597,44 +659,39 @@ export class SolmateApp extends EventEmitter {
     }
     
     testWave() {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.playWave === 'function') {
-            this.components.vrmController.playWave();
+        if (this.components.vrmController) {
+            this.components.vrmController.wave();
         } else {
-            console.warn('VRMController.playWave not available');
+            console.warn('VRMController.wave not available');
         }
     }
     
     testNod() {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.playNod === 'function') {
-            this.components.vrmController.playNod();
+        if (this.components.vrmController) {
+            this.components.vrmController.nod();
         } else {
-            console.warn('VRMController.playNod not available');
+            console.warn('VRMController.nod not available');
         }
     }
     
     testThink() {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.playThink === 'function') {
-            this.components.vrmController.playThink();
+        if (this.components.vrmController) {
+            this.components.vrmController.think();
         } else {
-            console.warn('VRMController.playThink not available');
+            console.warn('VRMController.think not available');
         }
     }
     
     testExcited() {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.playExcited === 'function') {
-            this.components.vrmController.playExcited();
+        if (this.components.vrmController) {
+            this.components.vrmController.excited();
         } else {
-            console.warn('VRMController.playExcited not available');
+            console.warn('VRMController.excited not available');
         }
     }
     
     testExpression(name = 'happy', intensity = 0.8) {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.setExpression === 'function') {
+        if (this.components.vrmController) {
             this.components.vrmController.setExpression(name, intensity);
         } else {
             console.warn('VRMController.setExpression not available');
@@ -642,8 +699,7 @@ export class SolmateApp extends EventEmitter {
     }
     
     testMood(mood = 'happy') {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.setMood === 'function') {
+        if (this.components.vrmController) {
             this.components.vrmController.setMood(mood);
         } else {
             console.warn('VRMController.setMood not available');
@@ -651,12 +707,17 @@ export class SolmateApp extends EventEmitter {
     }
     
     reloadVRM() {
-        if (this.components.vrmController && 
-            typeof this.components.vrmController.reload === 'function') {
-            return this.components.vrmController.reload();
+        if (this.components.vrmController) {
+            return this.loadVRMModel().then(() => {
+                console.log('✅ VRM reloaded successfully');
+                return 'VRM reloaded successfully';
+            }).catch(error => {
+                console.error('❌ VRM reload failed:', error);
+                return 'VRM reload failed: ' + error.message;
+            });
         } else {
-            console.warn('VRMController.reload not available');
-            return 'VRMController.reload not available';
+            console.warn('VRMController not available for reload');
+            return 'VRMController not available';
         }
     }
     
@@ -670,8 +731,13 @@ export class SolmateApp extends EventEmitter {
         }
         
         // Destroy components
-        this.components.vrmController?.destroy();
-        this.components.audioManager?.destroy();
+        if (this.components.vrmController && typeof this.components.vrmController.dispose === 'function') {
+            this.components.vrmController.dispose();
+        }
+        
+        if (this.components.audioManager && typeof this.components.audioManager.destroy === 'function') {
+            this.components.audioManager.destroy();
+        }
         
         // Clear event listeners
         this.removeAllListeners();
