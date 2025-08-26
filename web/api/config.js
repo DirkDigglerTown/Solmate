@@ -8,7 +8,7 @@ module.exports = async (req, res) => {
     if (preflight(req, res)) return;
     
     // Set CORS headers
-    setCors(res, req.headers.origin);
+    setCors(res, req.headers?.origin);
     
     // Apply rate limiting (more generous for config endpoint)
     if (rateLimit(req, res, "config", { max: 20, windowMs: 60000 })) return;
@@ -16,8 +16,8 @@ module.exports = async (req, res) => {
     const meta = {
         route: "/api/config",
         method: req.method,
-        ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown",
-        ua: req.headers["user-agent"],
+        ip: req.headers?.["x-forwarded-for"] || req.connection?.remoteAddress || "unknown",
+        ua: req.headers?.["user-agent"],
         region: process.env.VERCEL_REGION,
         commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7)
     };
