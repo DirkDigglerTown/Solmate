@@ -642,6 +642,23 @@ export class VRMLoader extends EventEmitter {
         }
     }
     
+    // Quick position test helper
+    quickPositionTest() {
+        const positions = [3.5, 4.0, 4.5, 5.0, 5.5];
+        console.log('Testing positions - watch the avatar:');
+        let index = 0;
+        const interval = setInterval(() => {
+            if (index >= positions.length) {
+                clearInterval(interval);
+                console.log('Test complete. Use setModelPosition(0, y, 0) with your preferred y value');
+                return;
+            }
+            this.setModelPosition(0, positions[index], 0);
+            console.log(`Position y=${positions[index]}`);
+            index++;
+        }, 2000);
+    }
+    
     destroy() {
         // Stop animations
         this.animation.isWaving = false;
