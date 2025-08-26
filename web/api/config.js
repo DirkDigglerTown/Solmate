@@ -11,8 +11,7 @@ module.exports = async (req, res) => {
     setCors(res, req.headers.origin);
     
     // Apply rate limiting (more generous for config endpoint)
-    const rateLimitConfig = { max: 20, windowMs: 60000 }; // 20 requests per minute
-    if (rateLimit(req, res, "config", rateLimitConfig)) return;
+    if (rateLimit(req, res, "config", { max: 20, windowMs: 60000 })) return;
     
     const meta = {
         route: "/api/config",
@@ -55,7 +54,8 @@ module.exports = async (req, res) => {
                 tts: "/api/tts",
                 price: "/api/price",
                 tps: "/api/tps",
-                health: "/api/health"
+                health: "/api/health",
+                config: "/api/config"
             },
             
             // Client-side limits
@@ -162,7 +162,8 @@ module.exports = async (req, res) => {
                 chat: "/api/chat",
                 tts: "/api/tts",
                 price: "/api/price",
-                tps: "/api/tps"
+                tps: "/api/tps",
+                health: "/api/health"
             },
             maxMessageLength: 500,
             maxConversationSize: 50,
