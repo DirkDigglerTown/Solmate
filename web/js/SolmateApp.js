@@ -116,8 +116,8 @@ export class SolmateApp extends EventEmitter {
     }
     
     setupComponentListeners() {
-        // VRM Controller events - only if component exists
-        if (this.components.vrmController) {
+        // VRM Controller events - check if it has EventEmitter capabilities
+        if (this.components.vrmController && typeof this.components.vrmController.on === 'function') {
             this.components.vrmController.on('load:start', () => {
                 this.updateLoadingStatus('Loading avatar...');
             });
@@ -125,16 +125,22 @@ export class SolmateApp extends EventEmitter {
             this.components.vrmController.on('load:complete', (vrm) => {
                 this.updateLoadingStatus('');
                 this.emit('vrm:loaded', vrm);
-                console.log('✅ VRM loaded from:', this.components.vrmController.getLoadedPath());
+                if (typeof this.components.vrmController.getLoadedPath === 'function') {
+                    console.log('✅ VRM loaded from:', this.components.vrmController.getLoadedPath());
+                }
             });
             
             this.components.vrmController.on('error', (error) => {
                 this.emit('error', { context: 'vrm', error });
             });
+        } else if (this.components.vrmController) {
+            // VRMController exists but doesn't extend EventEmitter
+            // Set up alternative event handling or polling if needed
+            console.log('✅ VRMController initialized (no EventEmitter support)');
         }
         
-        // Audio Manager events - only if component exists
-        if (this.components.audioManager) {
+        // Audio Manager events - only if component exists and has EventEmitter capabilities
+        if (this.components.audioManager && typeof this.components.audioManager.on === 'function') {
             this.components.audioManager.on('play:start', (item) => {
                 this.emit('speech:start', item);
                 if (this.components.vrmController && 
@@ -154,6 +160,8 @@ export class SolmateApp extends EventEmitter {
             this.components.audioManager.on('error', (error) => {
                 this.emit('error', { context: 'audio', error });
             });
+        } else if (this.components.audioManager) {
+            console.log('✅ AudioManager initialized (no EventEmitter support)');
         }
     }
     
