@@ -178,7 +178,7 @@ function log(msg, data = null) {
     }
 }
 
-// ===== INJECT ES MODULE LOADER FOR VRM =====
+// ===== INJECT ES MODULE LOADER FOR VRM WITH FIXED POSITIONING =====
 function injectVRMModule() {
     log('🎭 Injecting VRM ES module loader...');
     
@@ -194,7 +194,7 @@ function injectVRMModule() {
     });
     document.head.appendChild(importMap);
     
-    // Add ES module script
+    // Add ES module script with fixed camera and VRM positioning
     const moduleScript = document.createElement('script');
     moduleScript.type = 'module';
     moduleScript.textContent = `
@@ -210,9 +210,9 @@ function injectVRMModule() {
             state.scene = new THREE.Scene();
             state.scene.background = new THREE.Color(0x0a0e17);
             
-            // Camera
-            state.camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
-            state.camera.position.set(0, 1.4, 3);
+            // Camera - ADJUSTED FOR PROPER VRM FRAMING
+            state.camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20);
+            state.camera.position.set(0, 0.6, 2.2); // Lower height, closer to model
             
             // Renderer
             const canvas = document.getElementById('vrmCanvas');
@@ -294,6 +294,9 @@ function injectVRMModule() {
                         // Rotate model 180 degrees to face camera
                         vrm.scene.rotation.y = Math.PI;
                         
+                        // POSITION FIX - Adjust vertical position
+                        vrm.scene.position.y = -0.2;
+                        
                         // Add to scene
                         state.scene.add(vrm.scene);
                         state.currentVRM = vrm;
@@ -304,8 +307,8 @@ function injectVRMModule() {
                             if (hips) hips.position.set(0, 0, 0);
                         }
                         
-                        // Camera look at model
-                        state.camera.lookAt(0, 1, 0);
+                        // Camera looks at chest level
+                        state.camera.lookAt(0, 0.3, 0);
                         
                         console.log('✅ VRM loaded successfully from:', url);
                         if (loadingEl) loadingEl.style.display = 'none';
@@ -340,9 +343,11 @@ function injectVRMModule() {
                 const geometry = new THREE.BoxGeometry(0.5, 1, 0.3);
                 const material = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
                 const fallback = new THREE.Mesh(geometry, material);
-                fallback.position.y = 1;
+                fallback.position.y = 0;
                 fallback.name = 'fallback';
                 state.scene.add(fallback);
+                
+                state.camera.lookAt(0, 0, 0);
                 
                 // Create fake VRM object
                 state.currentVRM = {
