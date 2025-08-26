@@ -3,7 +3,6 @@
   "version": "2.0.0",
   "description": "Solmate - Your AI-powered Solana companion with 3D VRM avatar, chat, TTS, and live blockchain data",
   "private": true,
-  "type": "module",
   "author": "DirkDigglerTown",
   "license": "MIT",
   "repository": {
