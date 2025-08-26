@@ -8,6 +8,14 @@
   
   "rewrites": [
     {
+      "source": "/manifest.webmanifest",
+      "destination": "/web/manifest.webmanifest"
+    },
+    {
+      "source": "/service-worker.js",
+      "destination": "/web/service-worker.js"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/web/api/$1.js"
     },
