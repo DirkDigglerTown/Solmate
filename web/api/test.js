@@ -1,5 +1,5 @@
 // web/api/test.js
-// Simple test endpoint with no dependencies
+// Simple test endpoint with no dependencies to verify environment
 
 module.exports = (req, res) => {
   // Set CORS headers manually
@@ -31,7 +31,10 @@ module.exports = (req, res) => {
         key.includes("OPENAI") || 
         key.includes("HELIUS") || 
         key.includes("SOLANA") ||
-        key.includes("MAX_")
+        key.includes("MAX_") ||
+        key.includes("CHAT_") ||
+        key.includes("TPS_") ||
+        key.includes("PRICE_")
       )
     };
     
