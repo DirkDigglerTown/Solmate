@@ -9,18 +9,15 @@ const ALLOWLIST = new Set([
   "http://localhost:3000",
   "http://localhost:4173",
   "http://127.0.0.1:3000",
-  "https://vercel.app",              // generic (fallback)
-  // Add your specific preview/production host(s) here if you want to lock it down:
-  // "https://solmate-<hash>-dirkdigglertowns-projects.vercel.app",
-  // "https://solmate.yourdomain.com",
+  "https://vercel.app",
+  "https://solmate.vercel.app",
+  "https://solmate-3nqa7awxv-dirkdigglertowns-projects.vercel.app"
 ]);
 
 function nowSec() { return Math.floor(Date.now()/1000); }
 
 function setCors(res, origin) {
-  // If you want to strictly enforce, uncomment the allowlist check below.
-  // if (origin && ![...ALLOWLIST].some(a => origin.startsWith(a))) origin = undefined;
-
+  // Allow all origins for now - can be restricted later
   res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -37,11 +34,12 @@ function preflight(req, res) {
   return false;
 }
 
-function rateLimit(req, res, keyPrefix = "rl") {
+function rateLimit(req, res, keyPrefix = "rl", customConfig = null) {
+  const config = customConfig || RATE;
   const ip = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown";
   const key = `${keyPrefix}:${ip}`;
   const now = Date.now();
-  const win = RATE.windowMs;
+  const win = config.windowMs;
 
   let b = buckets.get(key);
   if (!b) b = { t: now, c: 0 };
@@ -49,13 +47,13 @@ function rateLimit(req, res, keyPrefix = "rl") {
   b.c += 1;
   buckets.set(key, b);
 
-  const remaining = Math.max(0, RATE.max - b.c);
-  res.setHeader("X-RateLimit-Limit", String(RATE.max));
+  const remaining = Math.max(0, config.max - b.c);
+  res.setHeader("X-RateLimit-Limit", String(config.max));
   res.setHeader("X-RateLimit-Remaining", String(remaining));
   res.setHeader("X-RateLimit-Reset", String(Math.ceil((b.t + win) / 1000)));
 
-  if (b.c > RATE.max) {
-    console.warn("RATE_LIMIT", { ip, keyPrefix, count: b.c, windowMs: RATE.windowMs });
+  if (b.c > config.max) {
+    console.warn("RATE_LIMIT", { ip, keyPrefix, count: b.c, windowMs: config.windowMs });
     res.statusCode = 429;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Rate limit exceeded" }));
@@ -71,17 +69,25 @@ function logStart(tag, extra = {}) {
     ...extra
   });
 }
+
 function logOk(tag, extra = {}) {
   console.log(`${tag}: ok`, extra);
 }
+
 function logWarn(tag, extra = {}) {
   console.warn(`${tag}: warn`, extra);
 }
+
 function logErr(tag, extra = {}) {
   console.error(`${tag}: error`, extra);
 }
 
 module.exports = {
-  setCors, preflight, rateLimit,
-  logStart, logOk, logWarn, logErr
+  setCors, 
+  preflight, 
+  rateLimit,
+  logStart, 
+  logOk, 
+  logWarn, 
+  logErr
 };
