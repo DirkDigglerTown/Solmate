@@ -33,7 +33,17 @@ export class VRMLoader extends EventEmitter {
             isTalking: false,
             headTarget: { x: 0, y: 0 },
             blinkTimer: 0,
-            breathingPhase: 0
+            breathingPhase: 0,
+            idleTimer: 0,
+            gestureTimer: 0,
+            currentExpression: 'neutral',
+            expressionIntensity: 0,
+            targetExpression: 'neutral',
+            targetIntensity: 0,
+            transitionSpeed: 0.05,
+            lastGestureTime: 0,
+            swayPhase: 0,
+            armSwayPhase: 0
         };
         
         this.config = {
@@ -353,8 +363,13 @@ export class VRMLoader extends EventEmitter {
             // Spring bones will be updated in animation loop
         }
         
-        // Adjust camera to frame the model better
+        // Trigger welcome sequence after VRM loads
         this.adjustCameraForModel(vrm);
+        
+        // Play welcome animation after a short delay
+        setTimeout(() => {
+            this.playWelcomeSequence();
+        }, 1000);
         
         this.emit('vrm:setup', vrm);
     }
@@ -472,34 +487,295 @@ export class VRMLoader extends EventEmitter {
         
         const time = Date.now() / 1000;
         
-        // Update breathing
+        // === BREATHING ANIMATION ===
         this.animation.breathingPhase += deltaTime;
-        const breathe = 1 + Math.sin(this.animation.breathingPhase * 2) * 0.01;
+        const breathe = 1 + Math.sin(this.animation.breathingPhase * 2) * 0.02;
         if (this.vrm.current.scene) {
             this.vrm.current.scene.scale.y = breathe;
+            this.vrm.current.scene.scale.x = 1 + Math.sin(this.animation.breathingPhase * 2 + Math.PI) * 0.005;
         }
         
-        // Update idle animation
+        // === IDLE ANIMATIONS ===
         if (!this.animation.isTalking && !this.animation.isWaving) {
+            // Natural body sway
+            this.animation.swayPhase += deltaTime * 0.5;
             if (this.vrm.current.scene) {
-                this.vrm.current.scene.rotation.y = Math.PI + Math.sin(time * 0.5) * 0.02;
+                this.vrm.current.scene.rotation.y = Math.PI + Math.sin(this.animation.swayPhase) * 0.03;
+                this.vrm.current.scene.position.x = Math.sin(this.animation.swayPhase * 0.7) * 0.02;
             }
             
-            // Head movement
+            // Idle head movement
             if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
                 const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+                const neck = this.vrm.current.humanoid.getNormalizedBoneNode('neck');
+                
                 if (head) {
-                    head.rotation.x = Math.sin(time * 0.8) * 0.015 + this.animation.headTarget.x;
-                    head.rotation.y = Math.sin(time * 0.6) * 0.02 + this.animation.headTarget.y;
+                    head.rotation.x = Math.sin(time * 0.8) * 0.02 + this.animation.headTarget.x;
+                    head.rotation.y = Math.sin(time * 0.6) * 0.03 + this.animation.headTarget.y;
+                    head.rotation.z = Math.sin(time * 0.9) * 0.01;
+                }
+                
+                if (neck) {
+                    neck.rotation.x = Math.sin(time * 0.7 + 0.5) * 0.01;
+                    neck.rotation.y = Math.sin(time * 0.5 + 0.5) * 0.02;
+                }
+                
+                // Natural arm movements
+                const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+                
+                this.animation.armSwayPhase += deltaTime * 0.8;
+                
+                if (leftArm) {
+                    leftArm.rotation.z = 0.2 + Math.sin(this.animation.armSwayPhase) * 0.05;
+                    leftArm.rotation.x = Math.sin(this.animation.armSwayPhase * 1.3) * 0.03;
+                }
+                
+                if (rightArm) {
+                    rightArm.rotation.z = -0.2 - Math.sin(this.animation.armSwayPhase + Math.PI) * 0.05;
+                    rightArm.rotation.x = Math.sin(this.animation.armSwayPhase * 1.3 + Math.PI) * 0.03;
+                }
+                
+                // Occasional idle gestures
+                this.animation.idleTimer += deltaTime;
+                if (this.animation.idleTimer > 5 + Math.random() * 5) {
+                    this.performIdleGesture();
+                    this.animation.idleTimer = 0;
                 }
             }
         }
         
-        // Update blinking
+        // === TALKING ANIMATIONS ===
+        if (this.animation.isTalking && this.vrm.current.humanoid && !this.vrm.current.isFallback) {
+            // Animated talking gestures
+            const talkTime = time * 3;
+            
+            // Head movements during speech
+            const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+            if (head) {
+                head.rotation.x = Math.sin(talkTime * 1.2) * 0.03;
+                head.rotation.y = Math.sin(talkTime) * 0.04;
+                head.rotation.z = Math.sin(talkTime * 0.8) * 0.02;
+            }
+            
+            // Hand gestures while talking
+            const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+            const leftLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftLowerArm');
+            const rightLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightLowerArm');
+            const leftHand = this.vrm.current.humanoid.getNormalizedBoneNode('leftHand');
+            const rightHand = this.vrm.current.humanoid.getNormalizedBoneNode('rightHand');
+            
+            // Natural conversational gestures
+            const gestureIntensity = 0.3 + Math.sin(talkTime * 0.5) * 0.2;
+            
+            if (leftArm) {
+                leftArm.rotation.z = 0.3 + Math.sin(talkTime) * gestureIntensity;
+                leftArm.rotation.x = Math.sin(talkTime * 1.3) * 0.2;
+                leftArm.rotation.y = Math.sin(talkTime * 0.7) * 0.1;
+            }
+            
+            if (rightArm) {
+                rightArm.rotation.z = -0.3 - Math.sin(talkTime + Math.PI * 0.5) * gestureIntensity;
+                rightArm.rotation.x = Math.sin(talkTime * 1.3 + Math.PI) * 0.2;
+                rightArm.rotation.y = -Math.sin(talkTime * 0.7 + Math.PI) * 0.1;
+            }
+            
+            if (leftLowerArm) {
+                leftLowerArm.rotation.y = -0.5 + Math.sin(talkTime * 1.5) * 0.3;
+                leftLowerArm.rotation.z = Math.sin(talkTime * 2) * 0.1;
+            }
+            
+            if (rightLowerArm) {
+                rightLowerArm.rotation.y = 0.5 - Math.sin(talkTime * 1.5 + Math.PI) * 0.3;
+                rightLowerArm.rotation.z = Math.sin(talkTime * 2 + Math.PI) * 0.1;
+            }
+            
+            if (leftHand) {
+                leftHand.rotation.z = Math.sin(talkTime * 2.5) * 0.2;
+                leftHand.rotation.x = Math.sin(talkTime * 3) * 0.1;
+            }
+            
+            if (rightHand) {
+                rightHand.rotation.z = Math.sin(talkTime * 2.5 + Math.PI) * 0.2;
+                rightHand.rotation.x = Math.sin(talkTime * 3 + Math.PI) * 0.1;
+            }
+            
+            // Body movement while talking
+            if (this.vrm.current.humanoid) {
+                const spine = this.vrm.current.humanoid.getNormalizedBoneNode('spine');
+                const chest = this.vrm.current.humanoid.getNormalizedBoneNode('chest');
+                
+                if (spine) {
+                    spine.rotation.y = Math.sin(talkTime * 0.8) * 0.02;
+                    spine.rotation.x = 0.05 + Math.sin(talkTime * 0.6) * 0.02;
+                }
+                
+                if (chest) {
+                    chest.rotation.y = Math.sin(talkTime * 0.9 + 0.5) * 0.02;
+                    chest.rotation.x = Math.sin(talkTime * 0.7) * 0.01;
+                }
+            }
+        }
+        
+        // === EXPRESSION ANIMATIONS ===
+        this.updateExpressions(deltaTime);
+        
+        // === BLINKING ===
         this.animation.blinkTimer += deltaTime;
-        if (this.animation.blinkTimer > 3 + Math.random() * 2) {
+        const blinkInterval = this.animation.isTalking ? 2 : 3;
+        if (this.animation.blinkTimer > blinkInterval + Math.random() * 2) {
             this.performBlink();
             this.animation.blinkTimer = 0;
+        }
+    }
+    
+    updateExpressions(deltaTime) {
+        if (!this.vrm.current?.expressionManager) return;
+        
+        // Smooth transition between expressions
+        if (this.animation.currentExpression !== this.animation.targetExpression) {
+            this.animation.expressionIntensity -= this.animation.transitionSpeed;
+            
+            if (this.animation.expressionIntensity <= 0) {
+                this.animation.currentExpression = this.animation.targetExpression;
+                this.animation.expressionIntensity = 0;
+            }
+        } else if (this.animation.expressionIntensity < this.animation.targetIntensity) {
+            this.animation.expressionIntensity = Math.min(
+                this.animation.expressionIntensity + this.animation.transitionSpeed,
+                this.animation.targetIntensity
+            );
+        }
+        
+        // Apply current expression
+        try {
+            if (this.animation.currentExpression !== 'neutral') {
+                this.vrm.current.expressionManager.setValue(
+                    this.animation.currentExpression,
+                    this.animation.expressionIntensity
+                );
+            }
+            
+            // Add subtle mouth movement when talking
+            if (this.animation.isTalking) {
+                const mouthValue = Math.abs(Math.sin(Date.now() * 0.01)) * 0.3;
+                this.vrm.current.expressionManager.setValue('aa', mouthValue);
+            } else {
+                this.vrm.current.expressionManager.setValue('aa', 0);
+            }
+        } catch (e) {
+            // Expression not available
+        }
+    }
+    
+    performIdleGesture() {
+        if (!this.vrm.current.humanoid || this.vrm.current.isFallback) return;
+        
+        const gestures = [
+            () => this.performHeadTilt(),
+            () => this.performShoulderShrug(),
+            () => this.performWeightShift(),
+            () => this.setExpression('happy', 0.3, 2000),
+            () => this.performWink()
+        ];
+        
+        const gesture = gestures[Math.floor(Math.random() * gestures.length)];
+        gesture();
+    }
+    
+    performHeadTilt() {
+        const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+        if (head) {
+            const originalRotation = head.rotation.clone();
+            let tiltTime = 0;
+            
+            const tiltInterval = setInterval(() => {
+                tiltTime += 0.016;
+                
+                if (tiltTime >= 1) {
+                    head.rotation.copy(originalRotation);
+                    clearInterval(tiltInterval);
+                    return;
+                }
+                
+                const tiltProgress = Math.sin(tiltTime * Math.PI);
+                head.rotation.z = originalRotation.z + tiltProgress * 0.15;
+            }, 16);
+        }
+    }
+    
+    performShoulderShrug() {
+        const leftShoulder = this.vrm.current.humanoid.getNormalizedBoneNode('leftShoulder');
+        const rightShoulder = this.vrm.current.humanoid.getNormalizedBoneNode('rightShoulder');
+        
+        if (leftShoulder && rightShoulder) {
+            let shrugTime = 0;
+            
+            const shrugInterval = setInterval(() => {
+                shrugTime += 0.016;
+                
+                if (shrugTime >= 1) {
+                    leftShoulder.rotation.z = 0;
+                    rightShoulder.rotation.z = 0;
+                    clearInterval(shrugInterval);
+                    return;
+                }
+                
+                const shrugProgress = Math.sin(shrugTime * Math.PI);
+                leftShoulder.rotation.z = shrugProgress * 0.1;
+                rightShoulder.rotation.z = -shrugProgress * 0.1;
+            }, 16);
+        }
+    }
+    
+    performWeightShift() {
+        const hips = this.vrm.current.humanoid.getNormalizedBoneNode('hips');
+        if (hips) {
+            let shiftTime = 0;
+            
+            const shiftInterval = setInterval(() => {
+                shiftTime += 0.016;
+                
+                if (shiftTime >= 2) {
+                    hips.position.x = 0;
+                    hips.rotation.z = 0;
+                    clearInterval(shiftInterval);
+                    return;
+                }
+                
+                const shiftProgress = Math.sin(shiftTime * Math.PI);
+                hips.position.x = shiftProgress * 0.02;
+                hips.rotation.z = shiftProgress * 0.01;
+            }, 16);
+        }
+    }
+    
+    performWink() {
+        if (this.vrm.current?.expressionManager) {
+            try {
+                this.vrm.current.expressionManager.setValue('winkLeft', 1.0);
+                setTimeout(() => {
+                    if (this.vrm.current?.expressionManager) {
+                        this.vrm.current.expressionManager.setValue('winkLeft', 0);
+                    }
+                }, 200);
+            } catch (e) {
+                // Wink not available, try blink instead
+                this.performBlink();
+            }
+        }
+    }
+    
+    setExpression(expression, intensity = 0.5, duration = 1000) {
+        this.animation.targetExpression = expression;
+        this.animation.targetIntensity = intensity;
+        
+        if (duration) {
+            setTimeout(() => {
+                this.animation.targetExpression = 'neutral';
+                this.animation.targetIntensity = 0;
+            }, duration);
         }
     }
     
@@ -524,6 +800,9 @@ export class VRMLoader extends EventEmitter {
         this.animation.isWaving = true;
         this.emit('animation:wave:start');
         
+        // Set happy expression during wave
+        this.setExpression('happy', 0.5);
+        
         if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
             this.playHumanoidWave();
         } else {
@@ -533,26 +812,76 @@ export class VRMLoader extends EventEmitter {
     
     playHumanoidWave() {
         const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+        const rightLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightLowerArm');
+        const rightHand = this.vrm.current.humanoid.getNormalizedBoneNode('rightHand');
+        
         if (!rightArm) {
             this.playFallbackWave();
             return;
         }
         
-        const originalRotation = rightArm.rotation.clone();
+        const originalUpperRotation = rightArm.rotation.clone();
+        const originalLowerRotation = rightLowerArm ? rightLowerArm.rotation.clone() : null;
+        const originalHandRotation = rightHand ? rightHand.rotation.clone() : null;
+        
         let waveTime = 0;
         
         const waveInterval = setInterval(() => {
             waveTime += 0.016;
             
-            if (waveTime >= 2) {
-                rightArm.rotation.copy(originalRotation);
+            if (waveTime >= 3) {
+                rightArm.rotation.copy(originalUpperRotation);
+                if (rightLowerArm && originalLowerRotation) {
+                    rightLowerArm.rotation.copy(originalLowerRotation);
+                }
+                if (rightHand && originalHandRotation) {
+                    rightHand.rotation.copy(originalHandRotation);
+                }
+                
                 this.animation.isWaving = false;
+                this.setExpression('neutral', 0);
+                
+                // Perform a wink after waving
+                setTimeout(() => this.performWink(), 500);
+                
                 clearInterval(waveInterval);
                 this.emit('animation:wave:end');
                 return;
             }
             
-            rightArm.rotation.z = -0.5 - Math.sin(waveTime * Math.PI * 3) * 0.5;
+            // More natural wave animation
+            const waveIntensity = Math.sin(waveTime * Math.PI * 4);
+            
+            // Raise arm up and to the side
+            rightArm.rotation.z = -1.2 - Math.abs(waveIntensity) * 0.3;
+            rightArm.rotation.x = -0.5;
+            rightArm.rotation.y = 0.3;
+            
+            if (rightLowerArm) {
+                // Bend elbow naturally
+                rightLowerArm.rotation.y = 0.8;
+                rightLowerArm.rotation.z = waveIntensity * 0.3;
+            }
+            
+            if (rightHand) {
+                // Wave hand side to side
+                rightHand.rotation.z = waveIntensity * 0.5;
+                rightHand.rotation.y = waveIntensity * 0.3;
+                
+                // Add finger movement if available
+                const fingers = ['thumb', 'index', 'middle', 'ring', 'little'];
+                fingers.forEach(finger => {
+                    const proximal = this.vrm.current.humanoid.getNormalizedBoneNode(`right${finger.charAt(0).toUpperCase() + finger.slice(1)}Proximal`);
+                    if (proximal) {
+                        proximal.rotation.z = Math.abs(waveIntensity) * 0.2;
+                    }
+                });
+            }
+            
+            // Add slight body movement
+            if (this.vrm.current.scene) {
+                this.vrm.current.scene.rotation.y = Math.PI + Math.sin(waveTime * Math.PI * 2) * 0.05;
+            }
         }, 16);
     }
     
@@ -578,13 +907,41 @@ export class VRMLoader extends EventEmitter {
         }, 16);
     }
     
-    startSpeechAnimation() {
+    startSpeechAnimation(text) {
         this.animation.isTalking = true;
+        
+        // Analyze text sentiment for appropriate expression
+        const lowerText = text ? text.toLowerCase() : '';
         
         if (this.vrm.current?.expressionManager) {
             try {
-                this.vrm.current.expressionManager.setValue('happy', 0.3);
+                // Choose expression based on content
+                if (lowerText.includes('happy') || lowerText.includes('great') || lowerText.includes('awesome')) {
+                    this.setExpression('happy', 0.4);
+                } else if (lowerText.includes('sorry') || lowerText.includes('unfortunately')) {
+                    this.setExpression('sad', 0.3);
+                } else if (lowerText.includes('wow') || lowerText.includes('amazing') || lowerText.includes('!')) {
+                    this.setExpression('surprised', 0.3);
+                    // Quick eyebrow raise
+                    setTimeout(() => this.setExpression('happy', 0.2), 1000);
+                } else {
+                    // Default pleasant expression
+                    this.setExpression('happy', 0.2);
+                }
             } catch (e) {}
+        }
+        
+        // Reset arm positions for talking gestures
+        if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
+            const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+            
+            if (leftArm) {
+                leftArm.rotation.z = 0.2;
+            }
+            if (rightArm) {
+                rightArm.rotation.z = -0.2;
+            }
         }
         
         this.emit('animation:speech:start');
@@ -593,10 +950,43 @@ export class VRMLoader extends EventEmitter {
     stopSpeechAnimation() {
         this.animation.isTalking = false;
         
-        if (this.vrm.current?.expressionManager) {
-            try {
-                this.vrm.current.expressionManager.setValue('happy', 0);
-            } catch (e) {}
+        // Return to neutral expression
+        this.setExpression('neutral', 0);
+        
+        // Reset arm positions smoothly
+        if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
+            const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+            const leftLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftLowerArm');
+            const rightLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightLowerArm');
+            
+            // Smooth return to rest position
+            let returnTime = 0;
+            const returnInterval = setInterval(() => {
+                returnTime += 0.016;
+                
+                if (returnTime >= 0.5) {
+                    clearInterval(returnInterval);
+                    return;
+                }
+                
+                const progress = returnTime / 0.5;
+                
+                if (leftArm) {
+                    leftArm.rotation.z = leftArm.rotation.z * (1 - progress) + 0.1 * progress;
+                    leftArm.rotation.x = leftArm.rotation.x * (1 - progress);
+                }
+                if (rightArm) {
+                    rightArm.rotation.z = rightArm.rotation.z * (1 - progress) - 0.1 * progress;
+                    rightArm.rotation.x = rightArm.rotation.x * (1 - progress);
+                }
+                if (leftLowerArm) {
+                    leftLowerArm.rotation.y = leftLowerArm.rotation.y * (1 - progress);
+                }
+                if (rightLowerArm) {
+                    rightLowerArm.rotation.y = rightLowerArm.rotation.y * (1 - progress);
+                }
+            }, 16);
         }
         
         this.emit('animation:speech:end');
@@ -642,21 +1032,78 @@ export class VRMLoader extends EventEmitter {
         }
     }
     
-    // Quick position test helper
-    quickPositionTest() {
-        const positions = [3.5, 4.0, 4.5, 5.0, 5.5];
-        console.log('Testing positions - watch the avatar:');
-        let index = 0;
-        const interval = setInterval(() => {
-            if (index >= positions.length) {
-                clearInterval(interval);
-                console.log('Test complete. Use setModelPosition(0, y, 0) with your preferred y value');
-                return;
+    // Play welcome animation sequence
+    playWelcomeSequence() {
+        if (!this.vrm.current || this.vrm.current.isFallback) return;
+        
+        console.log('Playing welcome animation sequence');
+        
+        // Start with a wave
+        this.playWave();
+        
+        // Schedule wink
+        setTimeout(() => {
+            this.performWink();
+        }, 3500);
+        
+        // Add a happy expression
+        setTimeout(() => {
+            this.setExpression('happy', 0.4, 2000);
+        }, 4000);
+        
+        // Small bow/nod
+        setTimeout(() => {
+            this.performNod();
+        }, 5000);
+        
+        this.emit('animation:welcome');
+    }
+    
+    // Nodding animation
+    performNod() {
+        const head = this.vrm.current?.humanoid?.getNormalizedBoneNode('head');
+        const neck = this.vrm.current?.humanoid?.getNormalizedBoneNode('neck');
+        
+        if (head || neck) {
+            const target = head || neck;
+            const originalRotation = target.rotation.clone();
+            let nodTime = 0;
+            
+            const nodInterval = setInterval(() => {
+                nodTime += 0.016;
+                
+                if (nodTime >= 1) {
+                    target.rotation.copy(originalRotation);
+                    clearInterval(nodInterval);
+                    return;
+                }
+                
+                const nodProgress = Math.sin(nodTime * Math.PI * 2);
+                target.rotation.x = originalRotation.x + nodProgress * 0.2;
+            }, 16);
+        }
+    }
+    
+    // React to user input
+    reactToUserInput() {
+        // Quick acknowledgment animation
+        if (this.vrm.current?.humanoid && !this.vrm.current.isFallback) {
+            const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+            if (head) {
+                // Small tilt to show listening
+                const originalRotation = head.rotation.clone();
+                head.rotation.z = 0.1;
+                
+                setTimeout(() => {
+                    head.rotation.copy(originalRotation);
+                }, 300);
             }
-            this.setModelPosition(0, positions[index], 0);
-            console.log(`Position y=${positions[index]}`);
-            index++;
-        }, 2000);
+            
+            // Set attentive expression
+            this.setExpression('happy', 0.2);
+        }
+        
+        this.emit('animation:listening');
     }
     
     destroy() {
