@@ -1,5 +1,5 @@
 // web/js/VRMLoader.js
-// Dedicated VRM loading module with proper error handling
+// Dedicated VRM loading module with proper positioning fix
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -42,8 +42,10 @@ export class VRMLoader extends EventEmitter {
                 'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
             ],
             fallbackEnabled: true,
-            cameraPosition: { x: 0, y: 1.4, z: 3 },
-            lookAtPosition: { x: 0, y: 1, z: 0 }
+            // Adjusted camera and model positions for better centering
+            cameraPosition: { x: 0, y: 1.6, z: 2.5 },
+            lookAtPosition: { x: 0, y: 1.2, z: 0 },
+            modelPosition: { x: 0, y: 0.8, z: 0 }  // Raised model position
         };
     }
     
@@ -139,9 +141,9 @@ export class VRMLoader extends EventEmitter {
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // Create camera
+        // Create camera with adjusted FOV and position
         this.three.camera = new THREE.PerspectiveCamera(
-            30,
+            35,  // Slightly wider FOV to show more of the model
             window.innerWidth / window.innerHeight,
             0.1,
             20
@@ -310,14 +312,29 @@ export class VRMLoader extends EventEmitter {
         // Rotate to face camera
         vrm.scene.rotation.y = Math.PI;
         
+        // Position the model higher on screen
+        vrm.scene.position.set(
+            this.config.modelPosition.x,
+            this.config.modelPosition.y,
+            this.config.modelPosition.z
+        );
+        
         // Add to scene
         this.three.scene.add(vrm.scene);
         
-        // Setup humanoid
+        // Setup humanoid - adjust hip position if needed
         if (vrm.humanoid) {
             const hips = vrm.humanoid.getNormalizedBoneNode('hips');
             if (hips) {
+                // Keep hips at origin relative to the model
                 hips.position.set(0, 0, 0);
+            }
+            
+            // Adjust spine/chest for better framing if available
+            const spine = vrm.humanoid.getNormalizedBoneNode('spine');
+            const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+            if (spine) {
+                spine.rotation.x = 0.05; // Slight forward lean
             }
         }
         
@@ -336,7 +353,34 @@ export class VRMLoader extends EventEmitter {
             // Spring bones will be updated in animation loop
         }
         
+        // Adjust camera to frame the model better
+        this.adjustCameraForModel(vrm);
+        
         this.emit('vrm:setup', vrm);
+    }
+    
+    adjustCameraForModel(vrm) {
+        const THREE = window.THREE;
+        
+        // Calculate bounding box of the model
+        const box = new THREE.Box3();
+        box.setFromObject(vrm.scene);
+        
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        // Adjust camera to look at the upper-middle part of the model
+        const lookAtY = center.y + (size.y * 0.1); // Look slightly above center
+        this.three.camera.lookAt(0, lookAtY, 0);
+        
+        // Store adjusted look-at position for future use
+        this.config.lookAtPosition.y = lookAtY;
+        
+        console.log('Model dimensions:', {
+            center: center,
+            size: size,
+            adjustedLookAt: lookAtY
+        });
     }
     
     setupExpressions(expressionManager) {
@@ -362,15 +406,16 @@ export class VRMLoader extends EventEmitter {
         const group = new THREE.Group();
         group.name = 'FallbackAvatar';
         
-        // Create simple character
+        // Create simple character positioned higher
         const geometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
         const material = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.y = 1;
+        mesh.position.y = 1.4; // Position fallback avatar higher
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         
         group.add(mesh);
+        group.position.y = this.config.modelPosition.y;
         this.three.scene.add(group);
         
         // Create minimal VRM interface
@@ -567,7 +612,32 @@ export class VRMLoader extends EventEmitter {
         this.three.camera.updateProjectionMatrix();
         this.three.renderer.setSize(window.innerWidth, window.innerHeight);
         
+        // Optionally adjust camera position on mobile/tablet
+        if (window.innerWidth < 768) {
+            this.three.camera.position.z = 3; // Move camera back on mobile
+        } else {
+            this.three.camera.position.z = this.config.cameraPosition.z;
+        }
+        
         this.emit('resize');
+    }
+    
+    // Method to manually adjust model position if needed
+    setModelPosition(x, y, z) {
+        if (this.vrm.current && this.vrm.current.scene) {
+            this.vrm.current.scene.position.set(x, y, z);
+            this.config.modelPosition = { x, y, z };
+            console.log('Model position updated:', { x, y, z });
+        }
+    }
+    
+    // Method to manually adjust camera position if needed
+    setCameraPosition(x, y, z) {
+        if (this.three.camera) {
+            this.three.camera.position.set(x, y, z);
+            this.config.cameraPosition = { x, y, z };
+            console.log('Camera position updated:', { x, y, z });
+        }
     }
     
     destroy() {
