@@ -397,6 +397,3 @@ export class AudioManager extends EventEmitter {
         this.emit('destroyed');
     }
 }
-
-// Export the AudioManager class
-export { AudioManager };
