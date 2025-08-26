@@ -25,7 +25,9 @@ function preflight(req, res) {
 
 function rateLimit(req, res, keyPrefix = "rl", customConfig = null) {
   const config = customConfig || RATE;
-  const ip = req.headers?.["x-forwarded-for"] || req.connection?.remoteAddress || "unknown";
+  const ip = (req.headers && req.headers["x-forwarded-for"]) || 
+             (req.connection && req.connection.remoteAddress) || 
+             "unknown";
   const key = `${keyPrefix}:${ip}`;
   const now = Date.now();
   const win = config.windowMs || 30000;
