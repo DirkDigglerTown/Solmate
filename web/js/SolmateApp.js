@@ -423,7 +423,10 @@ export class SolmateApp extends EventEmitter {
         const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
         const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
         
-        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.updateHeadTarget === 'function') {
+            this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
+        }
     }
     
     enableAudioContext() {
@@ -445,6 +448,8 @@ export class SolmateApp extends EventEmitter {
                 if (this.components.vrmController && 
                     typeof this.components.vrmController.playWave === 'function') {
                     this.components.vrmController.playWave();
+                } else {
+                    console.warn('VRMController.playWave not available');
                 }
             }, 1000);
         }, 2000);
@@ -551,10 +556,28 @@ export class SolmateApp extends EventEmitter {
         return {
             initialized: this.state.initialized,
             conversationLength: this.state.conversation.length,
-            vrmLoaded: this.components.vrmController?.isLoaded() || false,
-            audioQueueLength: this.components.audioManager?.getQueueLength() || 0,
+            vrmLoaded: this.components.vrmController && 
+                      typeof this.components.vrmController.isLoaded === 'function' ? 
+                      this.components.vrmController.isLoaded() : 'unknown',
+            audioQueueLength: this.components.audioManager && 
+                            typeof this.components.audioManager.getQueueLength === 'function' ? 
+                            this.components.audioManager.getQueueLength() : 'unknown',
             wsConnected: this.state.wsConnection?.readyState === WebSocket.OPEN,
             timersActive: this.state.timers.size,
+            componentsStatus: {
+                vrmController: {
+                    exists: !!this.components.vrmController,
+                    hasEventEmitter: !!(this.components.vrmController && 
+                                      typeof this.components.vrmController.on === 'function'),
+                    methods: this.components.vrmController ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.components.vrmController)) : []
+                },
+                audioManager: {
+                    exists: !!this.components.audioManager,
+                    hasEventEmitter: !!(this.components.audioManager && 
+                                      typeof this.components.audioManager.on === 'function'),
+                    methods: this.components.audioManager ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.components.audioManager)) : []
+                }
+            },
             config: this.config
         };
     }
@@ -565,50 +588,75 @@ export class SolmateApp extends EventEmitter {
     }
     
     testTTS() {
-        if (this.components.audioManager) {
+        if (this.components.audioManager && 
+            typeof this.components.audioManager.queue === 'function') {
             this.components.audioManager.queue("Testing the text to speech system with Solmate!");
+        } else {
+            console.warn('AudioManager.queue not available');
         }
     }
     
     testWave() {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.playWave === 'function') {
             this.components.vrmController.playWave();
+        } else {
+            console.warn('VRMController.playWave not available');
         }
     }
     
     testNod() {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.playNod === 'function') {
             this.components.vrmController.playNod();
+        } else {
+            console.warn('VRMController.playNod not available');
         }
     }
     
     testThink() {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.playThink === 'function') {
             this.components.vrmController.playThink();
+        } else {
+            console.warn('VRMController.playThink not available');
         }
     }
     
     testExcited() {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.playExcited === 'function') {
             this.components.vrmController.playExcited();
+        } else {
+            console.warn('VRMController.playExcited not available');
         }
     }
     
     testExpression(name = 'happy', intensity = 0.8) {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.setExpression === 'function') {
             this.components.vrmController.setExpression(name, intensity);
+        } else {
+            console.warn('VRMController.setExpression not available');
         }
     }
     
     testMood(mood = 'happy') {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.setMood === 'function') {
             this.components.vrmController.setMood(mood);
+        } else {
+            console.warn('VRMController.setMood not available');
         }
     }
     
     reloadVRM() {
-        if (this.components.vrmController) {
+        if (this.components.vrmController && 
+            typeof this.components.vrmController.reload === 'function') {
             return this.components.vrmController.reload();
+        } else {
+            console.warn('VRMController.reload not available');
+            return 'VRMController.reload not available';
         }
     }
     
