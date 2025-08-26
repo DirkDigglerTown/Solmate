@@ -226,24 +226,7 @@
     }
   },
   
-  "env": [
-    "OPENAI_API_KEY",
-    "HELIUS_RPC_URL",
-    "SOLANA_RPC_URL",
-    "NODE_ENV",
-    "OPENAI_MODEL",
-    "MAX_MESSAGE_LENGTH",
-    "MAX_CONVERSATION_SIZE",
-    "MAX_TTS_LENGTH",
-    "MAX_TOKENS",
-    "CHAT_TEMPERATURE",
-    "PRICE_UPDATE_INTERVAL",
-    "TPS_UPDATE_INTERVAL",
-    "SOLANA_NETWORK",
-    "ERROR_TRACKING_ENABLED",
-    "ERROR_SAMPLE_RATE",
-    "ENABLE_ANALYTICS"
-  ],
+
   
   "github": {
     "silent": true
