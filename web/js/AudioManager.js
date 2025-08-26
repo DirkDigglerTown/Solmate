@@ -1,397 +1,575 @@
-// web/js/AudioManager.js
-// Centralized audio queue management with memory leak prevention
+// web/js/SolmateApp.js
+// Main application class with event-driven architecture
 
 import { EventEmitter } from './EventEmitter.js';
+import { VRMController } from './VRMController.js';
+import { AudioManager } from './AudioManager.js';
 
-export class AudioManager extends EventEmitter {
+export class SolmateApp extends EventEmitter {
     constructor() {
         super();
         
         this.config = {
-            maxQueueSize: 10,
-            defaultVoice: 'nova',
-            ttsEndpoint: '/api/tts',
-            speechRate: 0.9,
-            speechPitch: 1.1,
-            speechVolume: 0.8,
-            maxRetries: 3,
-            retryDelay: 1000
+            apiEndpoints: {
+                chat: '/api/chat',
+                tts: '/api/tts',
+                price: '/api/price',
+                tps: '/api/tps',
+                config: '/api/config'
+            },
+            maxMessageLength: 500,
+            maxConversationSize: 50,
+            updateIntervals: {
+                price: 30000,
+                tps: 60000
+            },
+            systemPrompt: `You are Solmate, a helpful and witty Solana Companion. Be helpful and add humor when appropriate. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Keep responses concise and engaging. Always remind users: Not financial advice.`
         };
         
         this.state = {
-            isPlaying: false,
-            isPaused: false,
-            currentAudio: null,
-            audioContext: null,
-            contextEnabled: false
+            initialized: false,
+            conversation: [],
+            wsConnection: null,
+            wsReconnectAttempts: 0,
+            timers: new Map(),
+            ui: {
+                theme: 'dark',
+                debugMode: false
+            }
         };
         
-        this.queue = [];
-        this.audioCache = new Map();
-        this.activeAudioElements = new Set();
-        this.retryCount = new Map();
-    }
-    
-    enableContext() {
-        if (this.state.contextEnabled) return;
-        
-        try {
-            this.state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            this.state.audioContext.resume();
-            this.state.contextEnabled = true;
-            this.emit('context:enabled');
-        } catch (error) {
-            this.emit('error', { context: 'audio:context', error });
-        }
-    }
-    
-    queue(text, voice = this.config.defaultVoice) {
-        if (!text || typeof text !== 'string') {
-            console.warn('Invalid text provided to AudioManager');
-            return;
-        }
-        
-        // Limit queue size to prevent memory issues
-        if (this.queue.length >= this.config.maxQueueSize) {
-            console.warn('Audio queue full, removing oldest item');
-            this.queue.shift();
-        }
-        
-        const item = {
-            id: this.generateId(),
-            text: text.trim(),
-            voice,
-            timestamp: Date.now()
+        this.components = {
+            vrmController: null,
+            audioManager: null
         };
-        
-        this.queue.push(item);
-        this.emit('queue:added', item);
-        
-        if (!this.state.isPlaying) {
-            this.playNext();
-        }
     }
     
-    async playNext() {
-        if (this.queue.length === 0) {
-            this.state.isPlaying = false;
-            this.emit('queue:empty');
-            return;
-        }
-        
-        if (this.state.isPaused) {
-            return;
-        }
-        
-        const item = this.queue.shift();
-        this.state.isPlaying = true;
-        
-        this.emit('play:start', item);
-        
+    async init() {
         try {
-            // Check cache first
-            const cacheKey = this.getCacheKey(item.text, item.voice);
-            let audioBlob;
+            this.emit('init:start');
             
-            if (this.audioCache.has(cacheKey)) {
-                audioBlob = this.audioCache.get(cacheKey);
-                this.emit('cache:hit', cacheKey);
-            } else {
-                audioBlob = await this.fetchAudio(item);
-                
-                // Cache the audio blob (limit cache size)
-                if (this.audioCache.size < 50) {
-                    this.audioCache.set(cacheKey, audioBlob);
-                    this.emit('cache:stored', cacheKey);
-                }
-            }
+            // Load configuration
+            await this.loadConfiguration();
             
-            await this.playAudio(audioBlob, item);
+            // Initialize components
+            this.components.vrmController = new VRMController();
+            this.components.audioManager = new AudioManager();
+            
+            // Setup component event listeners
+            this.setupComponentListeners();
+            
+            // Initialize UI
+            this.initializeUI();
+            
+            // Start data connections
+            await this.initializeDataConnections();
+            
+            // Load saved state
+            this.loadSavedState();
+            
+            // Initialize VRM
+            await this.components.vrmController.init();
+            
+            this.state.initialized = true;
+            this.emit('init:complete');
+            
+            // Welcome message
+            this.scheduleWelcomeMessage();
             
         } catch (error) {
-            this.emit('error', { context: 'play', error, item });
-            
-            // Try fallback TTS
-            await this.fallbackTTS(item);
-        } finally {
-            this.state.isPlaying = false;
-            this.emit('play:end', item);
-            
-            // Clear retry count
-            this.retryCount.delete(item.id);
-            
-            // Play next item
-            this.playNext();
-        }
-    }
-    
-    async fetchAudio(item) {
-        const retries = this.retryCount.get(item.id) || 0;
-        
-        try {
-            const response = await fetch(this.config.ttsEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: item.text,
-                    voice: item.voice
-                }),
-                signal: AbortSignal.timeout(30000) // 30 second timeout
-            });
-            
-            if (!response.ok || response.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
-                throw new Error('TTS API unavailable, use fallback');
-            }
-            
-            return await response.blob();
-            
-        } catch (error) {
-            if (retries < this.config.maxRetries) {
-                this.retryCount.set(item.id, retries + 1);
-                await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
-                return this.fetchAudio(item);
-            }
-            
+            this.emit('error', { context: 'initialization', error });
             throw error;
         }
     }
     
-    async playAudio(blob, item) {
-        return new Promise((resolve, reject) => {
-            const audioUrl = URL.createObjectURL(blob);
-            const audio = new Audio(audioUrl);
+    async loadConfiguration() {
+        try {
+            const response = await fetch(this.config.apiEndpoints.config);
+            if (!response.ok) {
+                throw new Error(`Config loading failed: ${response.status}`);
+            }
             
-            this.state.currentAudio = audio;
-            this.activeAudioElements.add(audio);
+            const serverConfig = await response.json();
+            this.config = { ...this.config, ...serverConfig };
+            this.emit('config:loaded', this.config);
+            console.log('✅ Configuration loaded from server');
             
-            // Set up event handlers
-            audio.onended = () => {
-                this.cleanupAudio(audio, audioUrl);
-                resolve();
-            };
-            
-            audio.onerror = (error) => {
-                this.cleanupAudio(audio, audioUrl);
-                reject(error);
-            };
-            
-            // Handle pause/resume
-            this.once('pause', () => {
-                audio.pause();
-            });
-            
-            this.once('resume', () => {
-                audio.play();
-            });
-            
-            // Play audio
-            audio.play().catch(reject);
-            
-            this.emit('audio:playing', { item, duration: audio.duration });
+        } catch (error) {
+            console.warn('Using default configuration:', error);
+            this.emit('config:default');
+        }
+    }
+    
+    setupComponentListeners() {
+        // VRM Controller events
+        this.components.vrmController.on('load:start', () => {
+            this.updateLoadingStatus('Loading avatar...');
+        });
+        
+        this.components.vrmController.on('load:complete', (vrm) => {
+            this.updateLoadingStatus('');
+            this.emit('vrm:loaded', vrm);
+            console.log('✅ VRM loaded from:', this.components.vrmController.getLoadedPath());
+        });
+        
+        this.components.vrmController.on('error', (error) => {
+            this.emit('error', { context: 'vrm', error });
+        });
+        
+        // Audio Manager events
+        this.components.audioManager.on('play:start', (item) => {
+            this.emit('speech:start', item);
+            this.components.vrmController.startSpeechAnimation(item.text);
+        });
+        
+        this.components.audioManager.on('play:end', () => {
+            this.emit('speech:end');
+            this.components.vrmController.stopSpeechAnimation();
+        });
+        
+        this.components.audioManager.on('error', (error) => {
+            this.emit('error', { context: 'audio', error });
         });
     }
     
-    async fallbackTTS(item) {
-        if (!window.speechSynthesis) {
-            console.warn('Speech synthesis not available');
+    initializeUI() {
+        // Theme toggle
+        this.bindElement('#themeToggle', 'click', () => this.toggleTheme());
+        
+        // Chat form
+        this.bindElement('#chatForm', 'submit', (e) => this.handleChatSubmit(e));
+        
+        // Clear audio
+        this.bindElement('#clearBtn', 'click', () => this.components.audioManager.clear());
+        
+        // Debug toggle
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                this.toggleDebugMode();
+            }
+        });
+        
+        // Mouse tracking for animations
+        document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        
+        // Audio enable on interaction
+        ['click', 'keydown'].forEach(event => {
+            document.addEventListener(event, () => this.enableAudioContext(), { once: true });
+        });
+    }
+    
+    bindElement(selector, event, handler) {
+        const element = document.querySelector(selector);
+        if (element) {
+            element.addEventListener(event, handler.bind(this));
+        }
+    }
+    
+    async initializeDataConnections() {
+        // WebSocket
+        if (this.config.wsUrl) {
+            this.connectWebSocket();
+        }
+        
+        // Initial data fetch
+        await Promise.all([
+            this.fetchPrice(),
+            this.fetchTPS()
+        ]);
+        
+        // Setup periodic updates
+        this.startTimer('price', () => this.fetchPrice(), this.config.updateIntervals.price);
+        this.startTimer('tps', () => this.fetchTPS(), this.config.updateIntervals.tps);
+    }
+    
+    connectWebSocket() {
+        if (this.state.wsConnection) {
+            this.state.wsConnection.close();
+        }
+        
+        try {
+            this.state.wsConnection = new WebSocket(this.config.wsUrl);
+            
+            this.state.wsConnection.onopen = () => {
+                this.state.wsReconnectAttempts = 0;
+                this.updateElement('#wsLight', 'WS ON', { color: '#00ff88' });
+                this.emit('ws:connected');
+                console.log('✅ WebSocket connected');
+            };
+            
+            this.state.wsConnection.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('WebSocket message parse error:', error);
+                }
+            };
+            
+            this.state.wsConnection.onclose = () => {
+                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b' });
+                this.scheduleWebSocketReconnect();
+                this.emit('ws:disconnected');
+            };
+            
+            this.state.wsConnection.onerror = (error) => {
+                this.emit('error', { context: 'websocket', error });
+            };
+            
+        } catch (error) {
+            this.emit('error', { context: 'websocket:connect', error });
+        }
+    }
+    
+    scheduleWebSocketReconnect() {
+        const delay = Math.min(5000 * Math.pow(2, this.state.wsReconnectAttempts), 60000);
+        this.state.wsReconnectAttempts++;
+        
+        this.startTimer('wsReconnect', () => this.connectWebSocket(), delay, false);
+    }
+    
+    handleWebSocketMessage(data) {
+        if (data.tps) {
+            this.updateTPS(data.tps);
+        }
+        this.emit('ws:message', data);
+    }
+    
+    async fetchPrice() {
+        try {
+            const response = await fetch(`${this.config.apiEndpoints.price}?ids=So11111111111111111111111111111111111111112`);
+            if (!response.ok) throw new Error(`Price fetch failed: ${response.status}`);
+            
+            const data = await response.json();
+            const solMint = 'So11111111111111111111111111111111111111112';
+            const price = data[solMint]?.usdPrice || data[solMint]?.price;
+            
+            if (price) {
+                this.updateElement('#solPrice', `SOL — $${price.toFixed(2)}`, { color: '#00ff88' });
+                this.emit('price:updated', price);
+            }
+        } catch (error) {
+            this.updateElement('#solPrice', 'SOL — Error', { color: '#ff6b6b' });
+            this.emit('error', { context: 'price', error });
+        }
+    }
+    
+    async fetchTPS() {
+        try {
+            const response = await fetch(this.config.apiEndpoints.tps);
+            const data = await response.json();
+            
+            if (data.tps) {
+                this.updateTPS(data.tps);
+            }
+        } catch (error) {
+            this.emit('error', { context: 'tps', error });
+        }
+    }
+    
+    updateTPS(tps) {
+        this.updateElement('#networkTPS', `${tps} TPS`, { color: '#00ff88' });
+        this.emit('tps:updated', tps);
+    }
+    
+    async handleChatSubmit(event) {
+        event.preventDefault();
+        
+        const input = document.querySelector('#promptInput');
+        if (!input) return;
+        
+        const text = input.value.trim();
+        if (!text) return;
+        
+        if (text.length > this.config.maxMessageLength) {
+            this.showError(`Message too long. Maximum ${this.config.maxMessageLength} characters.`);
             return;
         }
         
-        return new Promise((resolve) => {
-            const utterance = new SpeechSynthesisUtterance(item.text);
+        input.value = '';
+        this.setButtonState('#sendBtn', true, '⏳');
+        
+        try {
+            await this.sendMessage(text);
+        } finally {
+            this.setButtonState('#sendBtn', false, '▶');
+        }
+    }
+    
+    async sendMessage(text) {
+        // Sanitize input
+        const sanitizedText = this.sanitizeInput(text);
+        
+        // Add to conversation
+        this.state.conversation.push({ role: 'user', content: sanitizedText });
+        
+        // Limit conversation size
+        if (this.state.conversation.length > this.config.maxConversationSize) {
+            this.state.conversation = this.state.conversation.slice(-this.config.maxConversationSize);
+        }
+        
+        try {
+            const response = await fetch(this.config.apiEndpoints.chat, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [
+                        { role: 'system', content: this.getSystemPrompt() },
+                        ...this.state.conversation
+                    ]
+                })
+            });
             
-            utterance.voice = this.getVoice(item.voice);
-            utterance.rate = this.config.speechRate;
-            utterance.pitch = this.config.speechPitch;
-            utterance.volume = this.config.speechVolume;
+            if (!response.ok) {
+                throw new Error(`Chat request failed: ${response.status}`);
+            }
             
-            utterance.onend = () => {
-                this.emit('fallback:complete', item);
-                resolve();
-            };
+            const { content } = await response.json();
+            const sanitizedContent = this.sanitizeOutput(content);
             
-            utterance.onerror = (error) => {
-                this.emit('error', { context: 'fallback:tts', error, item });
-                resolve();
-            };
+            this.state.conversation.push({ role: 'assistant', content: sanitizedContent });
+            this.saveState();
             
-            speechSynthesis.speak(utterance);
-            this.emit('fallback:playing', item);
-        });
-    }
-    
-    getVoice(voiceName) {
-        const voices = speechSynthesis.getVoices();
-        return voices.find(v => v.name.toLowerCase().includes(voiceName.toLowerCase())) || voices[0];
-    }
-    
-    cleanupAudio(audio, url) {
-        // Remove from active set
-        this.activeAudioElements.delete(audio);
-        
-        // Clear reference
-        if (this.state.currentAudio === audio) {
-            this.state.currentAudio = null;
+            // Queue audio and trigger animations
+            this.components.audioManager.queue(sanitizedContent);
+            
+            this.emit('message:sent', { user: sanitizedText, assistant: sanitizedContent });
+            
+        } catch (error) {
+            this.emit('error', { context: 'chat', error });
+            this.components.audioManager.queue("I'm having trouble processing that. Please try again.");
         }
+    }
+    
+    getSystemPrompt() {
+        return this.config.systemPrompt || `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
+    }
+    
+    sanitizeInput(text) {
+        return text.replace(/<[^>]*>/g, '').trim();
+    }
+    
+    sanitizeOutput(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    toggleTheme() {
+        const html = document.documentElement;
+        const isLight = html.classList.toggle('light');
         
-        // Revoke object URL to free memory
-        if (url) {
-            URL.revokeObjectURL(url);
+        this.state.ui.theme = isLight ? 'light' : 'dark';
+        this.updateElement('#themeToggle', isLight ? '☀️' : '🌙');
+        this.emit('theme:changed', this.state.ui.theme);
+    }
+    
+    toggleDebugMode() {
+        this.state.ui.debugMode = !this.state.ui.debugMode;
+        const debugOverlay = document.querySelector('#debugOverlay');
+        if (debugOverlay) {
+            debugOverlay.classList.toggle('hidden');
         }
-        
-        // Remove event listeners
-        audio.onended = null;
-        audio.onerror = null;
-        
-        // Clear src to release resources
-        audio.src = '';
-        audio.load();
+        this.emit('debug:toggled', this.state.ui.debugMode);
     }
     
-    pause() {
-        if (!this.state.isPlaying || this.state.isPaused) return;
+    handleMouseMove(event) {
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
         
-        this.state.isPaused = true;
-        
-        if (this.state.currentAudio) {
-            this.state.currentAudio.pause();
+        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
+    }
+    
+    enableAudioContext() {
+        this.components.audioManager.enableContext();
+    }
+    
+    scheduleWelcomeMessage() {
+        setTimeout(() => {
+            if (this.components.audioManager && this.components.audioManager.queue) {
+                this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
+            }
+            setTimeout(() => this.components.vrmController.playWave(), 1000);
+        }, 2000);
+    }
+    
+    // Utility methods
+    updateElement(selector, content, styles = {}) {
+        const element = document.querySelector(selector);
+        if (element) {
+            if (content !== undefined) element.textContent = content;
+            Object.assign(element.style, styles);
         }
-        
-        if (window.speechSynthesis) {
-            speechSynthesis.pause();
+    }
+    
+    updateLoadingStatus(message) {
+        this.updateElement('#loadingStatus span', message);
+        const loadingEl = document.querySelector('#loadingStatus');
+        if (!message && loadingEl) {
+            setTimeout(() => {
+                loadingEl.style.display = 'none';
+            }, 500);
         }
-        
-        this.emit('pause');
     }
     
-    resume() {
-        if (!this.state.isPaused) return;
-        
-        this.state.isPaused = false;
-        
-        if (this.state.currentAudio) {
-            this.state.currentAudio.play();
+    setButtonState(selector, disabled, text) {
+        const button = document.querySelector(selector);
+        if (button) {
+            button.disabled = disabled;
+            if (text) button.innerHTML = `<span aria-hidden="true">${text}</span>`;
         }
+    }
+    
+    showError(message) {
+        const container = document.querySelector('#errorContainer');
+        if (!container) return;
         
-        if (window.speechSynthesis) {
-            speechSynthesis.resume();
+        const errorEl = document.createElement('div');
+        errorEl.className = 'error-message';
+        errorEl.textContent = message;
+        container.appendChild(errorEl);
+        
+        setTimeout(() => errorEl.remove(), 5000);
+        this.emit('error:shown', message);
+    }
+    
+    startTimer(name, callback, interval, repeating = true) {
+        this.stopTimer(name);
+        
+        if (repeating) {
+            this.state.timers.set(name, setInterval(callback, interval));
+        } else {
+            this.state.timers.set(name, setTimeout(() => {
+                callback();
+                this.state.timers.delete(name);
+            }, interval));
         }
-        
-        this.emit('resume');
     }
     
-    stop() {
-        // Stop current audio
-        if (this.state.currentAudio) {
-            this.state.currentAudio.pause();
-            this.state.currentAudio.currentTime = 0;
+    stopTimer(name) {
+        if (this.state.timers.has(name)) {
+            const timer = this.state.timers.get(name);
+            clearInterval(timer);
+            clearTimeout(timer);
+            this.state.timers.delete(name);
         }
-        
-        // Stop speech synthesis
-        if (window.speechSynthesis) {
-            speechSynthesis.cancel();
+    }
+    
+    saveState() {
+        try {
+            localStorage.setItem('solmateState', JSON.stringify({
+                conversation: this.state.conversation,
+                theme: this.state.ui.theme
+            }));
+        } catch (error) {
+            console.error('Failed to save state:', error);
         }
-        
-        this.state.isPlaying = false;
-        this.state.isPaused = false;
-        
-        this.emit('stop');
     }
     
-    clear() {
-        // Stop playback
-        this.stop();
-        
-        // Clear queue
-        this.queue = [];
-        
-        // Clear all active audio elements
-        this.activeAudioElements.forEach(audio => {
-            this.cleanupAudio(audio);
-        });
-        this.activeAudioElements.clear();
-        
-        this.emit('clear');
-    }
-    
-    setVolume(volume) {
-        const clampedVolume = Math.max(0, Math.min(1, volume));
-        this.config.speechVolume = clampedVolume;
-        
-        if (this.state.currentAudio) {
-            this.state.currentAudio.volume = clampedVolume;
+    loadSavedState() {
+        try {
+            const saved = localStorage.getItem('solmateState');
+            if (saved) {
+                const state = JSON.parse(saved);
+                
+                if (state.conversation) {
+                    this.state.conversation = state.conversation.slice(-this.config.maxConversationSize);
+                }
+                
+                if (state.theme) {
+                    this.state.ui.theme = state.theme;
+                    if (state.theme === 'light') {
+                        document.documentElement.classList.add('light');
+                        this.updateElement('#themeToggle', '☀️');
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load saved state:', error);
         }
-        
-        this.emit('volume:changed', clampedVolume);
     }
     
-    setRate(rate) {
-        const clampedRate = Math.max(0.5, Math.min(2, rate));
-        this.config.speechRate = clampedRate;
-        
-        if (this.state.currentAudio) {
-            this.state.currentAudio.playbackRate = clampedRate;
-        }
-        
-        this.emit('rate:changed', clampedRate);
-    }
-    
-    getQueueLength() {
-        return this.queue.length;
-    }
-    
-    isPlaying() {
-        return this.state.isPlaying;
-    }
-    
-    isPaused() {
-        return this.state.isPaused;
-    }
-    
-    getCacheKey(text, voice) {
-        return `${voice}:${text.substring(0, 50)}`;
-    }
-    
-    generateId() {
-        return `audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    }
-    
-    clearCache() {
-        // Clear audio cache
-        this.audioCache.clear();
-        this.emit('cache:cleared');
-    }
-    
-    getStats() {
+    // Debug methods
+    getAppState() {
         return {
-            queueLength: this.queue.length,
-            cacheSize: this.audioCache.size,
-            activeElements: this.activeAudioElements.size,
-            isPlaying: this.state.isPlaying,
-            isPaused: this.state.isPaused,
-            contextEnabled: this.state.contextEnabled
+            initialized: this.state.initialized,
+            conversationLength: this.state.conversation.length,
+            vrmLoaded: this.components.vrmController?.isLoaded() || false,
+            audioQueueLength: this.components.audioManager?.getQueueLength() || 0,
+            wsConnected: this.state.wsConnection?.readyState === WebSocket.OPEN,
+            timersActive: this.state.timers.size,
+            config: this.config
         };
     }
     
+    // Test methods
+    testChat() {
+        return this.sendMessage("Hello! How are you today?");
+    }
+    
+    testTTS() {
+        if (this.components.audioManager) {
+            this.components.audioManager.queue("Testing the text to speech system with Solmate!");
+        }
+    }
+    
+    testWave() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playWave();
+        }
+    }
+    
+    testNod() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playNod();
+        }
+    }
+    
+    testThink() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playThink();
+        }
+    }
+    
+    testExcited() {
+        if (this.components.vrmController) {
+            this.components.vrmController.playExcited();
+        }
+    }
+    
+    testExpression(name = 'happy', intensity = 0.8) {
+        if (this.components.vrmController) {
+            this.components.vrmController.setExpression(name, intensity);
+        }
+    }
+    
+    testMood(mood = 'happy') {
+        if (this.components.vrmController) {
+            this.components.vrmController.setMood(mood);
+        }
+    }
+    
+    reloadVRM() {
+        if (this.components.vrmController) {
+            return this.components.vrmController.reload();
+        }
+    }
+    
     destroy() {
-        // Clear everything
-        this.clear();
+        // Stop all timers
+        this.state.timers.forEach((timer, name) => this.stopTimer(name));
         
-        // Clear cache
-        this.clearCache();
-        
-        // Close audio context
-        if (this.state.audioContext) {
-            this.state.audioContext.close();
-            this.state.audioContext = null;
+        // Close WebSocket
+        if (this.state.wsConnection) {
+            this.state.wsConnection.close();
         }
         
-        // Clear all references
-        this.queue = [];
-        this.activeAudioElements.clear();
-        this.retryCount.clear();
+        // Destroy components
+        this.components.vrmController?.destroy();
+        this.components.audioManager?.destroy();
         
-        // Remove all event listeners
+        // Clear event listeners
         this.removeAllListeners();
         
         this.emit('destroyed');
