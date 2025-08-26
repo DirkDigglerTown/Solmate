@@ -1,8 +1,8 @@
 // web/js/SolmateApp.js
-// Main application class with event-driven architecture
+// Updated to use VRMController instead of VRMLoader
 
 import { EventEmitter } from './EventEmitter.js';
-import { VRMLoader } from './VRMLoader.js';
+import { VRMController } from './VRMController.js';  // Changed from VRMLoader
 import { AudioManager } from './AudioManager.js';
 
 export class SolmateApp extends EventEmitter {
@@ -38,7 +38,7 @@ export class SolmateApp extends EventEmitter {
         };
         
         this.components = {
-            vrmLoader: null,
+            vrmController: null,  // Changed from vrmLoader
             audioManager: null
         };
     }
@@ -51,7 +51,7 @@ export class SolmateApp extends EventEmitter {
             await this.loadConfiguration();
             
             // Initialize components
-            this.components.vrmLoader = new VRMLoader();
+            await this.initializeVRM();  // Updated method
             this.components.audioManager = new AudioManager();
             
             // Setup component event listeners
@@ -66,18 +66,56 @@ export class SolmateApp extends EventEmitter {
             // Load saved state
             this.loadSavedState();
             
-            // Initialize VRM
-            await this.components.vrmLoader.init();
-            
             this.state.initialized = true;
             this.emit('init:complete');
             
-            // Welcome message
+            // Welcome message with proper animation
             this.scheduleWelcomeMessage();
             
         } catch (error) {
             this.emit('error', { context: 'initialization', error });
             throw error;
+        }
+    }
+    
+    async initializeVRM() {
+        try {
+            // Get canvas element
+            const canvas = document.getElementById('vrmCanvas');
+            if (!canvas) {
+                throw new Error('Canvas element not found');
+            }
+            
+            // Create and initialize VRM controller
+            this.components.vrmController = new VRMController(canvas);
+            await this.components.vrmController.init();
+            
+            // Load VRM model
+            const vrmPaths = [
+                '/assets/avatar/solmate.vrm',
+                'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
+            ];
+            
+            let loaded = false;
+            for (const path of vrmPaths) {
+                try {
+                    await this.components.vrmController.loadVRM(path);
+                    loaded = true;
+                    console.log('✅ VRM loaded from:', path);
+                    break;
+                } catch (error) {
+                    console.warn('Failed to load VRM from:', path, error);
+                }
+            }
+            
+            if (!loaded) {
+                console.error('Failed to load VRM from all sources');
+                this.emit('error', { context: 'vrm', error: new Error('VRM load failed') });
+            }
+            
+        } catch (error) {
+            console.error('VRM initialization failed:', error);
+            this.emit('error', { context: 'vrm:init', error });
         }
     }
     
@@ -99,34 +137,46 @@ export class SolmateApp extends EventEmitter {
     }
     
     setupComponentListeners() {
-        // VRM Loader events
-        this.components.vrmLoader.on('load:start', () => {
-            this.updateLoadingStatus('Loading avatar...');
-        });
-        
-        this.components.vrmLoader.on('load:complete', (vrm) => {
-            this.updateLoadingStatus('');
-            this.emit('vrm:loaded', vrm);
-        });
-        
-        this.components.vrmLoader.on('error', (error) => {
-            this.emit('error', { context: 'vrm', error });
-        });
-        
         // Audio Manager events
         this.components.audioManager.on('play:start', (item) => {
             this.emit('speech:start', item);
-            this.components.vrmLoader.startSpeechAnimation();
+            // Use new VRM controller to start speaking animation
+            if (this.components.vrmController) {
+                const sentiment = this.analyzeSentiment(item.text);
+                this.components.vrmController.startSpeaking(item.text, sentiment);
+            }
         });
         
         this.components.audioManager.on('play:end', () => {
             this.emit('speech:end');
-            this.components.vrmLoader.stopSpeechAnimation();
+            // Stop speaking animation
+            if (this.components.vrmController) {
+                this.components.vrmController.stopSpeaking();
+            }
         });
         
         this.components.audioManager.on('error', (error) => {
             this.emit('error', { context: 'audio', error });
         });
+    }
+    
+    analyzeSentiment(text) {
+        const lower = text.toLowerCase();
+        
+        // Analyze sentiment for emotion
+        if (lower.includes('happy') || lower.includes('great') || lower.includes('awesome') || lower.includes('good')) {
+            return 'positive';
+        } else if (lower.includes('sorry') || lower.includes('unfortunately') || lower.includes('bad')) {
+            return 'negative';
+        } else if (lower.includes('wow') || lower.includes('amazing') || lower.includes('!')) {
+            return 'excited';
+        } else if (lower.includes('hmm') || lower.includes('maybe') || lower.includes('?')) {
+            return 'confused';
+        } else if (lower.includes('think') || lower.includes('consider') || lower.includes('perhaps')) {
+            return 'thoughtful';
+        }
+        
+        return 'neutral';
     }
     
     initializeUI() {
@@ -147,7 +197,7 @@ export class SolmateApp extends EventEmitter {
             }
         });
         
-        // Mouse tracking for animations
+        // Mouse tracking for VRM look-at
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         
         // Audio enable on interaction
@@ -283,6 +333,11 @@ export class SolmateApp extends EventEmitter {
             return;
         }
         
+        // React to user input with VRM
+        if (this.components.vrmController) {
+            this.components.vrmController.nod();  // Acknowledge input
+        }
+        
         input.value = '';
         this.setButtonState('#sendBtn', true, '⏳');
         
@@ -327,6 +382,12 @@ export class SolmateApp extends EventEmitter {
             this.state.conversation.push({ role: 'assistant', content: sanitizedContent });
             this.saveState();
             
+            // Analyze sentiment and update VRM mood
+            const sentiment = this.analyzeSentiment(sanitizedContent);
+            if (this.components.vrmController) {
+                this.components.vrmController.setMood(sentiment);
+            }
+            
             // Queue audio and trigger animations
             this.components.audioManager.queue(sanitizedContent);
             
@@ -334,6 +395,12 @@ export class SolmateApp extends EventEmitter {
             
         } catch (error) {
             this.emit('error', { context: 'chat', error });
+            
+            // Show confused expression on error
+            if (this.components.vrmController) {
+                this.components.vrmController.setMood('confused');
+            }
+            
             this.components.audioManager.queue("I'm having trouble processing that. Please try again.");
         }
     }
@@ -371,10 +438,15 @@ export class SolmateApp extends EventEmitter {
     }
     
     handleMouseMove(event) {
-        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-        
-        this.components.vrmLoader.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);
+        // Update VRM look-at target based on mouse position
+        if (this.components.vrmController) {
+            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Create a target position for the VRM to look at
+            const target = new THREE.Vector3(mouseX * 2, mouseY * 2, 5);
+            this.components.vrmController.lookAt(target);
+        }
     }
     
     enableAudioContext() {
@@ -383,8 +455,15 @@ export class SolmateApp extends EventEmitter {
     
     scheduleWelcomeMessage() {
         setTimeout(() => {
+            // Play welcome animation sequence
+            if (this.components.vrmController) {
+                this.components.vrmController.wave();
+                this.components.vrmController.setMood('happy');
+            }
+            
+            // Queue welcome audio
             this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
-            setTimeout(() => this.components.vrmLoader.playWave(), 1000);
+            
         }, 2000);
     }
     
@@ -494,52 +573,14 @@ export class SolmateApp extends EventEmitter {
         }
         
         // Destroy components
-        this.components.vrmLoader?.destroy();
+        if (this.components.vrmController) {
+            this.components.vrmController.dispose();
+        }
         this.components.audioManager?.destroy();
         
         // Clear event listeners
         this.removeAllListeners();
         
         this.emit('destroyed');
-    }
-}
-
-// Simple EventEmitter implementation
-export class EventEmitter {
-    constructor() {
-        this.events = {};
-    }
-    
-    on(event, listener) {
-        if (!this.events[event]) {
-            this.events[event] = [];
-        }
-        this.events[event].push(listener);
-    }
-    
-    off(event, listenerToRemove) {
-        if (!this.events[event]) return;
-        
-        this.events[event] = this.events[event].filter(listener => listener !== listenerToRemove);
-    }
-    
-    emit(event, ...args) {
-        if (!this.events[event]) return;
-        
-        this.events[event].forEach(listener => {
-            try {
-                listener(...args);
-            } catch (error) {
-                console.error(`Error in event listener for ${event}:`, error);
-            }
-        });
-    }
-    
-    removeAllListeners(event) {
-        if (event) {
-            delete this.events[event];
-        } else {
-            this.events = {};
-        }
     }
 }
