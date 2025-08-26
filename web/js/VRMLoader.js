@@ -42,10 +42,10 @@ export class VRMLoader extends EventEmitter {
                 'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
             ],
             fallbackEnabled: true,
-            // Adjusted camera and model positions for better centering
-            cameraPosition: { x: 0, y: 1.6, z: 2.5 },
-            lookAtPosition: { x: 0, y: 1.2, z: 0 },
-            modelPosition: { x: 0, y: 0.8, z: 0 }  // Raised model position
+            // Much higher positioning to center avatar properly
+            cameraPosition: { x: 0, y: 1.0, z: 4.5 },  // Camera moved back and lower
+            lookAtPosition: { x: 0, y: 0.8, z: 0 },    // Look at lower to compensate
+            modelPosition: { x: 0, y: 2.5, z: 0 }      // Model raised MUCH higher
         };
     }
     
@@ -143,7 +143,7 @@ export class VRMLoader extends EventEmitter {
         
         // Create camera with adjusted FOV and position
         this.three.camera = new THREE.PerspectiveCamera(
-            35,  // Slightly wider FOV to show more of the model
+            45,  // Wider FOV to show full model
             window.innerWidth / window.innerHeight,
             0.1,
             20
