@@ -1,8 +1,13 @@
-// Add asset verification to health check
-const fs = require('fs').promises;
-const path = require('path');
+// web/api/health.js
+const { setCors, preflight, logStart, logOk, logErr } = require("./_utils.js");
 
 module.exports = async (req, res) => {
+  // Handle preflight
+  if (preflight(req, res)) return;
+  
+  // Set CORS
+  setCors(res, req.headers.origin);
+  
   const meta = {
     route: "/api/health",
     method: req.method,
@@ -13,49 +18,48 @@ module.exports = async (req, res) => {
   };
 
   try {
-    console.log("HEALTH: start", meta);
+    logStart("HEALTH", meta);
 
+    // Check environment variables
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const hasHelius = !!process.env.HELIUS_RPC_URL;
     
-    // Check critical assets
-    const assetChecks = {
-      vrm: false,
-      logo: false
-    };
-
-    try {
-      const vrmPath = path.join(process.cwd(), 'assets', 'avatar', 'solmate.vrm');
-      const logoPath = path.join(process.cwd(), 'assets', 'logo', 'solmatelogo.png');
-      
-      const [vrmStat, logoStat] = await Promise.all([
-        fs.stat(vrmPath).catch(() => null),
-        fs.stat(logoPath).catch(() => null)
-      ]);
-
-      assetChecks.vrm = !!(vrmStat && vrmStat.size > 0);
-      assetChecks.logo = !!(logoStat && logoStat.size > 0);
-    } catch (e) {
-      console.warn("HEALTH: asset check failed", e.message);
-    }
-
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Cache-Control", "no-store");
-
+    // Basic health check response
     const body = {
       ok: true,
       time: Date.now(),
-      env: hasOpenAI,
-      region: meta.region || null,
-      commit: meta.commit || null,
-      assets: assetChecks
+      timestamp: new Date().toISOString(),
+      environment: {
+        hasOpenAI,
+        hasHelius,
+        nodeVersion: process.version,
+        region: meta.region || null,
+        commit: meta.commit || null,
+        env: process.env.VERCEL_ENV || "development"
+      },
+      services: {
+        chat: hasOpenAI,
+        tts: hasOpenAI,
+        price: true,
+        tps: hasHelius || !!process.env.SOLANA_RPC_URL
+      }
     };
 
-    console.log("HEALTH: ok", { env: hasOpenAI, time: body.time, assets: assetChecks });
-    return res.status(200).json(body);
-  } catch (err) {
-    console.error("HEALTH: error", { err: String(err?.message || err) });
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
-    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    res.statusCode = 200;
+
+    logOk("HEALTH", { env: hasOpenAI, time: body.time });
+    return res.end(JSON.stringify(body));
+    
+  } catch (err) {
+    logErr("HEALTH", { err: String(err?.message || err) });
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    res.statusCode = 500;
+    return res.end(JSON.stringify({ 
+      ok: false, 
+      error: String(err?.message || err) 
+    }));
   }
 };
