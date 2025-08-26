@@ -1,4 +1,4 @@
-# Solmate – Solana AI Companion 🚀
+# Solmate – Solana AI Companion  🚀
 
 <div align="center">
   <img src="web/assets/logo/solmatelogo.png" alt="Solmate Logo" width="200" />
