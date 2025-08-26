@@ -52,10 +52,10 @@ export class VRMLoader extends EventEmitter {
                 'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
             ],
             fallbackEnabled: true,
-            // Final positioning - avatar properly centered and visible
-            cameraPosition: { x: 0, y: 4.0, z: 5.0 },   // Camera at eye level, back for full view
-            lookAtPosition: { x: 0, y: 4.0, z: 0 },     // Look straight at avatar center
-            modelPosition: { x: 0, y: 4.0, z: 0 }       // Model at proper height
+            // Adjusted positioning - model higher, camera backed up more
+            cameraPosition: { x: 0, y: 4.2, z: 6.5 },   // Camera backed up to 6.5, slightly higher
+            lookAtPosition: { x: 0, y: 4.2, z: 0 },     // Look at chest level
+            modelPosition: { x: 0, y: 4.5, z: 0 }       // Model raised to 4.5
         };
     }
     
