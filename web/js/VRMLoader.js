@@ -42,10 +42,10 @@ export class VRMLoader extends EventEmitter {
                 'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
             ],
             fallbackEnabled: true,
-            // Much higher positioning to center avatar properly
-            cameraPosition: { x: 0, y: 1.0, z: 4.5 },  // Camera moved back and lower
-            lookAtPosition: { x: 0, y: 0.8, z: 0 },    // Look at lower to compensate
-            modelPosition: { x: 0, y: 2.5, z: 0 }      // Model raised MUCH higher
+            // AGGRESSIVE positioning - avatar needs to be MUCH higher
+            cameraPosition: { x: 0, y: 0.5, z: 5.0 },   // Camera lower and further back
+            lookAtPosition: { x: 0, y: 0.3, z: 0 },     // Look at very low point
+            modelPosition: { x: 0, y: 4.5, z: 0 }       // Model raised VERY high (4.5 units)
         };
     }
     
@@ -143,7 +143,7 @@ export class VRMLoader extends EventEmitter {
         
         // Create camera with adjusted FOV and position
         this.three.camera = new THREE.PerspectiveCamera(
-            45,  // Wider FOV to show full model
+            50,  // Even wider FOV to capture full height
             window.innerWidth / window.innerHeight,
             0.1,
             20
@@ -369,18 +369,20 @@ export class VRMLoader extends EventEmitter {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         
-        // Adjust camera to look at the upper-middle part of the model
-        const lookAtY = center.y + (size.y * 0.1); // Look slightly above center
-        this.three.camera.lookAt(0, lookAtY, 0);
-        
-        // Store adjusted look-at position for future use
-        this.config.lookAtPosition.y = lookAtY;
-        
+        // For aggressive positioning, don't auto-adjust - use manual settings
+        // Just log the dimensions for debugging
         console.log('Model dimensions:', {
             center: center,
             size: size,
-            adjustedLookAt: lookAtY
+            currentPosition: this.config.modelPosition
         });
+        
+        // Keep the camera looking at the configured position
+        this.three.camera.lookAt(
+            this.config.lookAtPosition.x,
+            this.config.lookAtPosition.y,
+            this.config.lookAtPosition.z
+        );
     }
     
     setupExpressions(expressionManager) {
