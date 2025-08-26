@@ -1,6 +1,5 @@
 // web/api/_utils.js
 // CORS + simple per-IP rate limit + preflight + tiny logger helpers
-// ES MODULE VERSION
 
 const RATE = { max: 8, windowMs: 30_000 }; // 8 req / 30s / IP
 const buckets = new Map();
@@ -18,7 +17,7 @@ const ALLOWLIST = new Set([
 
 function nowSec() { return Math.floor(Date.now()/1000); }
 
-export function setCors(res, origin) {
+function setCors(res, origin) {
   // If you want to strictly enforce, uncomment the allowlist check below.
   // if (origin && ![...ALLOWLIST].some(a => origin.startsWith(a))) origin = undefined;
 
@@ -28,7 +27,7 @@ export function setCors(res, origin) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-export function preflight(req, res) {
+function preflight(req, res) {
   if (req.method === "OPTIONS") {
     setCors(res, req.headers.origin);
     res.statusCode = 204;
@@ -38,12 +37,11 @@ export function preflight(req, res) {
   return false;
 }
 
-export function rateLimit(req, res, keyPrefix = "rl", customConfig = null) {
-  const config = customConfig || RATE;
+function rateLimit(req, res, keyPrefix = "rl") {
   const ip = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown";
   const key = `${keyPrefix}:${ip}`;
   const now = Date.now();
-  const win = config.windowMs;
+  const win = RATE.windowMs;
 
   let b = buckets.get(key);
   if (!b) b = { t: now, c: 0 };
@@ -51,13 +49,13 @@ export function rateLimit(req, res, keyPrefix = "rl", customConfig = null) {
   b.c += 1;
   buckets.set(key, b);
 
-  const remaining = Math.max(0, config.max - b.c);
-  res.setHeader("X-RateLimit-Limit", String(config.max));
+  const remaining = Math.max(0, RATE.max - b.c);
+  res.setHeader("X-RateLimit-Limit", String(RATE.max));
   res.setHeader("X-RateLimit-Remaining", String(remaining));
   res.setHeader("X-RateLimit-Reset", String(Math.ceil((b.t + win) / 1000)));
 
-  if (b.c > config.max) {
-    console.warn("RATE_LIMIT", { ip, keyPrefix, count: b.c, windowMs: config.windowMs });
+  if (b.c > RATE.max) {
+    console.warn("RATE_LIMIT", { ip, keyPrefix, count: b.c, windowMs: RATE.windowMs });
     res.statusCode = 429;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Rate limit exceeded" }));
@@ -66,33 +64,24 @@ export function rateLimit(req, res, keyPrefix = "rl", customConfig = null) {
   return false;
 }
 
-export function logStart(tag, extra = {}) {
+function logStart(tag, extra = {}) {
   console.log(`${tag}: start`, {
     region: process.env.VERCEL_REGION,
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7),
     ...extra
   });
 }
-
-export function logOk(tag, extra = {}) {
+function logOk(tag, extra = {}) {
   console.log(`${tag}: ok`, extra);
 }
-
-export function logWarn(tag, extra = {}) {
+function logWarn(tag, extra = {}) {
   console.warn(`${tag}: warn`, extra);
 }
-
-export function logErr(tag, extra = {}) {
+function logErr(tag, extra = {}) {
   console.error(`${tag}: error`, extra);
 }
 
-// Default export for CommonJS compatibility
-export default {
-  setCors,
-  preflight,
-  rateLimit,
-  logStart,
-  logOk,
-  logWarn,
-  logErr
+module.exports = {
+  setCors, preflight, rateLimit,
+  logStart, logOk, logWarn, logErr
 };
