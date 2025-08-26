@@ -6,13 +6,13 @@ module.exports = async (req, res) => {
   if (preflight(req, res)) return;
   
   // Set CORS
-  setCors(res, req.headers.origin);
+  setCors(res, req.headers?.origin);
   
   const meta = {
     route: "/api/health",
     method: req.method,
-    ua: req.headers["user-agent"],
-    ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress,
+    ua: req.headers?.["user-agent"],
+    ip: req.headers?.["x-forwarded-for"] || req.connection?.remoteAddress || "unknown",
     region: process.env.VERCEL_REGION,
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7),
   };
