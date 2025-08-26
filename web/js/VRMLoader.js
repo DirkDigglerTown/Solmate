@@ -151,13 +151,14 @@ export class VRMLoader extends EventEmitter {
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // Create camera with adjusted FOV and position
+        // Create camera with proper positioning
         this.three.camera = new THREE.PerspectiveCamera(
             50,  // Even wider FOV to capture full height
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
+        // Set camera to proper position immediately
         this.three.camera.position.set(
             this.config.cameraPosition.x,
             this.config.cameraPosition.y,
@@ -340,11 +341,46 @@ export class VRMLoader extends EventEmitter {
                 hips.position.set(0, 0, 0);
             }
             
-            // Adjust spine/chest for better framing if available
+            // IMPORTANT: Set natural resting pose for arms
+            const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+            const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+            const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+            
+            // Natural relaxed arm position
+            if (leftUpperArm) {
+                leftUpperArm.rotation.z = 0.6;  // Arms down at sides
+                leftUpperArm.rotation.x = 0.1;  // Slightly forward
+            }
+            if (rightUpperArm) {
+                rightUpperArm.rotation.z = -0.6;  // Arms down at sides
+                rightUpperArm.rotation.x = 0.1;   // Slightly forward
+            }
+            if (leftLowerArm) {
+                leftLowerArm.rotation.y = -0.2;  // Slight bend at elbow
+            }
+            if (rightLowerArm) {
+                rightLowerArm.rotation.y = 0.2;  // Slight bend at elbow
+            }
+            
+            // Relax shoulders
+            const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+            const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+            if (leftShoulder) {
+                leftShoulder.rotation.z = 0.05;
+            }
+            if (rightShoulder) {
+                rightShoulder.rotation.z = -0.05;
+            }
+            
+            // Natural spine position
             const spine = vrm.humanoid.getNormalizedBoneNode('spine');
             const chest = vrm.humanoid.getNormalizedBoneNode('chest');
             if (spine) {
-                spine.rotation.x = 0.05; // Slight forward lean
+                spine.rotation.x = 0.02; // Very slight forward lean
+            }
+            if (chest) {
+                chest.rotation.x = 0.01;
             }
         }
         
@@ -363,8 +399,8 @@ export class VRMLoader extends EventEmitter {
             // Spring bones will be updated in animation loop
         }
         
-        // Trigger welcome sequence after VRM loads
-        this.adjustCameraForModel(vrm);
+        // Don't auto-adjust camera, use our configured position
+        console.log('VRM setup complete with natural pose');
         
         // Play welcome animation after a short delay
         setTimeout(() => {
@@ -520,20 +556,33 @@ export class VRMLoader extends EventEmitter {
                     neck.rotation.y = Math.sin(time * 0.5 + 0.5) * 0.02;
                 }
                 
-                // Natural arm movements
+                // Natural RELAXED arm movements - arms at sides
                 const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
                 const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
+                const leftLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftLowerArm');
+                const rightLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightLowerArm');
                 
                 this.animation.armSwayPhase += deltaTime * 0.8;
                 
+                // Keep arms naturally at sides with subtle movement
                 if (leftArm) {
-                    leftArm.rotation.z = 0.2 + Math.sin(this.animation.armSwayPhase) * 0.05;
-                    leftArm.rotation.x = Math.sin(this.animation.armSwayPhase * 1.3) * 0.03;
+                    leftArm.rotation.z = 0.6 + Math.sin(this.animation.armSwayPhase) * 0.02;  // Very subtle sway
+                    leftArm.rotation.x = 0.1 + Math.sin(this.animation.armSwayPhase * 1.3) * 0.02;
+                    leftArm.rotation.y = Math.sin(this.animation.armSwayPhase * 0.7) * 0.01;
                 }
                 
                 if (rightArm) {
-                    rightArm.rotation.z = -0.2 - Math.sin(this.animation.armSwayPhase + Math.PI) * 0.05;
-                    rightArm.rotation.x = Math.sin(this.animation.armSwayPhase * 1.3 + Math.PI) * 0.03;
+                    rightArm.rotation.z = -0.6 - Math.sin(this.animation.armSwayPhase + Math.PI) * 0.02;
+                    rightArm.rotation.x = 0.1 + Math.sin(this.animation.armSwayPhase * 1.3 + Math.PI) * 0.02;
+                    rightArm.rotation.y = -Math.sin(this.animation.armSwayPhase * 0.7 + Math.PI) * 0.01;
+                }
+                
+                // Keep elbows naturally bent
+                if (leftLowerArm) {
+                    leftLowerArm.rotation.y = -0.2 + Math.sin(this.animation.armSwayPhase * 1.5) * 0.05;
+                }
+                if (rightLowerArm) {
+                    rightLowerArm.rotation.y = 0.2 - Math.sin(this.animation.armSwayPhase * 1.5) * 0.05;
                 }
                 
                 // Occasional idle gestures
