@@ -62,7 +62,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ===== CONSTANTS =====
-const ASSET_LOAD_TIMEOUT = 30ewan;
+const ASSET_LOAD_TIMEOUT = 30000;
 const VRM_PATHS = [
     '/assets/avatar/solmate.vrm',
     'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
