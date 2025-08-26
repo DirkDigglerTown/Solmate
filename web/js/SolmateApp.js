@@ -481,13 +481,14 @@ export class SolmateApp extends EventEmitter {
     
     handleMouseMove(event) {
         // Simplified mouse tracking for new VRM controller
-        if (this.components.vrmController) {
+        if (this.components.vrmController && this.components.vrmController.vrm?.lookAt) {
             const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
             const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
             
-            // Create target position for lookAt
-            const target = new THREE.Vector3(mouseX * 2, mouseY + 1, 3);
-            this.components.vrmController.lookAt(target);
+            // Update attention target directly on the VRM controller
+            this.components.vrmController.context.attentionTarget.x = mouseX * 2;
+            this.components.vrmController.context.attentionTarget.y = mouseY + 1;
+            this.components.vrmController.context.attentionTarget.z = 3;
         }
     }
     
