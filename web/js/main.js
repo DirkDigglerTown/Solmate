@@ -503,7 +503,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 // Development mode enhancements
-if (import.meta.env?.DEV || process.env.NODE_ENV === 'development') {
+if (import.meta.env?.DEV || window.location.hostname === 'localhost') {
     console.log('🛠️ Development mode active');
     
     // Hot reload support
