@@ -65,8 +65,8 @@ export class SolmateApp extends EventEmitter {
             this.components.vrmController = new VRMController();
             this.components.audioManager = new AudioManager();
             
-            // CRITICAL: Enable audio context first
-            this.components.audioManager.enableContext();
+            // CRITICAL FIX: Initialize AudioManager properly
+            await this.components.audioManager.init();
             
             // Setup component event listeners
             this.setupComponentListeners();
@@ -218,7 +218,7 @@ export class SolmateApp extends EventEmitter {
             };
             
             this.state.wsConnection.onclose = () => {
-                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b' });
+                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b');
                 this.scheduleWebSocketReconnect();
                 this.emit('ws:disconnected');
             };
@@ -465,6 +465,7 @@ export class SolmateApp extends EventEmitter {
             // Safety checks before calling methods
             if (this.components.audioManager && typeof this.components.audioManager.queue === 'function') {
                 this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
+                console.log('🎙️ Welcome message queued');
             } else {
                 console.warn('AudioManager not ready - skipping welcome audio');
             }
