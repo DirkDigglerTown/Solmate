@@ -1,6 +1,6 @@
 // web/js/VRMController.js
 // VRM avatar controller with AIRI-inspired natural animations
-// CRITICAL: Arms rest at 70-degree angle (1.22 radians), NOT T-pose!
+// FIXED: Proper 70-degree arm rest position and natural movements
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -42,10 +42,10 @@ export class VRMController extends EventEmitter {
             blinkTimer: 0,
             headTarget: { x: 0, y: 0 },
             armRestPosition: {
-                leftUpper: { x: 0, y: 0, z: 1.22 },  // 70 degrees
-                leftLower: { x: 0, y: 0, z: 0.3 },
-                rightUpper: { x: 0, y: 0, z: 1.22 }, // 70 degrees
-                rightLower: { x: 0, y: 0, z: 0.3 }
+                leftUpper: { x: 0, y: 0, z: 1.22 },  // 70 degrees - AIRI standard
+                leftLower: { x: 0, y: 0, z: 0.17 },  // Slight elbow bend
+                rightUpper: { x: 0, y: 0, z: -1.22 }, // -70 degrees - AIRI standard
+                rightLower: { x: 0, y: 0, z: -0.17 }  // Slight elbow bend
             },
             currentGesture: null,
             gestureQueue: []
@@ -74,7 +74,7 @@ export class VRMController extends EventEmitter {
             // Load VRM model
             await this.loadVRM();
             
-            // START THE ANIMATION LOOP - THIS WAS MISSING!
+            // START THE ANIMATION LOOP
             this.animate();
             console.log('🎮 Animation loop started');
             
@@ -103,22 +103,18 @@ export class VRMController extends EventEmitter {
         
         // Create scene
         this.three.scene = new THREE.Scene();
-        // Change background to a lighter color to see dark models
-        this.three.scene.background = new THREE.Color(0x1a2332); // Slightly lighter blue-gray
-        
-        // Optional: Add fog for depth
+        this.three.scene.background = new THREE.Color(0x1a2332);
         this.three.scene.fog = new THREE.Fog(0x1a2332, 5, 15);
         
-        // Create camera - LOWERED MORE FOR PROPER CENTERING
+        // Create camera
         this.three.camera = new THREE.PerspectiveCamera(
-            30,  // FOV
+            30,
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        // Much lower camera position to center the avatar on screen
-        this.three.camera.position.set(0, 1.6, 5.0); // Camera at chest height
-        this.three.camera.lookAt(0, 1.4, 0); // Look at mid-torso
+        this.three.camera.position.set(0, 1.6, 5.0);
+        this.three.camera.lookAt(0, 1.4, 0);
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -134,7 +130,7 @@ export class VRMController extends EventEmitter {
         this.three.renderer.setSize(window.innerWidth, window.innerHeight);
         this.three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.three.renderer.toneMappingExposure = 1.2; // Slightly brighter
+        this.three.renderer.toneMappingExposure = 1.2;
         
         // Ensure canvas is visible
         canvas.style.display = 'block';
@@ -144,22 +140,18 @@ export class VRMController extends EventEmitter {
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         
-        // Add lights - ENHANCED LIGHTING FOR BETTER VISIBILITY
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0); // Increased intensity
+        // Add lights
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0);
         directionalLight.position.set(1, 2, 2);
-        directionalLight.castShadow = false; // Disable shadows for performance
         this.three.scene.add(directionalLight);
         
-        // Add fill light from the opposite side
         const fillLight = new THREE.DirectionalLight(0x88aaff, 0.8);
         fillLight.position.set(-1, 1, -1);
         this.three.scene.add(fillLight);
         
-        // Ambient light for overall brightness
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Increased intensity
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         this.three.scene.add(ambientLight);
         
-        // Add a point light near the face for better visibility
         const pointLight = new THREE.PointLight(0xffffff, 1, 5);
         pointLight.position.set(0, 1.5, 2);
         this.three.scene.add(pointLight);
@@ -202,7 +194,6 @@ export class VRMController extends EventEmitter {
                     const vrm = gltf.userData.vrm;
                     
                     if (vrm) {
-                        // Setup VRM
                         await this.setupVRM(vrm);
                         loaded = true;
                         console.log('✅ VRM loaded successfully from:', url);
@@ -266,8 +257,8 @@ export class VRMController extends EventEmitter {
             });
         }
         
-        // Position model - KEEP AT ORIGIN FOR NATURAL HEIGHT
-        vrm.scene.position.set(0, 0, 0); // Model at origin (feet on ground)
+        // Position model
+        vrm.scene.position.set(0, 0, 0);
         vrm.scene.rotation.y = Math.PI; // Face camera
         
         // Get actual model bounds to verify positioning
@@ -283,10 +274,10 @@ export class VRMController extends EventEmitter {
             center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
         });
         
-        // Properly center the avatar based on its actual dimensions
-        const avatarCenter = center.y; // Usually around 0.8 for a 1.6 unit tall model
-        const cameraHeight = avatarCenter + 0.2; // Slightly above center
-        const lookAtHeight = avatarCenter; // Look at center
+        // Properly center the avatar
+        const avatarCenter = center.y;
+        const cameraHeight = avatarCenter + 0.2;
+        const lookAtHeight = avatarCenter;
         
         console.log(`📷 Camera auto-positioned for centering:
             Position: (0, ${cameraHeight.toFixed(2)}, 5.0)
@@ -336,29 +327,25 @@ export class VRMController extends EventEmitter {
             head: vrm.humanoid.getNormalizedBoneNode('head')
         };
         
-        // AIRI-style: Arms down at 45-50 degree angle from horizontal
-        // This creates a relaxed, natural stance
+        // AIRI-style: Arms down at 70-degree angle (1.22 radians)
+        // This is the CORRECT natural rest position
         if (bones.leftUpperArm) {
-            bones.leftUpperArm.rotation.z = Math.PI * 0.28; // ~50 degrees
+            bones.leftUpperArm.rotation.z = 1.22;  // 70 degrees - AIRI standard
+            bones.leftUpperArm.rotation.x = 0.05;  // Slight forward rotation
         }
         if (bones.rightUpperArm) {
-            bones.rightUpperArm.rotation.z = -Math.PI * 0.28; // Mirror for right
-        }
-        
-        // Slight forward shoulder rotation for more natural pose
-        if (bones.leftUpperArm) {
-            bones.leftUpperArm.rotation.x = 0.05;
-        }
-        if (bones.rightUpperArm) {
-            bones.rightUpperArm.rotation.x = 0.05;
+            bones.rightUpperArm.rotation.z = -1.22; // -70 degrees - AIRI standard
+            bones.rightUpperArm.rotation.x = 0.05;  // Slight forward rotation
         }
         
         // Natural elbow bend
         if (bones.leftLowerArm) {
-            bones.leftLowerArm.rotation.y = -0.15;
+            bones.leftLowerArm.rotation.z = 0.17;   // Slight bend
+            bones.leftLowerArm.rotation.y = -0.1;   // Natural rotation
         }
         if (bones.rightLowerArm) {
-            bones.rightLowerArm.rotation.y = 0.15;
+            bones.rightLowerArm.rotation.z = -0.17; // Slight bend
+            bones.rightLowerArm.rotation.y = 0.1;   // Natural rotation
         }
         
         // Slight spine curve for natural posture
@@ -368,13 +355,29 @@ export class VRMController extends EventEmitter {
         
         // Save rest positions
         this.animation.armRestPosition = {
-            leftUpper: bones.leftUpperArm ? bones.leftUpperArm.rotation.clone() : null,
-            leftLower: bones.leftLowerArm ? bones.leftLowerArm.rotation.clone() : null,
-            rightUpper: bones.rightUpperArm ? bones.rightUpperArm.rotation.clone() : null,
-            rightLower: bones.rightLowerArm ? bones.rightLowerArm.rotation.clone() : null
+            leftUpper: bones.leftUpperArm ? {
+                x: bones.leftUpperArm.rotation.x,
+                y: bones.leftUpperArm.rotation.y,
+                z: bones.leftUpperArm.rotation.z
+            } : null,
+            leftLower: bones.leftLowerArm ? {
+                x: bones.leftLowerArm.rotation.x,
+                y: bones.leftLowerArm.rotation.y,
+                z: bones.leftLowerArm.rotation.z
+            } : null,
+            rightUpper: bones.rightUpperArm ? {
+                x: bones.rightUpperArm.rotation.x,
+                y: bones.rightUpperArm.rotation.y,
+                z: bones.rightUpperArm.rotation.z
+            } : null,
+            rightLower: bones.rightLowerArm ? {
+                x: bones.rightLowerArm.rotation.x,
+                y: bones.rightLowerArm.rotation.y,
+                z: bones.rightLowerArm.rotation.z
+            } : null
         };
         
-        console.log('✅ AIRI-style natural rest pose set');
+        console.log('✅ AIRI-style natural rest pose set (arms at 70 degrees)');
     }
     
     setupExpressions(vrm) {
@@ -417,6 +420,7 @@ export class VRMController extends EventEmitter {
             this.updateBlink(elapsedTime);
             this.updateHeadMovement(deltaTime);
             this.updateGestures(deltaTime);
+            this.updateIdleAnimations(elapsedTime);
             
             // Update current animation if playing
             if (this.animation.currentGesture) {
@@ -424,7 +428,7 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // Render scene - THIS IS CRITICAL!
+        // Render scene
         if (this.three.renderer && this.three.scene && this.three.camera) {
             this.three.renderer.render(this.three.scene, this.three.camera);
         }
@@ -447,8 +451,8 @@ export class VRMController extends EventEmitter {
         // Chest breathing - very subtle expansion
         if (chest) {
             chest.scale.y = 1 + breath * 0.006 + breathDeep * 0.003;
-            chest.scale.x = 1 + breath * 0.004; // Slight width change
-            chest.rotation.x = breath * 0.003; // Tiny forward/back tilt
+            chest.scale.x = 1 + breath * 0.004;
+            chest.rotation.x = breath * 0.003;
         }
         
         // Upper chest follows with slight delay
@@ -458,13 +462,12 @@ export class VRMController extends EventEmitter {
         
         // Spine movement for natural posture shifts
         if (spine) {
-            spine.rotation.x = breathDeep * 0.002;
-            spine.rotation.z = Math.sin(time * 0.3) * 0.001; // Very slow sway
+            spine.rotation.x = 0.02 + breathDeep * 0.002; // Keep base spine curve
+            spine.rotation.z = Math.sin(time * 0.3) * 0.001;
         }
         
         // AIRI signature: Subtle weight shifting (body sway)
         if (hips) {
-            // Gentle figure-8 hip movement - barely visible but adds life
             hips.position.x = Math.sin(time * 0.4) * 0.003;
             hips.position.z = Math.cos(time * 0.4 * 2) * 0.002;
             hips.rotation.y = Math.sin(time * 0.3) * 0.002;
@@ -481,6 +484,39 @@ export class VRMController extends EventEmitter {
         if (rightShoulder) {
             rightShoulder.rotation.z = -breath * 0.002;
             rightShoulder.rotation.x = breathDeep * 0.001;
+        }
+    }
+    
+    updateIdleAnimations(time) {
+        if (!this.three.vrm || !this.three.vrm.humanoid || this.state.isAnimating) return;
+        
+        // Subtle idle animations for arms to prevent static look
+        const leftUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+        const rightUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+        const leftLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+        const rightLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+        
+        // Very subtle arm movement while maintaining rest position
+        const idlePhase = time * 0.5;
+        const microMovement = 0.02; // Very small movement
+        
+        if (leftUpperArm && this.animation.armRestPosition.leftUpper) {
+            leftUpperArm.rotation.z = this.animation.armRestPosition.leftUpper.z + Math.sin(idlePhase) * microMovement;
+            leftUpperArm.rotation.x = this.animation.armRestPosition.leftUpper.x + Math.cos(idlePhase * 1.3) * microMovement * 0.5;
+        }
+        
+        if (rightUpperArm && this.animation.armRestPosition.rightUpper) {
+            rightUpperArm.rotation.z = this.animation.armRestPosition.rightUpper.z - Math.sin(idlePhase + 0.5) * microMovement;
+            rightUpperArm.rotation.x = this.animation.armRestPosition.rightUpper.x + Math.cos(idlePhase * 1.3 + 0.5) * microMovement * 0.5;
+        }
+        
+        // Subtle lower arm movement
+        if (leftLowerArm && this.animation.armRestPosition.leftLower) {
+            leftLowerArm.rotation.z = this.animation.armRestPosition.leftLower.z + Math.sin(idlePhase * 1.5) * microMovement * 0.5;
+        }
+        
+        if (rightLowerArm && this.animation.armRestPosition.rightLower) {
+            rightLowerArm.rotation.z = this.animation.armRestPosition.rightLower.z - Math.sin(idlePhase * 1.5 + 0.5) * microMovement * 0.5;
         }
     }
     
@@ -513,8 +549,6 @@ export class VRMController extends EventEmitter {
         
         // AIRI-style subtle idle movements
         // Slow, natural head movements that make the character feel alive
-        
-        // Base idle animation - very subtle figure-8 pattern
         const idleX = Math.sin(time * 0.5) * 0.02 + Math.sin(time * 1.3) * 0.01;
         const idleY = Math.cos(time * 0.7) * 0.025 + Math.cos(time * 1.7) * 0.01;
         
@@ -522,7 +556,7 @@ export class VRMController extends EventEmitter {
         const microX = Math.sin(time * 3.2) * 0.005;
         const microY = Math.cos(time * 2.8) * 0.005;
         
-        // Smooth interpolation towards target (mouse follow or idle)
+        // Smooth interpolation towards target
         const lerpSpeed = 2.0;
         const targetX = this.animation.headTarget.x * 0.15 + idleX + microX;
         const targetY = this.animation.headTarget.y * 0.2 + idleY + microY;
@@ -536,11 +570,10 @@ export class VRMController extends EventEmitter {
             neck.rotation.y = head.rotation.y * 0.3;
         }
         
-        // AIRI-style occasional blink and micro-expressions
+        // AIRI-style occasional micro-expressions
         if (this.three.vrm.expressionManager) {
-            // Subtle expression changes during idle
             const expressionTime = time * 0.3;
-            const subtleSmile = (Math.sin(expressionTime) + 1) * 0.05; // 0-10% smile
+            const subtleSmile = (Math.sin(expressionTime) + 1) * 0.05;
             
             try {
                 this.three.vrm.expressionManager.setValue('happy', subtleSmile);
@@ -587,7 +620,7 @@ export class VRMController extends EventEmitter {
         if (!this.three.vrm || !this.three.vrm.humanoid) return;
         if (this.state.isAnimating) return;
         
-        console.log('👋 Playing AIRI-style wave animation');
+        console.log('👋 Playing AIRI-style natural wave animation');
         this.state.isAnimating = true;
         
         const bones = {
@@ -618,47 +651,47 @@ export class VRMController extends EventEmitter {
                 const easeInOut = (t) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
                 
                 if (progress < 0.25) {
-                    // Smoothly raise arm
+                    // Phase 1: Smoothly raise arm from rest position
                     const p = easeInOut(progress / 0.25);
                     
-                    // Rotate from rest position to wave position
-                    bones.rightUpperArm.rotation.z = -Math.PI * 0.28 + Math.PI * 0.38 * p; // Up to ~30 degrees above horizontal
-                    bones.rightUpperArm.rotation.x = 0.05 - 0.4 * p; // Forward
-                    bones.rightUpperArm.rotation.y = -0.2 * p; // Slight outward
+                    // From 70-degree rest to wave position
+                    bones.rightUpperArm.rotation.z = -1.22 + 1.52 * p; // From -70° to about 17°
+                    bones.rightUpperArm.rotation.x = 0.05 - 0.4 * p;   // Forward
+                    bones.rightUpperArm.rotation.y = -0.2 * p;         // Slight outward
                     
                     if (bones.rightLowerArm) {
-                        bones.rightLowerArm.rotation.y = 0.15 - 0.8 * p; // Bend elbow
-                        bones.rightLowerArm.rotation.z = -0.1 * p;
+                        bones.rightLowerArm.rotation.y = 0.1 - 0.8 * p;  // Bend elbow
+                        bones.rightLowerArm.rotation.z = -0.17 - 0.1 * p; // From rest bend
                     }
                 } else if (progress < 0.75) {
-                    // Wave motion
+                    // Phase 2: Wave motion
                     const p = (progress - 0.25) / 0.5;
-                    const wave = Math.sin(p * Math.PI * 2.5) * 0.3; // 2.5 waves
+                    const wave = Math.sin(p * Math.PI * 2.5) * 0.3;
                     
-                    bones.rightUpperArm.rotation.z = Math.PI * 0.1; // Hold up
+                    bones.rightUpperArm.rotation.z = 0.3; // Hold up
                     bones.rightUpperArm.rotation.x = -0.35;
                     bones.rightUpperArm.rotation.y = -0.2;
                     
                     if (bones.rightLowerArm) {
-                        bones.rightLowerArm.rotation.y = -0.65 + wave * 0.15; // Wave with forearm
-                        bones.rightLowerArm.rotation.z = -0.1;
+                        bones.rightLowerArm.rotation.y = -0.7 + wave * 0.15;
+                        bones.rightLowerArm.rotation.z = -0.27;
                     }
                     
                     if (bones.rightHand) {
-                        bones.rightHand.rotation.z = wave; // Hand waves side to side
-                        bones.rightHand.rotation.x = wave * 0.3; // Slight up/down
+                        bones.rightHand.rotation.z = wave;
+                        bones.rightHand.rotation.x = wave * 0.3;
                     }
                 } else {
-                    // Smoothly lower arm
+                    // Phase 3: Smoothly lower arm back to rest
                     const p = easeInOut((progress - 0.75) / 0.25);
                     
-                    bones.rightUpperArm.rotation.z = Math.PI * 0.1 - Math.PI * 0.38 * p;
-                    bones.rightUpperArm.rotation.x = -0.35 + 0.4 * p;
-                    bones.rightUpperArm.rotation.y = -0.2 + 0.2 * p;
+                    bones.rightUpperArm.rotation.z = 0.3 - 1.52 * p;  // Back to -70°
+                    bones.rightUpperArm.rotation.x = -0.35 + 0.4 * p; // Back to slight forward
+                    bones.rightUpperArm.rotation.y = -0.2 + 0.2 * p;  // Back to neutral
                     
                     if (bones.rightLowerArm) {
-                        bones.rightLowerArm.rotation.y = -0.65 + 0.8 * p;
-                        bones.rightLowerArm.rotation.z = -0.1 + 0.1 * p;
+                        bones.rightLowerArm.rotation.y = -0.7 + 0.8 * p;   // Back to slight bend
+                        bones.rightLowerArm.rotation.z = -0.27 + 0.1 * p;  // Back to rest bend
                     }
                     
                     if (bones.rightHand) {
@@ -746,7 +779,6 @@ export class VRMController extends EventEmitter {
                 try {
                     this.three.vrm.expressionManager.setValue('blinkLeft', winkValue);
                 } catch (e) {
-                    // Try blink as fallback
                     try {
                         this.three.vrm.expressionManager.setValue('blink', winkValue * 0.5);
                     } catch (e2) {}
@@ -776,16 +808,24 @@ export class VRMController extends EventEmitter {
         const rightLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
         
         if (leftUpperArm && this.animation.armRestPosition.leftUpper) {
-            leftUpperArm.rotation.copy(this.animation.armRestPosition.leftUpper);
+            leftUpperArm.rotation.x = this.animation.armRestPosition.leftUpper.x;
+            leftUpperArm.rotation.y = this.animation.armRestPosition.leftUpper.y;
+            leftUpperArm.rotation.z = this.animation.armRestPosition.leftUpper.z;
         }
         if (leftLowerArm && this.animation.armRestPosition.leftLower) {
-            leftLowerArm.rotation.copy(this.animation.armRestPosition.leftLower);
+            leftLowerArm.rotation.x = this.animation.armRestPosition.leftLower.x;
+            leftLowerArm.rotation.y = this.animation.armRestPosition.leftLower.y;
+            leftLowerArm.rotation.z = this.animation.armRestPosition.leftLower.z;
         }
         if (rightUpperArm && this.animation.armRestPosition.rightUpper) {
-            rightUpperArm.rotation.copy(this.animation.armRestPosition.rightUpper);
+            rightUpperArm.rotation.x = this.animation.armRestPosition.rightUpper.x;
+            rightUpperArm.rotation.y = this.animation.armRestPosition.rightUpper.y;
+            rightUpperArm.rotation.z = this.animation.armRestPosition.rightUpper.z;
         }
         if (rightLowerArm && this.animation.armRestPosition.rightLower) {
-            rightLowerArm.rotation.copy(this.animation.armRestPosition.rightLower);
+            rightLowerArm.rotation.x = this.animation.armRestPosition.rightLower.x;
+            rightLowerArm.rotation.y = this.animation.armRestPosition.rightLower.y;
+            rightLowerArm.rotation.z = this.animation.armRestPosition.rightLower.z;
         }
     }
     
@@ -901,20 +941,11 @@ export class VRMController extends EventEmitter {
         console.log('🎬 Playing opening sequence');
         
         // AIRI-style friendly greeting sequence
-        // Start with a gentle nod, then a friendly wave, optional wink
-        
-        // Initial pause to let user see the avatar
         setTimeout(() => this.performNod(), 500);
-        
-        // Friendly wave
         setTimeout(() => this.playWave(), 1500);
-        
-        // Optional subtle expressions
         setTimeout(() => {
             this.setExpression('happy', 0.3, 2000);
         }, 4500);
-        
-        // Return to neutral
         setTimeout(() => {
             this.setExpression('neutral', 0, 1000);
             this.returnToRestPose();
@@ -938,204 +969,6 @@ export class VRMController extends EventEmitter {
     }
     
     // === UTILITY METHODS ===
-    
-    debugCameraPosition() {
-        if (!this.three.vrm || !this.three.camera) {
-            console.log('No VRM or camera loaded');
-            return;
-        }
-        
-        // Get Three.js reference
-        const Three = window.THREE;
-        if (!Three) {
-            console.log('THREE.js not available in global scope');
-            return;
-        }
-        
-        // Get VRM bounds
-        const box = new Three.Box3().setFromObject(this.three.vrm.scene);
-        const center = box.getCenter(new Three.Vector3());
-        const size = box.getSize(new Three.Vector3());
-        
-        console.log('🎥 Camera Debug Info:');
-        console.log('VRM Position:', this.three.vrm.scene.position);
-        console.log('VRM Bounds:', { center, size });
-        console.log('VRM Height:', size.y);
-        console.log('Camera Position:', this.three.camera.position);
-        console.log('Camera FOV:', this.three.camera.fov);
-        
-        return { center, size, cameraPos: this.three.camera.position };
-    }
-    
-    adjustCamera(x = 0, y = 1.4, z = 3.0, lookY = 1.2) {
-        if (!this.three.camera) return;
-        
-        this.three.camera.position.set(x, y, z);
-        this.three.camera.lookAt(0, lookY, 0);
-        
-        console.log(`Camera adjusted to: pos(${x}, ${y}, ${z}) looking at (0, ${lookY}, 0)`);
-    }
-    
-    // Debug method to check rendering
-    debugVisibility() {
-        if (!this.three.vrm || !this.three.scene) {
-            console.log('No VRM or scene loaded');
-            return;
-        }
-        
-        console.log('🔍 Visibility Debug:');
-        console.log('Canvas element:', document.getElementById('vrmCanvas'));
-        console.log('Canvas size:', {
-            width: this.three.renderer?.domElement.width,
-            height: this.three.renderer?.domElement.height
-        });
-        console.log('Renderer size:', this.three.renderer?.getSize(new (window.THREE?.Vector2 || Object)()));
-        console.log('Scene children:', this.three.scene.children.length);
-        console.log('VRM visible:', this.three.vrm.scene.visible);
-        console.log('Scene background:', this.three.scene.background);
-        
-        // Check if canvas is actually visible on page
-        const canvas = document.getElementById('vrmCanvas');
-        if (canvas) {
-            const rect = canvas.getBoundingClientRect();
-            console.log('Canvas position on page:', rect);
-            console.log('Canvas computed style:', {
-                display: getComputedStyle(canvas).display,
-                visibility: getComputedStyle(canvas).visibility,
-                opacity: getComputedStyle(canvas).opacity,
-                zIndex: getComputedStyle(canvas).zIndex
-            });
-        }
-        
-        // Try to make VRM more visible
-        if (this.three.vrm?.scene) {
-            // Check materials
-            this.three.vrm.scene.traverse((child) => {
-                if (child.isMesh) {
-                    console.log('Mesh found:', child.name, 'visible:', child.visible);
-                    if (child.material) {
-                        console.log('Material:', child.material.type, 'opacity:', child.material.opacity);
-                    }
-                }
-            });
-        }
-    }
-    
-    // Debug method to force render and check scene
-    debugRender() {
-        console.log('🔍 Debug Render Check:');
-        
-        if (!this.three.renderer) {
-            console.error('❌ No renderer!');
-            return;
-        }
-        
-        if (!this.three.scene) {
-            console.error('❌ No scene!');
-            return;
-        }
-        
-        if (!this.three.camera) {
-            console.error('❌ No camera!');
-            return;
-        }
-        
-        if (!this.three.vrm) {
-            console.error('❌ No VRM!');
-            return;
-        }
-        
-        console.log('✅ All components present');
-        console.log('Scene children:', this.three.scene.children.length);
-        console.log('VRM visible:', this.three.vrm.scene.visible);
-        console.log('Canvas size:', {
-            width: this.three.renderer.domElement.width,
-            height: this.three.renderer.domElement.height
-        });
-        
-        // Force a render
-        console.log('Forcing render...');
-        this.three.renderer.render(this.three.scene, this.three.camera);
-        
-        // Check if anything was drawn
-        const gl = this.three.renderer.getContext();
-        const pixels = new Uint8Array(4);
-        gl.readPixels(
-            Math.floor(gl.canvas.width / 2),
-            Math.floor(gl.canvas.height / 2),
-            1, 1,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            pixels
-        );
-        console.log('Center pixel color:', pixels);
-        
-        // Try adding a test cube to see if anything renders
-        this.addTestCube();
-    }
-    
-    // Add a bright test cube to verify rendering works
-    addTestCube() {
-        import('three').then(THREE => {
-            const geometry = new THREE.BoxGeometry(1, 1, 1);
-            const material = new THREE.MeshBasicMaterial({ color: 0xff00ff });
-            const cube = new THREE.Mesh(geometry, material);
-            cube.position.set(0, 4.0, 0); // Same position as avatar
-            cube.name = 'testCube';
-            
-            // Remove old test cube if exists
-            const oldCube = this.three.scene.getObjectByName('testCube');
-            if (oldCube) {
-                this.three.scene.remove(oldCube);
-                console.log('Removed old test cube');
-            } else {
-                this.three.scene.add(cube);
-                console.log('Added bright pink test cube at avatar position');
-            }
-            
-            // Force render
-            this.three.renderer.render(this.three.scene, this.three.camera);
-        });
-    }
-    
-    // Manually start animation loop if it's not running
-    startAnimationLoop() {
-        if (!this.state.initialized) {
-            console.log('⚠️ Forcing initialization state for animation');
-            this.state.initialized = true;
-        }
-        
-        console.log('🎮 Manually starting animation loop');
-        this.animate();
-        
-        // Remove test cube if present
-        const testCube = this.three.scene?.getObjectByName('testCube');
-        if (testCube) {
-            this.three.scene.remove(testCube);
-            console.log('Removed test cube');
-        }
-    }
-    
-    // Method to cycle backgrounds for testing
-    cycleBackground() {
-        if (!this.three.scene) return;
-        
-        const colors = [
-            0x1a2332, // Dark blue-gray
-            0x2a3342, // Medium blue-gray  
-            0x3a4352, // Lighter blue-gray
-            0x4a5362, // Even lighter
-            0x888888, // Medium gray
-            0xaaaaaa  // Light gray
-        ];
-        
-        const currentColor = this.three.scene.background.getHex();
-        const currentIndex = colors.indexOf(currentColor);
-        const nextIndex = (currentIndex + 1) % colors.length;
-        
-        this.three.scene.background = new (window.THREE.Color)(colors[nextIndex]);
-        console.log(`Background changed to: #${colors[nextIndex].toString(16).padStart(6, '0')}`);
-    }
     
     updateHeadTarget(x, y) {
         this.animation.headTarget.x = x;
@@ -1192,7 +1025,6 @@ export class VRMController extends EventEmitter {
         
         if (this.three.vrm && this.three.scene) {
             this.three.scene.remove(this.three.vrm.scene);
-            // VRMUtils.deepDispose would be called here if imported
         }
         
         // Clean up tracked resources
