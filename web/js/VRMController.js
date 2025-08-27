@@ -102,7 +102,11 @@ export class VRMController extends EventEmitter {
         
         // Create scene
         this.three.scene = new THREE.Scene();
-        this.three.scene.background = new THREE.Color(0x0a0e17);
+        // Change background to a lighter color to see dark models
+        this.three.scene.background = new THREE.Color(0x1a2332); // Slightly lighter blue-gray
+        
+        // Optional: Add fog for depth
+        this.three.scene.fog = new THREE.Fog(0x1a2332, 5, 15);
         
         // Create camera - PROPER FRAMING FOR STANDARD VRM
         this.three.camera = new THREE.PerspectiveCamera(
@@ -129,14 +133,35 @@ export class VRMController extends EventEmitter {
         this.three.renderer.setSize(window.innerWidth, window.innerHeight);
         this.three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.three.renderer.toneMappingExposure = 1.2; // Slightly brighter
         
-        // Add lights
-        const directionalLight = new THREE.DirectionalLight(0xffffff, Math.PI);
-        directionalLight.position.set(1, 1, 1);
+        // Ensure canvas is visible
+        canvas.style.display = 'block';
+        canvas.style.position = 'absolute';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        
+        // Add lights - ENHANCED LIGHTING FOR BETTER VISIBILITY
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0); // Increased intensity
+        directionalLight.position.set(1, 2, 2);
+        directionalLight.castShadow = false; // Disable shadows for performance
         this.three.scene.add(directionalLight);
         
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        // Add fill light from the opposite side
+        const fillLight = new THREE.DirectionalLight(0x88aaff, 0.8);
+        fillLight.position.set(-1, 1, -1);
+        this.three.scene.add(fillLight);
+        
+        // Ambient light for overall brightness
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Increased intensity
         this.three.scene.add(ambientLight);
+        
+        // Add a point light near the face for better visibility
+        const pointLight = new THREE.PointLight(0xffffff, 1, 5);
+        pointLight.position.set(0, 1.5, 2);
+        this.three.scene.add(pointLight);
         
         // Initialize clock
         this.three.clock = new THREE.Clock();
@@ -801,6 +826,72 @@ export class VRMController extends EventEmitter {
         this.three.camera.lookAt(0, lookY, 0);
         
         console.log(`Camera adjusted to: pos(${x}, ${y}, ${z}) looking at (0, ${lookY}, 0)`);
+    }
+    
+    // Debug method to check rendering
+    debugVisibility() {
+        if (!this.three.vrm || !this.three.scene) {
+            console.log('No VRM or scene loaded');
+            return;
+        }
+        
+        console.log('🔍 Visibility Debug:');
+        console.log('Canvas element:', document.getElementById('vrmCanvas'));
+        console.log('Canvas size:', {
+            width: this.three.renderer?.domElement.width,
+            height: this.three.renderer?.domElement.height
+        });
+        console.log('Renderer size:', this.three.renderer?.getSize(new (window.THREE?.Vector2 || Object)()));
+        console.log('Scene children:', this.three.scene.children.length);
+        console.log('VRM visible:', this.three.vrm.scene.visible);
+        console.log('Scene background:', this.three.scene.background);
+        
+        // Check if canvas is actually visible on page
+        const canvas = document.getElementById('vrmCanvas');
+        if (canvas) {
+            const rect = canvas.getBoundingClientRect();
+            console.log('Canvas position on page:', rect);
+            console.log('Canvas computed style:', {
+                display: getComputedStyle(canvas).display,
+                visibility: getComputedStyle(canvas).visibility,
+                opacity: getComputedStyle(canvas).opacity,
+                zIndex: getComputedStyle(canvas).zIndex
+            });
+        }
+        
+        // Try to make VRM more visible
+        if (this.three.vrm?.scene) {
+            // Check materials
+            this.three.vrm.scene.traverse((child) => {
+                if (child.isMesh) {
+                    console.log('Mesh found:', child.name, 'visible:', child.visible);
+                    if (child.material) {
+                        console.log('Material:', child.material.type, 'opacity:', child.material.opacity);
+                    }
+                }
+            });
+        }
+    }
+    
+    // Method to cycle backgrounds for testing
+    cycleBackground() {
+        if (!this.three.scene) return;
+        
+        const colors = [
+            0x1a2332, // Dark blue-gray
+            0x2a3342, // Medium blue-gray  
+            0x3a4352, // Lighter blue-gray
+            0x4a5362, // Even lighter
+            0x888888, // Medium gray
+            0xaaaaaa  // Light gray
+        ];
+        
+        const currentColor = this.three.scene.background.getHex();
+        const currentIndex = colors.indexOf(currentColor);
+        const nextIndex = (currentIndex + 1) % colors.length;
+        
+        this.three.scene.background = new (window.THREE.Color)(colors[nextIndex]);
+        console.log(`Background changed to: #${colors[nextIndex].toString(16).padStart(6, '0')}`);
     }
     
     updateHeadTarget(x, y) {
