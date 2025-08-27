@@ -58,6 +58,7 @@ export class SolmateApp extends EventEmitter {
             
             // Initialize AudioManager
             this.components.audioManager = new AudioManager();
+            await this.components.audioManager.init();
             console.log('✅ AudioManager initialized');
             
             // Initialize VRMController with error handling
