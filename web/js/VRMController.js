@@ -97,7 +97,7 @@ export class VRMController extends EventEmitter {
     }
     
     async initializeScene() {
-        // Import Three.js dynamically
+        // Import Three.js using the import map
         const THREE = await import('three');
         
         // Create scene
@@ -155,9 +155,12 @@ export class VRMController extends EventEmitter {
         if (loadingEl) loadingEl.style.display = 'block';
         
         try {
-            // Import VRM loader
+            // Import loaders using the import map
             const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
             const { VRMLoaderPlugin, VRMUtils } = await import('@pixiv/three-vrm');
+            
+            // Store VRMUtils for cleanup
+            this.VRMUtils = VRMUtils;
             
             const loader = new GLTFLoader();
             loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -191,6 +194,7 @@ export class VRMController extends EventEmitter {
             if (loadingEl) loadingEl.style.display = 'none';
             
         } catch (error) {
+            console.error('VRM loading error:', error);
             if (loadingEl) loadingEl.style.display = 'none';
             throw error;
         }
@@ -223,8 +227,9 @@ export class VRMController extends EventEmitter {
         // Remove existing VRM if present
         if (this.three.vrm) {
             this.three.scene.remove(this.three.vrm.scene);
-            const { VRMUtils } = await import('@pixiv/three-vrm');
-            VRMUtils.deepDispose(this.three.vrm.scene);
+            if (this.VRMUtils) {
+                this.VRMUtils.deepDispose(this.three.vrm.scene);
+            }
         }
         
         this.three.vrm = vrm;
