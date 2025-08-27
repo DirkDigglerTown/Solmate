@@ -462,19 +462,45 @@ export class SolmateApp extends EventEmitter {
     
     scheduleWelcomeMessage() {
         setTimeout(() => {
-            // Safety checks before calling methods
+            // Queue the welcome message - will play after user interaction due to Chrome autoplay policy
             if (this.components.audioManager && typeof this.components.audioManager.queue === 'function') {
                 this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
-                console.log('🎙️ Welcome message queued');
-            } else {
-                console.warn('AudioManager not ready - skipping welcome audio');
+                console.log('🎙️ Welcome message queued (waiting for user click to play audio)');
+                
+                // Show notification to user about clicking for audio
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 80px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: linear-gradient(135deg, #00f0ff, #00ff88);
+                    color: #001014;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    z-index: 10000;
+                    animation: pulse 2s infinite;
+                `;
+                notification.textContent = '🔊 Click anywhere to enable audio';
+                document.body.appendChild(notification);
+                
+                // Remove notification on click
+                const removeNotification = () => {
+                    notification.remove();
+                    document.removeEventListener('click', removeNotification);
+                };
+                document.addEventListener('click', removeNotification);
+                
+                // Auto-remove after 10 seconds
+                setTimeout(() => notification.remove(), 10000);
             }
             
+            // Wave animation can play immediately
             setTimeout(() => {
                 if (this.components.vrmController && typeof this.components.vrmController.playWave === 'function') {
                     this.components.vrmController.playWave();
-                } else {
-                    console.warn('VRMController not ready - skipping wave animation');
                 }
             }, 1000);
         }, 2000);
