@@ -899,3 +899,47 @@ export class VRMController extends EventEmitter {
         
         // Stop animations
         this.animation.isWaving = false;
+        this.animation.isTalking = false;
+        this.animation.isNodding = false;
+        this.animation.isThinking = false;
+        this.animation.isExcited = false;
+        
+        // Dispose VRM
+        if (this.vrm.current) {
+            this.three.scene.remove(this.vrm.current.scene);
+            if (this.state.modules.VRMUtils) {
+                this.state.modules.VRMUtils.deepDispose(this.vrm.current.scene);
+            }
+        }
+        
+        // Dispose fallback
+        if (this.vrm.fallback) {
+            this.three.scene.remove(this.vrm.fallback);
+        }
+        
+        // Dispose renderer
+        if (this.three.renderer) {
+            this.three.renderer.dispose();
+        }
+        
+        // Remove lights
+        this.three.lights.forEach(light => {
+            this.three.scene.remove(light);
+        });
+        
+        // Clear references
+        this.vrm.current = null;
+        this.vrm.fallback = null;
+        this.three.scene = null;
+        this.three.camera = null;
+        this.three.renderer = null;
+        this.three.clock = null;
+        this.three.lights = [];
+        
+        // Remove event listeners
+        this.removeAllListeners();
+        
+        this.state.initialized = false;
+        this.emit('destroyed');
+    }
+}
