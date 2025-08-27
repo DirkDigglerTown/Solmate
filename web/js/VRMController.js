@@ -324,52 +324,57 @@ export class VRMController extends EventEmitter {
     setupNaturalPose(vrm) {
         if (!vrm.humanoid) return;
         
-        // Get arm bones
-        const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
-        const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
-        const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
-        const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
-        
-        // Reset all rotations to zero first to see default pose
-        if (leftUpperArm) {
-            leftUpperArm.rotation.set(0, 0, 0);
-        }
-        if (leftLowerArm) {
-            leftLowerArm.rotation.set(0, 0, 0);
-        }
-        if (rightUpperArm) {
-            rightUpperArm.rotation.set(0, 0, 0);
-        }
-        if (rightLowerArm) {
-            rightLowerArm.rotation.set(0, 0, 0);
-        }
-        
-        // For VRMs in T-pose, we need to rotate arms DOWN
-        // Most VRM files have arms horizontal by default
-        if (leftUpperArm) {
-            leftUpperArm.rotation.z = Math.PI / 3; // 60 degrees down from horizontal
-        }
-        if (rightUpperArm) {
-            rightUpperArm.rotation.z = -Math.PI / 3; // -60 degrees for right arm
-        }
-        
-        // Add slight elbow bend for natural look
-        if (leftLowerArm) {
-            leftLowerArm.rotation.y = -0.1; // Slight inward bend
-        }
-        if (rightLowerArm) {
-            rightLowerArm.rotation.y = 0.1; // Slight inward bend
-        }
-        
-        // Save rest positions for returning after animations
-        this.animation.armRestPosition = {
-            leftUpper: leftUpperArm ? leftUpperArm.rotation.clone() : null,
-            leftLower: leftLowerArm ? leftLowerArm.rotation.clone() : null,
-            rightUpper: rightUpperArm ? rightUpperArm.rotation.clone() : null,
-            rightLower: rightLowerArm ? rightLowerArm.rotation.clone() : null
+        // Get all bones we'll need
+        const bones = {
+            leftUpperArm: vrm.humanoid.getNormalizedBoneNode('leftUpperArm'),
+            leftLowerArm: vrm.humanoid.getNormalizedBoneNode('leftLowerArm'),
+            rightUpperArm: vrm.humanoid.getNormalizedBoneNode('rightUpperArm'),
+            rightLowerArm: vrm.humanoid.getNormalizedBoneNode('rightLowerArm'),
+            spine: vrm.humanoid.getNormalizedBoneNode('spine'),
+            chest: vrm.humanoid.getNormalizedBoneNode('chest'),
+            neck: vrm.humanoid.getNormalizedBoneNode('neck'),
+            head: vrm.humanoid.getNormalizedBoneNode('head')
         };
         
-        console.log('✅ Natural rest pose set - arms lowered from T-pose');
+        // AIRI-style: Arms down at 45-50 degree angle from horizontal
+        // This creates a relaxed, natural stance
+        if (bones.leftUpperArm) {
+            bones.leftUpperArm.rotation.z = Math.PI * 0.28; // ~50 degrees
+        }
+        if (bones.rightUpperArm) {
+            bones.rightUpperArm.rotation.z = -Math.PI * 0.28; // Mirror for right
+        }
+        
+        // Slight forward shoulder rotation for more natural pose
+        if (bones.leftUpperArm) {
+            bones.leftUpperArm.rotation.x = 0.05;
+        }
+        if (bones.rightUpperArm) {
+            bones.rightUpperArm.rotation.x = 0.05;
+        }
+        
+        // Natural elbow bend
+        if (bones.leftLowerArm) {
+            bones.leftLowerArm.rotation.y = -0.15;
+        }
+        if (bones.rightLowerArm) {
+            bones.rightLowerArm.rotation.y = 0.15;
+        }
+        
+        // Slight spine curve for natural posture
+        if (bones.spine) {
+            bones.spine.rotation.x = 0.02;
+        }
+        
+        // Save rest positions
+        this.animation.armRestPosition = {
+            leftUpper: bones.leftUpperArm ? bones.leftUpperArm.rotation.clone() : null,
+            leftLower: bones.leftLowerArm ? bones.leftLowerArm.rotation.clone() : null,
+            rightUpper: bones.rightUpperArm ? bones.rightUpperArm.rotation.clone() : null,
+            rightLower: bones.rightLowerArm ? bones.rightLowerArm.rotation.clone() : null
+        };
+        
+        console.log('✅ AIRI-style natural rest pose set');
     }
     
     setupExpressions(vrm) {
@@ -428,36 +433,54 @@ export class VRMController extends EventEmitter {
     updateBreathing(time) {
         if (!this.three.vrm || !this.three.vrm.humanoid) return;
         
-        // AIRI-style subtle breathing - barely noticeable but adds life
-        const breathingIntensity = 0.008; // Very subtle - only 0.8% variation
-        const breathingSpeed = 3.0; // Slower, more relaxed breathing
+        // AIRI-style natural breathing with body sway
+        const breathPhase = time * 2.4; // Natural breathing rate
+        const breath = Math.sin(breathPhase);
+        const breathDeep = Math.sin(breathPhase * 0.5); // Occasional deeper breaths
         
+        // Get bones
         const chest = this.three.vrm.humanoid.getNormalizedBoneNode('chest');
         const spine = this.three.vrm.humanoid.getNormalizedBoneNode('spine');
+        const upperChest = this.three.vrm.humanoid.getNormalizedBoneNode('upperChest');
+        const hips = this.three.vrm.humanoid.getNormalizedBoneNode('hips');
         
+        // Chest breathing - very subtle expansion
         if (chest) {
-            // Subtle chest expansion
-            const breathScale = 1 + Math.sin(time * breathingSpeed) * breathingIntensity;
-            chest.scale.y = breathScale;
-            
-            // Very slight forward/back movement
-            chest.rotation.x = Math.sin(time * breathingSpeed) * 0.005;
+            chest.scale.y = 1 + breath * 0.006 + breathDeep * 0.003;
+            chest.scale.x = 1 + breath * 0.004; // Slight width change
+            chest.rotation.x = breath * 0.003; // Tiny forward/back tilt
         }
         
+        // Upper chest follows with slight delay
+        if (upperChest) {
+            upperChest.rotation.x = Math.sin(breathPhase - 0.2) * 0.002;
+        }
+        
+        // Spine movement for natural posture shifts
         if (spine) {
-            // Slight spine movement for more natural breathing
-            spine.rotation.x = Math.sin(time * breathingSpeed + 0.5) * 0.003;
+            spine.rotation.x = breathDeep * 0.002;
+            spine.rotation.z = Math.sin(time * 0.3) * 0.001; // Very slow sway
         }
         
-        // Subtle shoulder movement during breathing
+        // AIRI signature: Subtle weight shifting (body sway)
+        if (hips) {
+            // Gentle figure-8 hip movement - barely visible but adds life
+            hips.position.x = Math.sin(time * 0.4) * 0.003;
+            hips.position.z = Math.cos(time * 0.4 * 2) * 0.002;
+            hips.rotation.y = Math.sin(time * 0.3) * 0.002;
+        }
+        
+        // Shoulder breathing
         const leftShoulder = this.three.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
         const rightShoulder = this.three.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
         
         if (leftShoulder) {
-            leftShoulder.rotation.y = Math.sin(time * breathingSpeed) * 0.005;
+            leftShoulder.rotation.z = breath * 0.002;
+            leftShoulder.rotation.x = breathDeep * 0.001;
         }
         if (rightShoulder) {
-            rightShoulder.rotation.y = Math.sin(time * breathingSpeed) * -0.005;
+            rightShoulder.rotation.z = -breath * 0.002;
+            rightShoulder.rotation.x = breathDeep * 0.001;
         }
     }
     
@@ -482,18 +505,46 @@ export class VRMController extends EventEmitter {
         if (!this.three.vrm || !this.three.vrm.humanoid) return;
         
         const head = this.three.vrm.humanoid.getNormalizedBoneNode('head');
+        const neck = this.three.vrm.humanoid.getNormalizedBoneNode('neck');
+        
         if (!head) return;
         
-        // Smooth head movement towards target
-        const lerpSpeed = 3.0;
-        head.rotation.x += (this.animation.headTarget.x - head.rotation.x) * lerpSpeed * deltaTime;
-        head.rotation.y += (this.animation.headTarget.y - head.rotation.y) * lerpSpeed * deltaTime;
+        const time = this.three.clock.getElapsedTime();
         
-        // Add subtle idle movement
-        if (!this.state.isTalking && !this.state.isAnimating) {
-            const time = this.three.clock.getElapsedTime();
-            head.rotation.x += Math.sin(time * 0.8) * 0.01;
-            head.rotation.y += Math.sin(time * 0.6) * 0.015;
+        // AIRI-style subtle idle movements
+        // Slow, natural head movements that make the character feel alive
+        
+        // Base idle animation - very subtle figure-8 pattern
+        const idleX = Math.sin(time * 0.5) * 0.02 + Math.sin(time * 1.3) * 0.01;
+        const idleY = Math.cos(time * 0.7) * 0.025 + Math.cos(time * 1.7) * 0.01;
+        
+        // Occasional micro-movements (small random adjustments)
+        const microX = Math.sin(time * 3.2) * 0.005;
+        const microY = Math.cos(time * 2.8) * 0.005;
+        
+        // Smooth interpolation towards target (mouse follow or idle)
+        const lerpSpeed = 2.0;
+        const targetX = this.animation.headTarget.x * 0.15 + idleX + microX;
+        const targetY = this.animation.headTarget.y * 0.2 + idleY + microY;
+        
+        head.rotation.x += (targetX - head.rotation.x) * lerpSpeed * deltaTime;
+        head.rotation.y += (targetY - head.rotation.y) * lerpSpeed * deltaTime;
+        
+        // Subtle neck movement (follows head with delay)
+        if (neck) {
+            neck.rotation.x = head.rotation.x * 0.3;
+            neck.rotation.y = head.rotation.y * 0.3;
+        }
+        
+        // AIRI-style occasional blink and micro-expressions
+        if (this.three.vrm.expressionManager) {
+            // Subtle expression changes during idle
+            const expressionTime = time * 0.3;
+            const subtleSmile = (Math.sin(expressionTime) + 1) * 0.05; // 0-10% smile
+            
+            try {
+                this.three.vrm.expressionManager.setValue('happy', subtleSmile);
+            } catch (e) {}
         }
     }
     
@@ -536,83 +587,94 @@ export class VRMController extends EventEmitter {
         if (!this.three.vrm || !this.three.vrm.humanoid) return;
         if (this.state.isAnimating) return;
         
-        console.log('👋 Playing natural wave animation');
+        console.log('👋 Playing AIRI-style wave animation');
         this.state.isAnimating = true;
         
-        const rightUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
-        const rightLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
-        const rightHand = this.three.vrm.humanoid.getNormalizedBoneNode('rightHand');
+        const bones = {
+            rightUpperArm: this.three.vrm.humanoid.getNormalizedBoneNode('rightUpperArm'),
+            rightLowerArm: this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm'),
+            rightHand: this.three.vrm.humanoid.getNormalizedBoneNode('rightHand')
+        };
         
-        if (!rightUpperArm) {
+        if (!bones.rightUpperArm) {
             this.state.isAnimating = false;
             return;
         }
         
-        // Store initial rotation
-        const initialUpperRotation = rightUpperArm.rotation.clone();
-        const initialLowerRotation = rightLowerArm ? rightLowerArm.rotation.clone() : null;
+        // Store initial positions
+        const initial = {
+            upperArm: bones.rightUpperArm.rotation.clone(),
+            lowerArm: bones.rightLowerArm ? bones.rightLowerArm.rotation.clone() : null,
+            hand: bones.rightHand ? bones.rightHand.rotation.clone() : null
+        };
         
-        // Friendly wave - raise right arm and wave hand
+        // AIRI-style wave: smooth, friendly, natural
         this.animation.currentGesture = {
             type: 'wave',
-            duration: 3.0,
+            duration: 2.8,
             elapsed: 0,
             update: (progress) => {
-                if (progress < 0.2) {
-                    // Raise arm up and forward
-                    const p = progress / 0.2;
-                    const easeP = p * p * (3 - 2 * p); // Smooth easing
+                // Easing function for smooth motion
+                const easeInOut = (t) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                
+                if (progress < 0.25) {
+                    // Smoothly raise arm
+                    const p = easeInOut(progress / 0.25);
                     
-                    // From rest position, rotate up
-                    rightUpperArm.rotation.z = -Math.PI/3 + (Math.PI/3 + Math.PI/6) * easeP; // Raise up
-                    rightUpperArm.rotation.x = -Math.PI/4 * easeP; // Forward
+                    // Rotate from rest position to wave position
+                    bones.rightUpperArm.rotation.z = -Math.PI * 0.28 + Math.PI * 0.38 * p; // Up to ~30 degrees above horizontal
+                    bones.rightUpperArm.rotation.x = 0.05 - 0.4 * p; // Forward
+                    bones.rightUpperArm.rotation.y = -0.2 * p; // Slight outward
                     
-                    if (rightLowerArm) {
-                        rightLowerArm.rotation.y = 0.1 - 0.5 * easeP; // Bend elbow more
+                    if (bones.rightLowerArm) {
+                        bones.rightLowerArm.rotation.y = 0.15 - 0.8 * p; // Bend elbow
+                        bones.rightLowerArm.rotation.z = -0.1 * p;
                     }
-                } else if (progress < 0.7) {
-                    // Wave the hand
-                    const p = (progress - 0.2) / 0.5;
-                    const wave = Math.sin(p * Math.PI * 3); // 3 waves
+                } else if (progress < 0.75) {
+                    // Wave motion
+                    const p = (progress - 0.25) / 0.5;
+                    const wave = Math.sin(p * Math.PI * 2.5) * 0.3; // 2.5 waves
                     
-                    rightUpperArm.rotation.z = Math.PI/6; // Keep raised
-                    rightUpperArm.rotation.x = -Math.PI/4;
+                    bones.rightUpperArm.rotation.z = Math.PI * 0.1; // Hold up
+                    bones.rightUpperArm.rotation.x = -0.35;
+                    bones.rightUpperArm.rotation.y = -0.2;
                     
-                    if (rightLowerArm) {
-                        rightLowerArm.rotation.y = -0.4;
+                    if (bones.rightLowerArm) {
+                        bones.rightLowerArm.rotation.y = -0.65 + wave * 0.15; // Wave with forearm
+                        bones.rightLowerArm.rotation.z = -0.1;
                     }
                     
-                    if (rightHand) {
-                        rightHand.rotation.z = wave * 0.5; // Wave hand side to side
-                        rightHand.rotation.x = wave * 0.2; // Slight up/down
+                    if (bones.rightHand) {
+                        bones.rightHand.rotation.z = wave; // Hand waves side to side
+                        bones.rightHand.rotation.x = wave * 0.3; // Slight up/down
                     }
                 } else {
-                    // Lower arm back to rest
-                    const p = (progress - 0.7) / 0.3;
-                    const easeP = p * p * (3 - 2 * p);
+                    // Smoothly lower arm
+                    const p = easeInOut((progress - 0.75) / 0.25);
                     
-                    // Smoothly return to initial position
-                    rightUpperArm.rotation.z = Math.PI/6 - (Math.PI/6 + Math.PI/3) * easeP;
-                    rightUpperArm.rotation.x = -Math.PI/4 * (1 - easeP);
+                    bones.rightUpperArm.rotation.z = Math.PI * 0.1 - Math.PI * 0.38 * p;
+                    bones.rightUpperArm.rotation.x = -0.35 + 0.4 * p;
+                    bones.rightUpperArm.rotation.y = -0.2 + 0.2 * p;
                     
-                    if (rightLowerArm) {
-                        rightLowerArm.rotation.y = -0.4 + 0.5 * easeP;
+                    if (bones.rightLowerArm) {
+                        bones.rightLowerArm.rotation.y = -0.65 + 0.8 * p;
+                        bones.rightLowerArm.rotation.z = -0.1 + 0.1 * p;
                     }
                     
-                    if (rightHand) {
-                        rightHand.rotation.z = 0;
-                        rightHand.rotation.x = 0;
+                    if (bones.rightHand) {
+                        bones.rightHand.rotation.z = 0;
+                        bones.rightHand.rotation.x = 0;
                     }
                 }
             },
             onComplete: () => {
-                // Ensure we return to exact initial position
-                rightUpperArm.rotation.copy(initialUpperRotation);
-                if (rightLowerArm && initialLowerRotation) {
-                    rightLowerArm.rotation.copy(initialLowerRotation);
+                // Return to exact initial positions
+                bones.rightUpperArm.rotation.copy(initial.upperArm);
+                if (bones.rightLowerArm && initial.lowerArm) {
+                    bones.rightLowerArm.rotation.copy(initial.lowerArm);
                 }
-                if (rightHand) {
-                    rightHand.rotation.set(0, 0, 0);
+                if (bones.rightHand && initial.hand) {
+                    bones.rightHand.rotation.copy(initial.hand);
                 }
             }
         };
