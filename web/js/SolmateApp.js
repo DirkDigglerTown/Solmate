@@ -1,5 +1,5 @@
 // web/js/SolmateApp.js
-// Fixed main application class with proper VRM integration
+// Fixed main application class based on working version
 
 import { EventEmitter } from './EventEmitter.js';
 import { VRMController } from './VRMController.js';
@@ -58,10 +58,9 @@ export class SolmateApp extends EventEmitter {
             
             // Initialize AudioManager
             this.components.audioManager = new AudioManager();
-            await this.components.audioManager.init();
             console.log('✅ AudioManager initialized');
             
-            // Initialize VRMController with better error handling
+            // Initialize VRMController with error handling
             try {
                 this.components.vrmController = new VRMController();
                 await this.components.vrmController.init();
@@ -660,6 +659,134 @@ export class SolmateApp extends EventEmitter {
             conversation: this.state.conversation.length,
             avatar: this.state.avatar,
             config: this.config,
-            vrmController: this.components.vrmController?.getState(),
-            audioManager: this.components.audioManager?.getStats(),
-            tim
+            vrmController: this.components.vrmController?.getState?.(),
+            audioManager: this.components.audioManager?.getStats?.(),
+            timers: Array.from(this.state.timers.keys()),
+            wsConnection: this.state.wsConnection?.readyState
+        };
+    }
+    
+    // PUBLIC API METHODS FOR DEBUGGING
+    
+    debugVRM() {
+        if (!this.components.vrmController) {
+            console.log('❌ VRM Controller not initialized');
+            return null;
+        }
+        
+        const state = this.components.vrmController.getState?.();
+        console.log('🤖 VRM Debug Report:', state);
+        return state;
+    }
+    
+    testChat() {
+        return this.sendMessage("Hello Solmate! How are you today?");
+    }
+    
+    testTTS() {
+        if (this.components.audioManager) {
+            this.components.audioManager.queue("Testing the text to speech system with animations.", 'nova');
+            return 'TTS test queued';
+        }
+        return 'AudioManager not available';
+    }
+    
+    testWave() {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.playWave?.();
+            return 'Wave animation started';
+        }
+        return 'VRM not ready';
+    }
+    
+    testNod() {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.playNod?.();
+            return 'Nod animation started';
+        }
+        return 'VRM not ready';
+    }
+    
+    testThink() {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.playThink?.();
+            return 'Think animation started';
+        }
+        return 'VRM not ready';
+    }
+    
+    testExcited() {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.playExcited?.();
+            return 'Excited animation started';
+        }
+        return 'VRM not ready';
+    }
+    
+    testExpression(expression = 'happy', intensity = 0.5) {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.setExpression?.(expression, intensity);
+            return `Expression '${expression}' set to ${intensity}`;
+        }
+        return 'VRM not ready';
+    }
+    
+    testMood(mood = 'happy') {
+        if (this.components.vrmController && this.state.avatar.ready) {
+            this.components.vrmController.setMood?.(mood);
+            return `Mood set to '${mood}'`;
+        }
+        return 'VRM not ready';
+    }
+    
+    reloadVRM() {
+        if (this.components.vrmController) {
+            this.components.vrmController.reload?.();
+            return 'VRM reload initiated';
+        }
+        return 'VRM Controller not available';
+    }
+    
+    testPrice() {
+        return this.fetchPrice();
+    }
+    
+    testTPS() {
+        return this.fetchTPS();
+    }
+    
+    // CLEANUP AND DESTRUCTION
+    
+    destroy() {
+        console.log('🧹 Destroying Solmate app...');
+        
+        // Stop all timers
+        this.state.timers.forEach((timer, name) => this.stopTimer(name));
+        
+        // Close WebSocket
+        if (this.state.wsConnection) {
+            this.state.wsConnection.close();
+        }
+        
+        // Destroy components
+        if (this.components.vrmController) {
+            this.components.vrmController.destroy?.();
+        }
+        
+        if (this.components.audioManager) {
+            this.components.audioManager.destroy?.();
+        }
+        
+        // Clear event listeners
+        this.removeAllListeners();
+        
+        // Reset state
+        this.state.initialized = false;
+        this.state.conversation = [];
+        this.state.avatar.ready = false;
+        this.state.avatar.isAnimating = false;
+        
+        this.emit('destroyed');
+        console.log('✅ Solmate app destroyed');
+    }
+}
