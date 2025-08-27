@@ -104,15 +104,17 @@ export class VRMController extends EventEmitter {
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // Create camera - PROPER POSITIONING FOR AVATAR
+        // Create camera - AIRI-STYLE CLOSER FRAMING
+        // AIRI typically uses FOV 20-25 for more intimate framing
         this.three.camera = new THREE.PerspectiveCamera(
-            35,
+            20,  // Lower FOV for less distortion and closer feel (was 35)
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        this.three.camera.position.set(0, 4.0, 5.0); // Head-on view
-        this.three.camera.lookAt(0, 4.0, 0);
+        // Closer position for upper body/bust shot like AIRI
+        this.three.camera.position.set(0, 1.5, 2.5); // Much closer, chest-level view
+        this.three.camera.lookAt(0, 1.3, 0); // Look at chest/neck area
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -227,8 +229,8 @@ export class VRMController extends EventEmitter {
         
         this.three.vrm = vrm;
         
-        // Position model - CRITICAL FOR PROPER VIEWING
-        vrm.scene.position.y = 4.0; // Above chat interface
+        // Position model - AIRI-STYLE CENTERED POSITION
+        vrm.scene.position.y = 0; // Model at origin for proper framing
         vrm.scene.rotation.y = Math.PI; // Face camera
         
         // Add to scene
