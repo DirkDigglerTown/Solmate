@@ -109,16 +109,16 @@ export class VRMController extends EventEmitter {
         // Optional: Add fog for depth
         this.three.scene.fog = new THREE.Fog(0x1a2332, 5, 15);
         
-        // Create camera - ADJUSTED FOR BETTER FRAMING
+        // Create camera - LOWERED MORE FOR PROPER CENTERING
         this.three.camera = new THREE.PerspectiveCamera(
             30,  // FOV
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        // Lower camera position to center the avatar on screen
-        this.three.camera.position.set(0, 3.2, 5.0); // Camera lowered from 4.0 to 3.2
-        this.three.camera.lookAt(0, 3.2, 0); // Look at lower point to center avatar
+        // Much lower camera position to center the avatar on screen
+        this.three.camera.position.set(0, 1.6, 5.0); // Camera at chest height
+        this.three.camera.lookAt(0, 1.4, 0); // Look at mid-torso
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -266,8 +266,8 @@ export class VRMController extends EventEmitter {
             });
         }
         
-        // Position model - LOWERED FOR BETTER CENTERING
-        vrm.scene.position.set(0, 3.2, 0); // Model lowered from 4.0 to 3.2
+        // Position model - KEEP AT ORIGIN FOR NATURAL HEIGHT
+        vrm.scene.position.set(0, 0, 0); // Model at origin (feet on ground)
         vrm.scene.rotation.y = Math.PI; // Face camera
         
         // Get actual model bounds to verify positioning
@@ -283,15 +283,19 @@ export class VRMController extends EventEmitter {
             center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
         });
         
-        // DO NOT auto-adjust camera - use the centered values
-        console.log(`📷 Camera using centered values:
-            Position: (0, 3.2, 5.0)
-            Looking at: (0, 3.2, 0)`);
+        // Properly center the avatar based on its actual dimensions
+        const avatarCenter = center.y; // Usually around 0.8 for a 1.6 unit tall model
+        const cameraHeight = avatarCenter + 0.2; // Slightly above center
+        const lookAtHeight = avatarCenter; // Look at center
         
-        // Ensure camera stays at the centered position
+        console.log(`📷 Camera auto-positioned for centering:
+            Position: (0, ${cameraHeight.toFixed(2)}, 5.0)
+            Looking at: (0, ${lookAtHeight.toFixed(2)}, 0)`);
+        
+        // Set camera to properly frame the avatar
         if (this.three.camera) {
-            this.three.camera.position.set(0, 3.2, 5.0);
-            this.three.camera.lookAt(0, 3.2, 0);
+            this.three.camera.position.set(0, cameraHeight, 5.0);
+            this.three.camera.lookAt(0, lookAtHeight, 0);
         }
         
         // Add to scene
