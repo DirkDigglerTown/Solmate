@@ -1007,6 +1007,27 @@ export class VRMController extends EventEmitter {
         console.log('👋 Acknowledged user return');
     }
     
+    // React to user input (quick acknowledgment)
+    reactToUserInput() {
+        if (!this.vrm.current?.humanoid || this.vrm.current.isFallback) return;
+        
+        // Quick acknowledgment animation
+        const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+        if (head) {
+            // Small tilt to show listening
+            const originalRotation = head.rotation.clone();
+            head.rotation.z = 0.08;
+            
+            setTimeout(() => {
+                head.rotation.copy(originalRotation);
+            }, 300);
+        }
+        
+        // Set attentive expression
+        this.setExpression('happy', 0.15, 800);
+        this.emit('animation:listening');
+    }
+    
     // Method to manually adjust model position if needed
     setModelPosition(x, y, z) {
         if (this.vrm.current && this.vrm.current.scene) {
