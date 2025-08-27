@@ -1,56 +1,61 @@
-// web/js/SolmateApp.js
-// Main application class with event-driven architecture
-// USES VRMController consistently (not VRMLoader)
+// web/js/VRMController.js
+// VRM avatar controller with AIRI-inspired natural animations
+// CRITICAL: Arms rest at 70-degree angle (1.22 radians), NOT T-pose!
 
 import { EventEmitter } from './EventEmitter.js';
-import { VRMController } from './VRMController.js';  // CORRECT: VRMController
-import { AudioManager } from './AudioManager.js';
 
-export class SolmateApp extends EventEmitter {
+export class VRMController extends EventEmitter {
     constructor() {
         super();
         
         this.config = {
-            apiEndpoints: {
-                chat: '/api/chat',
-                tts: '/api/tts',
-                price: '/api/price',
-                tps: '/api/tps',
-                config: '/api/config'
-            },
-            maxMessageLength: 500,
-            maxConversationSize: 50,
-            updateIntervals: {
-                price: 30000,
-                tps: 60000
-            }
+            vrmPaths: [
+                '/assets/avatar/solmate.vrm',
+                'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
+            ],
+            loadTimeout: 30000,
+            animationSpeed: 1.0,
+            breathingSpeed: 2.0,
+            blinkInterval: 4000
         };
         
         this.state = {
             initialized: false,
-            conversation: [],
-            wsConnection: null,
-            wsReconnectAttempts: 0,
-            timers: new Map(),
-            ui: {
-                theme: 'dark',
-                debugMode: false
-            },
-            userContext: {
-                isTyping: false,
-                lastInteraction: null,
-                relationshipLevel: 'new',
-                interactionCount: 0,
-                preferences: {},
-                conversationTone: 'friendly',
-                topics: [],
-                mood: 'neutral'
-            }
+            loaded: false,
+            isAnimating: false,
+            isTalking: false,
+            currentExpression: 'neutral',
+            currentMood: 'neutral'
         };
         
-        this.components = {
-            vrmController: null,  // CORRECT: vrmController
-            audioManager: null
+        this.three = {
+            scene: null,
+            camera: null,
+            renderer: null,
+            clock: null,
+            vrm: null,
+            mixer: null
+        };
+        
+        this.animation = {
+            breathingPhase: 0,
+            blinkTimer: 0,
+            headTarget: { x: 0, y: 0 },
+            armRestPosition: {
+                leftUpper: { x: 0, y: 0, z: 1.22 },  // 70 degrees
+                leftLower: { x: 0, y: 0, z: 0.3 },
+                rightUpper: { x: 0, y: 0, z: 1.22 }, // 70 degrees
+                rightLower: { x: 0, y: 0, z: 0.3 }
+            },
+            currentGesture: null,
+            gestureQueue: []
+        };
+        
+        // Track resources for cleanup
+        this.resources = {
+            textures: new Set(),
+            geometries: new Set(),
+            materials: new Set()
         };
     }
     
@@ -58,573 +63,735 @@ export class SolmateApp extends EventEmitter {
         try {
             this.emit('init:start');
             
-            // Load configuration
-            await this.loadConfiguration();
+            // Check WebGL support
+            if (!this.checkWebGLSupport()) {
+                throw new Error('WebGL not supported');
+            }
             
-            // Initialize components PROPERLY
-            this.components.vrmController = new VRMController();
-            this.components.audioManager = new AudioManager();
+            // Initialize Three.js scene
+            await this.initializeScene();
             
-            // CRITICAL: Enable audio context first
-            this.components.audioManager.enableContext();
+            // Load VRM model
+            await this.loadVRM();
             
-            // Setup component event listeners
-            this.setupComponentListeners();
-            
-            // Initialize UI
-            this.initializeUI();
-            
-            // Start data connections
-            await this.initializeDataConnections();
-            
-            // Load saved state
-            this.loadSavedState();
-            
-            // Initialize VRM Controller
-            await this.components.vrmController.init();
+            // Start animation loop
+            this.animate();
             
             this.state.initialized = true;
             this.emit('init:complete');
             
-            // Welcome message - with safety check
-            this.scheduleWelcomeMessage();
+        } catch (error) {
+            this.emit('error', error);
+            this.createFallbackAvatar();
+        }
+    }
+    
+    checkWebGLSupport() {
+        try {
+            const canvas = document.createElement('canvas');
+            return !!(window.WebGLRenderingContext && 
+                (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+        } catch(e) {
+            return false;
+        }
+    }
+    
+    async initializeScene() {
+        // Import Three.js dynamically
+        const THREE = await import('three');
+        
+        // Create scene
+        this.three.scene = new THREE.Scene();
+        this.three.scene.background = new THREE.Color(0x0a0e17);
+        
+        // Create camera - PROPER POSITIONING FOR AVATAR
+        this.three.camera = new THREE.PerspectiveCamera(
+            35,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            20
+        );
+        this.three.camera.position.set(0, 4.0, 5.0); // Head-on view
+        this.three.camera.lookAt(0, 4.0, 0);
+        
+        // Create renderer
+        const canvas = document.getElementById('vrmCanvas');
+        if (!canvas) {
+            throw new Error('Canvas element not found');
+        }
+        
+        this.three.renderer = new THREE.WebGLRenderer({
+            canvas,
+            antialias: true,
+            alpha: false
+        });
+        this.three.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        
+        // Add lights
+        const directionalLight = new THREE.DirectionalLight(0xffffff, Math.PI);
+        directionalLight.position.set(1, 1, 1);
+        this.three.scene.add(directionalLight);
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        this.three.scene.add(ambientLight);
+        
+        // Initialize clock
+        this.three.clock = new THREE.Clock();
+        
+        // Handle window resize
+        window.addEventListener('resize', this.handleResize.bind(this));
+        
+        this.emit('scene:ready');
+    }
+    
+    async loadVRM() {
+        this.emit('load:start');
+        
+        const loadingEl = document.getElementById('loadingStatus');
+        if (loadingEl) loadingEl.style.display = 'block';
+        
+        try {
+            // Import VRM loader
+            const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+            const { VRMLoaderPlugin, VRMUtils } = await import('@pixiv/three-vrm');
+            
+            const loader = new GLTFLoader();
+            loader.register((parser) => new VRMLoaderPlugin(parser));
+            
+            let loaded = false;
+            
+            for (const url of this.config.vrmPaths) {
+                if (loaded) break;
+                
+                console.log('Attempting to load VRM from:', url);
+                
+                try {
+                    const gltf = await this.loadWithTimeout(loader, url);
+                    const vrm = gltf.userData.vrm;
+                    
+                    if (vrm) {
+                        // Setup VRM
+                        await this.setupVRM(vrm);
+                        loaded = true;
+                        console.log('✅ VRM loaded successfully from:', url);
+                    }
+                } catch (error) {
+                    console.warn('Failed to load from', url, error);
+                }
+            }
+            
+            if (!loaded) {
+                throw new Error('Failed to load VRM from all sources');
+            }
+            
+            if (loadingEl) loadingEl.style.display = 'none';
             
         } catch (error) {
-            this.emit('error', { context: 'initialization', error });
+            if (loadingEl) loadingEl.style.display = 'none';
             throw error;
         }
     }
     
-    async loadConfiguration() {
-        try {
-            const response = await fetch(this.config.apiEndpoints.config);
-            if (!response.ok) {
-                throw new Error(`Config loading failed: ${response.status}`);
-            }
+    loadWithTimeout(loader, url) {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Load timeout'));
+            }, this.config.loadTimeout);
             
-            const serverConfig = await response.json();
-            this.config = { ...this.config, ...serverConfig };
-            this.emit('config:loaded', this.config);
-            
-        } catch (error) {
-            console.warn('Using default configuration:', error);
-            this.emit('config:default');
-        }
-    }
-    
-    setupComponentListeners() {
-        // VRM Controller events (CORRECTED)
-        this.components.vrmController.on('load:start', () => {
-            this.updateLoadingStatus('Loading avatar...');
-        });
-        
-        this.components.vrmController.on('load:complete', (vrm) => {
-            this.updateLoadingStatus('');
-            this.emit('vrm:loaded', vrm);
-        });
-        
-        this.components.vrmController.on('error', (error) => {
-            this.emit('error', { context: 'vrm', error });
-        });
-        
-        // Audio Manager events
-        this.components.audioManager.on('play:start', (item) => {
-            this.emit('speech:start', item);
-            this.components.vrmController.startSpeechAnimation(item.text);  // CORRECT
-        });
-        
-        this.components.audioManager.on('play:end', () => {
-            this.emit('speech:end');
-            this.components.vrmController.stopSpeechAnimation();  // CORRECT
-        });
-        
-        this.components.audioManager.on('error', (error) => {
-            this.emit('error', { context: 'audio', error });
-        });
-    }
-    
-    initializeUI() {
-        // Theme toggle
-        this.bindElement('#themeToggle', 'click', () => this.toggleTheme());
-        
-        // Chat form
-        this.bindElement('#chatForm', 'submit', (e) => this.handleChatSubmit(e));
-        
-        // Clear audio
-        this.bindElement('#clearBtn', 'click', () => this.components.audioManager.clear());
-        
-        // Debug toggle
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && e.key === 'd') {
-                e.preventDefault();
-                this.toggleDebugMode();
-            }
-        });
-        
-        // Mouse tracking for animations
-        document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        
-        // Audio enable on interaction
-        ['click', 'keydown'].forEach(event => {
-            document.addEventListener(event, () => this.enableAudioContext(), { once: true });
-        });
-    }
-    
-    bindElement(selector, event, handler) {
-        const element = document.querySelector(selector);
-        if (element) {
-            element.addEventListener(event, handler.bind(this));
-        }
-    }
-    
-    async initializeDataConnections() {
-        // WebSocket
-        if (this.config.wsUrl) {
-            this.connectWebSocket();
-        }
-        
-        // Initial data fetch
-        await Promise.all([
-            this.fetchPrice(),
-            this.fetchTPS()
-        ]);
-        
-        // Setup periodic updates
-        this.startTimer('price', () => this.fetchPrice(), this.config.updateIntervals.price);
-        this.startTimer('tps', () => this.fetchTPS(), this.config.updateIntervals.tps);
-    }
-    
-    connectWebSocket() {
-        if (this.state.wsConnection) {
-            this.state.wsConnection.close();
-        }
-        
-        try {
-            this.state.wsConnection = new WebSocket(this.config.wsUrl);
-            
-            this.state.wsConnection.onopen = () => {
-                this.state.wsReconnectAttempts = 0;
-                this.updateElement('#wsLight', 'WS ON', { color: '#00ff88' });
-                this.emit('ws:connected');
-            };
-            
-            this.state.wsConnection.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('WebSocket message parse error:', error);
+            loader.load(
+                url,
+                (gltf) => {
+                    clearTimeout(timeout);
+                    resolve(gltf);
+                },
+                (progress) => {
+                    // Progress callback
+                },
+                (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
                 }
-            };
-            
-            this.state.wsConnection.onclose = () => {
-                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b' });
-                this.scheduleWebSocketReconnect();
-                this.emit('ws:disconnected');
-            };
-            
-            this.state.wsConnection.onerror = (error) => {
-                this.emit('error', { context: 'websocket', error });
-            };
-            
-        } catch (error) {
-            this.emit('error', { context: 'websocket:connect', error });
-        }
+            );
+        });
     }
     
-    scheduleWebSocketReconnect() {
-        const delay = Math.min(5000 * Math.pow(2, this.state.wsReconnectAttempts), 60000);
-        this.state.wsReconnectAttempts++;
+    async setupVRM(vrm) {
+        // Remove existing VRM if present
+        if (this.three.vrm) {
+            this.three.scene.remove(this.three.vrm.scene);
+            const { VRMUtils } = await import('@pixiv/three-vrm');
+            VRMUtils.deepDispose(this.three.vrm.scene);
+        }
         
-        this.startTimer('wsReconnect', () => this.connectWebSocket(), delay, false);
-    }
-    
-    handleWebSocketMessage(data) {
-        if (data.tps) {
-            this.updateTPS(data.tps);
+        this.three.vrm = vrm;
+        
+        // Position model - CRITICAL FOR PROPER VIEWING
+        vrm.scene.position.y = 4.0; // Above chat interface
+        vrm.scene.rotation.y = Math.PI; // Face camera
+        
+        // Add to scene
+        this.three.scene.add(vrm.scene);
+        
+        // Setup natural rest pose (AIRI-style)
+        this.setupNaturalPose(vrm);
+        
+        // Setup look-at if available
+        if (vrm.lookAt) {
+            vrm.lookAt.target = this.three.camera;
         }
-        this.emit('ws:message', data);
+        
+        // Setup expressions if available
+        if (vrm.expressionManager) {
+            this.setupExpressions(vrm);
+        }
+        
+        this.state.loaded = true;
+        this.emit('load:complete', vrm);
+        
+        // Play opening sequence after short delay
+        setTimeout(() => this.playOpeningSequence(), 1000);
     }
     
-    async fetchPrice() {
-        try {
-            const response = await fetch(`${this.config.apiEndpoints.price}?ids=So11111111111111111111111111111111111111112`);
-            if (!response.ok) throw new Error(`Price fetch failed: ${response.status}`);
-            
-            const data = await response.json();
-            const solMint = 'So11111111111111111111111111111111111111112';
-            const price = data[solMint]?.usdPrice || data[solMint]?.price;
-            
-            if (price) {
-                this.updateElement('#solPrice', `SOL — $${price.toFixed(2)}`, { color: '#00ff88' });
-                this.emit('price:updated', price);
+    setupNaturalPose(vrm) {
+        if (!vrm.humanoid) return;
+        
+        // CRITICAL: Set arms to natural rest position (70 degrees down)
+        // This matches AIRI's natural human-like pose
+        
+        const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+        const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+        const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+        const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+        
+        if (leftUpperArm) {
+            leftUpperArm.rotation.z = 1.22; // 70 degrees
+        }
+        if (leftLowerArm) {
+            leftLowerArm.rotation.z = 0.3; // Slight bend
+        }
+        if (rightUpperArm) {
+            rightUpperArm.rotation.z = 1.22; // 70 degrees
+        }
+        if (rightLowerArm) {
+            rightLowerArm.rotation.z = 0.3; // Slight bend
+        }
+        
+        // Save rest positions for returning after animations
+        this.animation.armRestPosition = {
+            leftUpper: leftUpperArm ? leftUpperArm.rotation.clone() : null,
+            leftLower: leftLowerArm ? leftLowerArm.rotation.clone() : null,
+            rightUpper: rightUpperArm ? rightUpperArm.rotation.clone() : null,
+            rightLower: rightLowerArm ? rightLowerArm.rotation.clone() : null
+        };
+        
+        console.log('✅ Natural rest pose set - arms at 70 degrees');
+    }
+    
+    setupExpressions(vrm) {
+        // Test available expressions
+        const expressions = ['happy', 'angry', 'sad', 'surprised', 'relaxed', 'neutral'];
+        const available = [];
+        
+        expressions.forEach(expr => {
+            try {
+                vrm.expressionManager.setValue(expr, 0);
+                available.push(expr);
+            } catch (e) {
+                // Expression not available
             }
-        } catch (error) {
-            this.updateElement('#solPrice', 'SOL — Error', { color: '#ff6b6b' });
-            this.emit('error', { context: 'price', error });
-        }
+        });
+        
+        console.log('Available expressions:', available);
+        this.availableExpressions = available;
     }
     
-    async fetchTPS() {
-        try {
-            const response = await fetch(this.config.apiEndpoints.tps);
-            const data = await response.json();
+    animate() {
+        if (!this.state.initialized) return;
+        
+        requestAnimationFrame(() => this.animate());
+        
+        const deltaTime = this.three.clock.getDelta();
+        const elapsedTime = this.three.clock.getElapsedTime();
+        
+        // Update VRM
+        if (this.three.vrm) {
+            this.three.vrm.update(deltaTime);
             
-            if (data.tps) {
-                this.updateTPS(data.tps);
+            // Apply animations
+            this.updateBreathing(elapsedTime);
+            this.updateBlink(elapsedTime);
+            this.updateHeadMovement(deltaTime);
+            this.updateGestures(deltaTime);
+            
+            // Update current animation if playing
+            if (this.animation.currentGesture) {
+                this.updateCurrentGesture(deltaTime);
             }
-        } catch (error) {
-            this.emit('error', { context: 'tps', error });
+        }
+        
+        // Render scene
+        this.three.renderer.render(this.three.scene, this.three.camera);
+    }
+    
+    updateBreathing(time) {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
+        
+        // Natural breathing animation
+        const breathingIntensity = 0.025; // 2.5% scale variation
+        const breathingSpeed = this.config.breathingSpeed;
+        
+        const chest = this.three.vrm.humanoid.getNormalizedBoneNode('chest');
+        if (chest) {
+            const breathScale = 1 + Math.sin(time * breathingSpeed) * breathingIntensity;
+            chest.scale.set(1, breathScale, 1);
         }
     }
     
-    updateTPS(tps) {
-        this.updateElement('#networkTPS', `${tps} TPS`, { color: '#00ff88' });
-        this.emit('tps:updated', tps);
+    updateBlink(time) {
+        if (!this.three.vrm || !this.three.vrm.expressionManager) return;
+        if (!this.availableExpressions?.includes('blink')) return;
+        
+        // Natural blinking
+        this.animation.blinkTimer += time - (this.animation.lastTime || 0);
+        this.animation.lastTime = time;
+        
+        if (this.animation.blinkTimer > this.config.blinkInterval / 1000) {
+            this.performBlink();
+            this.animation.blinkTimer = 0;
+            
+            // Randomize next blink interval
+            this.config.blinkInterval = 3000 + Math.random() * 3000;
+        }
     }
     
-    async handleChatSubmit(event) {
-        event.preventDefault();
+    updateHeadMovement(deltaTime) {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
         
-        const input = document.querySelector('#promptInput');
-        if (!input) return;
+        const head = this.three.vrm.humanoid.getNormalizedBoneNode('head');
+        if (!head) return;
         
-        const text = input.value.trim();
-        if (!text) return;
+        // Smooth head movement towards target
+        const lerpSpeed = 3.0;
+        head.rotation.x += (this.animation.headTarget.x - head.rotation.x) * lerpSpeed * deltaTime;
+        head.rotation.y += (this.animation.headTarget.y - head.rotation.y) * lerpSpeed * deltaTime;
         
-        if (text.length > this.config.maxMessageLength) {
-            this.showError(`Message too long. Maximum ${this.config.maxMessageLength} characters.`);
+        // Add subtle idle movement
+        if (!this.state.isTalking && !this.state.isAnimating) {
+            const time = this.three.clock.getElapsedTime();
+            head.rotation.x += Math.sin(time * 0.8) * 0.01;
+            head.rotation.y += Math.sin(time * 0.6) * 0.015;
+        }
+    }
+    
+    updateGestures(deltaTime) {
+        // Process gesture queue
+        if (this.animation.gestureQueue.length > 0 && !this.animation.currentGesture) {
+            const gesture = this.animation.gestureQueue.shift();
+            this.performGesture(gesture);
+        }
+    }
+    
+    updateCurrentGesture(deltaTime) {
+        const gesture = this.animation.currentGesture;
+        if (!gesture) return;
+        
+        gesture.elapsed += deltaTime;
+        const progress = Math.min(gesture.elapsed / gesture.duration, 1);
+        
+        // Apply gesture animation
+        if (gesture.update) {
+            gesture.update(progress);
+        }
+        
+        // Complete gesture
+        if (progress >= 1) {
+            if (gesture.onComplete) {
+                gesture.onComplete();
+            }
+            this.animation.currentGesture = null;
+            this.state.isAnimating = false;
+            
+            // Return to rest pose
+            this.returnToRestPose();
+        }
+    }
+    
+    // === GESTURE SYSTEM ===
+    
+    playWave() {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
+        if (this.state.isAnimating) return;
+        
+        console.log('👋 Playing natural wave animation');
+        this.state.isAnimating = true;
+        
+        const rightUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+        const rightLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+        const rightHand = this.three.vrm.humanoid.getNormalizedBoneNode('rightHand');
+        
+        if (!rightUpperArm) {
+            this.state.isAnimating = false;
             return;
         }
         
-        input.value = '';
-        this.setButtonState('#sendBtn', true, '⏳');
-        
-        // Update user context
-        this.state.userContext.isTyping = false;
-        this.state.userContext.lastInteraction = Date.now();
-        this.state.userContext.interactionCount++;
-        
-        // React to user input (if VRM is ready)
-        if (this.components.vrmController && this.components.vrmController.state.loaded) {
-            this.components.vrmController.reactToUserInput?.();
-        }
-        
-        try {
-            await this.sendMessage(text);
-        } finally {
-            this.setButtonState('#sendBtn', false, '▶');
-        }
-    }
-    
-    async sendMessage(text) {
-        // Sanitize input
-        const sanitizedText = this.sanitizeInput(text);
-        
-        // Add to conversation
-        this.state.conversation.push({ role: 'user', content: sanitizedText });
-        
-        // Limit conversation size
-        if (this.state.conversation.length > this.config.maxConversationSize) {
-            this.state.conversation = this.state.conversation.slice(-this.config.maxConversationSize);
-        }
-        
-        try {
-            const response = await fetch(this.config.apiEndpoints.chat, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: [
-                        { role: 'system', content: this.getSystemPrompt() },
-                        ...this.state.conversation
-                    ]
-                })
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Chat request failed: ${response.status}`);
-            }
-            
-            const { content } = await response.json();
-            const sanitizedContent = this.sanitizeOutput(content);
-            
-            this.state.conversation.push({ role: 'assistant', content: sanitizedContent });
-            this.saveState();
-            
-            // Queue audio and trigger animations
-            this.components.audioManager.queue(sanitizedContent);
-            
-            // Update user relationship based on conversation
-            this.updateUserRelationship(sanitizedText, sanitizedContent);
-            
-            this.emit('message:sent', { user: sanitizedText, assistant: sanitizedContent });
-            
-        } catch (error) {
-            this.emit('error', { context: 'chat', error });
-            const errorResponse = "I'm having trouble processing that. Please try again.";
-            this.components.audioManager.queue(errorResponse);
-        }
-    }
-    
-    getSystemPrompt() {
-        const basePrompt = `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
-        
-        // Add context based on user relationship
-        const relationshipContext = this.getUserRelationshipContext();
-        
-        return basePrompt + relationshipContext;
-    }
-    
-    getUserRelationshipContext() {
-        const { relationshipLevel, interactionCount, conversationTone } = this.state.userContext;
-        
-        if (relationshipLevel === 'new' && interactionCount === 0) {
-            return ' This is your first interaction with this user - be welcoming and introduce yourself naturally.';
-        } else if (relationshipLevel === 'familiar' && interactionCount > 5) {
-            return ` You have chatted ${interactionCount} times with this user. Be friendly and reference shared context when appropriate.`;
-        } else if (relationshipLevel === 'close' && interactionCount > 20) {
-            return ` You are close friends with this user (${interactionCount} interactions). Be warm, personal, and remember their preferences.`;
-        }
-        
-        return '';
-    }
-    
-    updateUserRelationship(userMessage, botResponse) {
-        const ctx = this.state.userContext;
-        
-        // Update relationship level based on interaction count
-        if (ctx.interactionCount > 20) {
-            ctx.relationshipLevel = 'close';
-        } else if (ctx.interactionCount > 5) {
-            ctx.relationshipLevel = 'familiar';
-        } else {
-            ctx.relationshipLevel = 'new';
-        }
-        
-        // Analyze conversation tone
-        const userLower = userMessage.toLowerCase();
-        if (userLower.includes('thank') || userLower.includes('awesome') || userLower.includes('great')) {
-            ctx.mood = 'positive';
-        } else if (userLower.includes('help') || userLower.includes('problem') || userLower.includes('issue')) {
-            ctx.mood = 'helpful';
-        }
-        
-        // Extract topics
-        const solanaKeywords = ['solana', 'sol', 'defi', 'nft', 'crypto', 'blockchain', 'token'];
-        const foundKeywords = solanaKeywords.filter(keyword => userLower.includes(keyword));
-        if (foundKeywords.length > 0) {
-            ctx.topics = [...new Set([...ctx.topics, ...foundKeywords])].slice(-10); // Keep last 10 topics
-        }
-        
-        this.saveState();
-    }
-    
-    sanitizeInput(text) {
-        return text.replace(/<[^>]*>/g, '').trim();
-    }
-    
-    sanitizeOutput(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    toggleTheme() {
-        const html = document.documentElement;
-        const isLight = html.classList.toggle('light');
-        
-        this.state.ui.theme = isLight ? 'light' : 'dark';
-        this.updateElement('#themeToggle', isLight ? '☀️' : '🌙');
-        this.emit('theme:changed', this.state.ui.theme);
-    }
-    
-    toggleDebugMode() {
-        this.state.ui.debugMode = !this.state.ui.debugMode;
-        const debugOverlay = document.querySelector('#debugOverlay');
-        if (debugOverlay) {
-            debugOverlay.classList.toggle('hidden');
-        }
-        this.emit('debug:toggled', this.state.ui.debugMode);
-    }
-    
-    handleMouseMove(event) {
-        if (!this.components.vrmController) return;
-        
-        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-        
-        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);  // CORRECT
-    }
-    
-    enableAudioContext() {
-        this.components.audioManager.enableContext();
-    }
-    
-    scheduleWelcomeMessage() {
-        setTimeout(() => {
-            // Safety checks before calling methods
-            if (this.components.audioManager && typeof this.components.audioManager.queue === 'function') {
-                this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
-            } else {
-                console.warn('AudioManager not ready - skipping welcome audio');
-            }
-            
-            setTimeout(() => {
-                if (this.components.vrmController && typeof this.components.vrmController.playWave === 'function') {
-                    this.components.vrmController.playWave();
+        // Multi-phase wave animation
+        this.animation.currentGesture = {
+            type: 'wave',
+            duration: 2.5,
+            elapsed: 0,
+            update: (progress) => {
+                if (progress < 0.3) {
+                    // Raise arm
+                    const p = progress / 0.3;
+                    rightUpperArm.rotation.z = 1.22 - (1.22 + 0.5) * p;
+                    rightUpperArm.rotation.x = -0.8 * p;
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.z = 0.3 - 0.5 * p;
+                    }
+                } else if (progress < 0.8) {
+                    // Wave motion
+                    const p = (progress - 0.3) / 0.5;
+                    const waveIntensity = Math.sin(p * Math.PI * 4);
+                    if (rightHand) {
+                        rightHand.rotation.z = waveIntensity * 0.5;
+                    }
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.z = -0.2 + waveIntensity * 0.3;
+                    }
                 } else {
-                    console.warn('VRMController not ready - skipping wave animation');
-                }
-            }, 1000);
-        }, 2000);
-    }
-    
-    handleOnlineStatus(isOnline) {
-        if (isOnline) {
-            document.body.classList.remove('offline');
-            // Reconnect WebSocket if needed
-            if (!this.state.wsConnection || this.state.wsConnection.readyState !== WebSocket.OPEN) {
-                this.connectWebSocket();
-            }
-        } else {
-            document.body.classList.add('offline');
-        }
-        
-        this.emit('online:changed', isOnline);
-    }
-    
-    // Utility methods
-    updateElement(selector, content, styles = {}) {
-        const element = document.querySelector(selector);
-        if (element) {
-            if (content !== undefined) element.textContent = content;
-            Object.assign(element.style, styles);
-        }
-    }
-    
-    updateLoadingStatus(message) {
-        this.updateElement('#loadingStatus', message);
-        if (!message) {
-            setTimeout(() => {
-                const element = document.querySelector('#loadingScreen');
-                if (element) element.style.display = 'none';
-            }, 500);
-        }
-    }
-    
-    setButtonState(selector, disabled, text) {
-        const button = document.querySelector(selector);
-        if (button) {
-            button.disabled = disabled;
-            if (text) button.textContent = text;
-        }
-    }
-    
-    showError(message) {
-        const container = document.querySelector('#errorContainer');
-        if (!container) return;
-        
-        const errorEl = document.createElement('div');
-        errorEl.className = 'error-message';
-        errorEl.textContent = message;
-        container.appendChild(errorEl);
-        
-        setTimeout(() => errorEl.remove(), 5000);
-        this.emit('error:shown', message);
-    }
-    
-    startTimer(name, callback, interval, repeating = true) {
-        this.stopTimer(name);
-        
-        if (repeating) {
-            this.state.timers.set(name, setInterval(callback, interval));
-        } else {
-            this.state.timers.set(name, setTimeout(() => {
-                callback();
-                this.state.timers.delete(name);
-            }, interval));
-        }
-    }
-    
-    stopTimer(name) {
-        if (this.state.timers.has(name)) {
-            const timer = this.state.timers.get(name);
-            clearInterval(timer);
-            clearTimeout(timer);
-            this.state.timers.delete(name);
-        }
-    }
-    
-    saveState() {
-        try {
-            localStorage.setItem('solmateState', JSON.stringify({
-                conversation: this.state.conversation,
-                theme: this.state.ui.theme,
-                userContext: this.state.userContext
-            }));
-        } catch (error) {
-            console.error('Failed to save state:', error);
-        }
-    }
-    
-    loadSavedState() {
-        try {
-            const saved = localStorage.getItem('solmateState');
-            if (saved) {
-                const state = JSON.parse(saved);
-                
-                if (state.conversation) {
-                    this.state.conversation = state.conversation.slice(-this.config.maxConversationSize);
-                }
-                
-                if (state.theme) {
-                    this.state.ui.theme = state.theme;
-                    if (state.theme === 'light') {
-                        document.documentElement.classList.add('light');
-                        this.updateElement('#themeToggle', '☀️');
+                    // Return to rest
+                    const p = (progress - 0.8) / 0.2;
+                    rightUpperArm.rotation.z = -0.5 + (1.22 + 0.5) * p;
+                    rightUpperArm.rotation.x = -0.8 * (1 - p);
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.z = -0.2 + 0.5 * p;
+                    }
+                    if (rightHand) {
+                        rightHand.rotation.z = 0;
                     }
                 }
-                
-                if (state.userContext) {
-                    this.state.userContext = { ...this.state.userContext, ...state.userContext };
+            }
+        };
+        
+        this.emit('gesture:wave');
+    }
+    
+    performHeadTilt() {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
+        
+        const head = this.three.vrm.humanoid.getNormalizedBoneNode('head');
+        if (!head) return;
+        
+        this.animation.currentGesture = {
+            type: 'headTilt',
+            duration: 1.0,
+            elapsed: 0,
+            update: (progress) => {
+                const tilt = Math.sin(progress * Math.PI) * 0.2;
+                head.rotation.z = tilt;
+            }
+        };
+    }
+    
+    performNod() {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
+        
+        const head = this.three.vrm.humanoid.getNormalizedBoneNode('head');
+        if (!head) return;
+        
+        this.animation.currentGesture = {
+            type: 'nod',
+            duration: 0.8,
+            elapsed: 0,
+            update: (progress) => {
+                const nod = Math.sin(progress * Math.PI * 2) * 0.15;
+                head.rotation.x = nod;
+            }
+        };
+    }
+    
+    performBlink() {
+        if (!this.three.vrm || !this.three.vrm.expressionManager) return;
+        
+        this.animation.currentGesture = {
+            type: 'blink',
+            duration: 0.15,
+            elapsed: 0,
+            update: (progress) => {
+                const blinkValue = progress < 0.5 ? progress * 2 : (1 - progress) * 2;
+                try {
+                    this.three.vrm.expressionManager.setValue('blink', blinkValue);
+                } catch (e) {
+                    // Blink not available
                 }
             }
-        } catch (error) {
-            console.error('Failed to load saved state:', error);
+        };
+    }
+    
+    performWink() {
+        if (!this.three.vrm || !this.three.vrm.expressionManager) return;
+        
+        this.animation.currentGesture = {
+            type: 'wink',
+            duration: 0.5,
+            elapsed: 0,
+            update: (progress) => {
+                const winkValue = progress < 0.5 ? progress * 2 : (1 - progress) * 2;
+                try {
+                    this.three.vrm.expressionManager.setValue('blinkLeft', winkValue);
+                } catch (e) {
+                    // Try blink as fallback
+                    try {
+                        this.three.vrm.expressionManager.setValue('blink', winkValue * 0.5);
+                    } catch (e2) {}
+                }
+            }
+        };
+    }
+    
+    performGesture(type) {
+        switch(type) {
+            case 'wave': this.playWave(); break;
+            case 'nod': this.performNod(); break;
+            case 'headTilt': this.performHeadTilt(); break;
+            case 'wink': this.performWink(); break;
+            case 'blink': this.performBlink(); break;
+            default: console.warn('Unknown gesture:', type);
         }
     }
     
-    getAppStats() {
+    returnToRestPose() {
+        if (!this.three.vrm || !this.three.vrm.humanoid) return;
+        
+        // Smoothly return arms to rest position
+        const leftUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+        const leftLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+        const rightUpperArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+        const rightLowerArm = this.three.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+        
+        if (leftUpperArm && this.animation.armRestPosition.leftUpper) {
+            leftUpperArm.rotation.copy(this.animation.armRestPosition.leftUpper);
+        }
+        if (leftLowerArm && this.animation.armRestPosition.leftLower) {
+            leftLowerArm.rotation.copy(this.animation.armRestPosition.leftLower);
+        }
+        if (rightUpperArm && this.animation.armRestPosition.rightUpper) {
+            rightUpperArm.rotation.copy(this.animation.armRestPosition.rightUpper);
+        }
+        if (rightLowerArm && this.animation.armRestPosition.rightLower) {
+            rightLowerArm.rotation.copy(this.animation.armRestPosition.rightLower);
+        }
+    }
+    
+    // === SPEECH ANIMATIONS ===
+    
+    startSpeechAnimation(text) {
+        this.state.isTalking = true;
+        
+        // Analyze sentiment for expression
+        const sentiment = this.analyzeSentiment(text);
+        this.setExpression(sentiment, 0.3);
+        
+        // Add conversational gestures
+        const gestures = this.generateConversationalGestures(text);
+        this.animation.gestureQueue = gestures;
+        
+        this.emit('speech:start', { text, sentiment });
+    }
+    
+    stopSpeechAnimation() {
+        this.state.isTalking = false;
+        
+        // Return to neutral expression
+        this.setExpression('neutral', 0);
+        
+        // Clear gesture queue
+        this.animation.gestureQueue = [];
+        
+        // Return to rest pose
+        this.returnToRestPose();
+        
+        this.emit('speech:end');
+    }
+    
+    analyzeSentiment(text) {
+        const lower = text.toLowerCase();
+        
+        if (lower.includes('happy') || lower.includes('great') || lower.includes('awesome')) {
+            return 'happy';
+        } else if (lower.includes('sad') || lower.includes('sorry')) {
+            return 'sad';
+        } else if (lower.includes('surprise') || lower.includes('wow')) {
+            return 'surprised';
+        } else if (lower.includes('think') || lower.includes('hmm')) {
+            return 'thinking';
+        }
+        
+        return 'neutral';
+    }
+    
+    generateConversationalGestures(text) {
+        const gestures = [];
+        const words = text.split(' ').length;
+        
+        // Add gestures based on text length
+        if (words > 10) {
+            gestures.push('nod');
+        }
+        if (words > 20) {
+            gestures.push('headTilt');
+        }
+        if (text.includes('!')) {
+            gestures.push('nod');
+        }
+        if (text.includes('?')) {
+            gestures.push('headTilt');
+        }
+        
+        return gestures;
+    }
+    
+    // === EXPRESSION SYSTEM ===
+    
+    setExpression(expression, intensity = 1.0, duration = 1000) {
+        if (!this.three.vrm || !this.three.vrm.expressionManager) return;
+        
+        const startTime = Date.now();
+        const startExpression = this.state.currentExpression;
+        
+        const updateExpression = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            try {
+                // Fade out old expression
+                if (startExpression !== 'neutral') {
+                    this.three.vrm.expressionManager.setValue(startExpression, (1 - progress) * intensity);
+                }
+                
+                // Fade in new expression
+                if (expression !== 'neutral') {
+                    this.three.vrm.expressionManager.setValue(expression, progress * intensity);
+                }
+                
+                if (progress < 1) {
+                    requestAnimationFrame(updateExpression);
+                } else {
+                    this.state.currentExpression = expression;
+                }
+            } catch (e) {
+                // Expression not available
+            }
+        };
+        
+        updateExpression();
+    }
+    
+    // === SPECIAL SEQUENCES ===
+    
+    playOpeningSequence() {
+        if (!this.three.vrm) return;
+        
+        console.log('🎬 Playing opening sequence');
+        
+        // 10-second welcome sequence
+        setTimeout(() => this.performNod(), 1000);
+        setTimeout(() => this.playWave(), 3000);
+        setTimeout(() => this.performWink(), 6000);
+        setTimeout(() => this.setExpression('happy', 0.5, 2000), 8000);
+        setTimeout(() => {
+            this.setExpression('neutral', 0, 1000);
+            this.returnToRestPose();
+        }, 10000);
+        
+        this.emit('sequence:opening');
+    }
+    
+    reactToUserInput() {
+        // Quick acknowledgment animation
+        const reactions = ['nod', 'headTilt', 'blink'];
+        const reaction = reactions[Math.floor(Math.random() * reactions.length)];
+        this.performGesture(reaction);
+    }
+    
+    reactToUserReturn() {
+        // Welcome back animation
+        this.setExpression('happy', 0.3, 1000);
+        this.performNod();
+        setTimeout(() => this.setExpression('neutral', 0, 1000), 2000);
+    }
+    
+    // === UTILITY METHODS ===
+    
+    updateHeadTarget(x, y) {
+        this.animation.headTarget.x = x;
+        this.animation.headTarget.y = y;
+    }
+    
+    handleResize() {
+        if (!this.three.camera || !this.three.renderer) return;
+        
+        this.three.camera.aspect = window.innerWidth / window.innerHeight;
+        this.three.camera.updateProjectionMatrix();
+        this.three.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    createFallbackAvatar() {
+        console.warn('Creating fallback avatar');
+        
+        // Show fallback UI
+        const fallback = document.querySelector('.webgl-fallback');
+        if (fallback) {
+            fallback.style.display = 'block';
+        }
+        
+        this.emit('fallback:created');
+    }
+    
+    async reload() {
+        console.log('🔄 Reloading VRM...');
+        this.state.loaded = false;
+        await this.loadVRM();
+    }
+    
+    getStats() {
         return {
             initialized: this.state.initialized,
-            conversationLength: this.state.conversation.length,
-            userInteractions: this.state.userContext.interactionCount,
-            relationshipLevel: this.state.userContext.relationshipLevel,
-            vrmStats: this.components.vrmController?.getStats() || null,  // CORRECT
-            audioStats: this.components.audioManager?.getStats() || null,
-            wsConnected: this.state.wsConnection?.readyState === WebSocket.OPEN,
-            activeTimers: this.state.timers.size,
-            theme: this.state.ui.theme
+            loaded: this.state.loaded,
+            isAnimating: this.state.isAnimating,
+            isTalking: this.state.isTalking,
+            currentExpression: this.state.currentExpression,
+            gestureQueueLength: this.animation.gestureQueue.length,
+            hasVRM: !!this.three.vrm,
+            availableExpressions: this.availableExpressions || []
         };
     }
     
     destroy() {
-        // Stop all timers
-        this.state.timers.forEach((timer, name) => this.stopTimer(name));
+        // Stop animation loop
+        this.state.initialized = false;
         
-        // Close WebSocket
-        if (this.state.wsConnection) {
-            this.state.wsConnection.close();
+        // Clean up Three.js resources
+        if (this.three.renderer) {
+            this.three.renderer.dispose();
         }
         
-        // Destroy components
-        this.components.vrmController?.destroy();  // CORRECT
-        this.components.audioManager?.destroy();
+        if (this.three.vrm && this.three.scene) {
+            this.three.scene.remove(this.three.vrm.scene);
+            // VRMUtils.deepDispose would be called here if imported
+        }
         
-        // Clear event listeners
+        // Clean up tracked resources
+        this.resources.textures.forEach(texture => texture.dispose());
+        this.resources.geometries.forEach(geometry => geometry.dispose());
+        this.resources.materials.forEach(material => material.dispose());
+        
+        // Remove event listeners
+        window.removeEventListener('resize', this.handleResize);
         this.removeAllListeners();
         
-        this.emit('destroyed');
-        console.log('🧹 SolmateApp destroyed and cleaned up');
+        console.log('🧹 VRMController destroyed');
     }
 }
