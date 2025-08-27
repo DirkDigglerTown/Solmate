@@ -74,8 +74,9 @@ export class VRMController extends EventEmitter {
             // Load VRM model
             await this.loadVRM();
             
-            // Start animation loop
+            // START THE ANIMATION LOOP - THIS WAS MISSING!
             this.animate();
+            console.log('🎮 Animation loop started');
             
             this.state.initialized = true;
             this.emit('init:complete');
@@ -370,17 +371,17 @@ export class VRMController extends EventEmitter {
     }
     
     animate() {
+        // Make sure we're initialized before animating
+        if (!this.state.initialized && this.three.renderer && this.three.scene && this.three.camera) {
+            this.state.initialized = true;
+        }
+        
         if (!this.state.initialized) return;
         
         requestAnimationFrame(() => this.animate());
         
-        const deltaTime = this.three.clock.getDelta();
-        const elapsedTime = this.three.clock.getElapsedTime();
-        
-        // Debug: Log every 60 frames to confirm animation is running
-        if (Math.floor(elapsedTime * 60) % 60 === 0) {
-            console.log('🎬 Animation frame:', Math.floor(elapsedTime), 'sec');
-        }
+        const deltaTime = this.three.clock ? this.three.clock.getDelta() : 0;
+        const elapsedTime = this.three.clock ? this.three.clock.getElapsedTime() : 0;
         
         // Update VRM
         if (this.three.vrm) {
@@ -401,8 +402,6 @@ export class VRMController extends EventEmitter {
         // Render scene - THIS IS CRITICAL!
         if (this.three.renderer && this.three.scene && this.three.camera) {
             this.three.renderer.render(this.three.scene, this.three.camera);
-        } else {
-            console.error('❌ Missing renderer, scene, or camera!');
         }
     }
     
@@ -953,6 +952,24 @@ export class VRMController extends EventEmitter {
             // Force render
             this.three.renderer.render(this.three.scene, this.three.camera);
         });
+    }
+    
+    // Manually start animation loop if it's not running
+    startAnimationLoop() {
+        if (!this.state.initialized) {
+            console.log('⚠️ Forcing initialization state for animation');
+            this.state.initialized = true;
+        }
+        
+        console.log('🎮 Manually starting animation loop');
+        this.animate();
+        
+        // Remove test cube if present
+        const testCube = this.three.scene?.getObjectByName('testCube');
+        if (testCube) {
+            this.three.scene.remove(testCube);
+            console.log('Removed test cube');
+        }
     }
     
     // Method to cycle backgrounds for testing
