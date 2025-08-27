@@ -1,5 +1,5 @@
 // web/js/AudioManager.js
-// Enhanced audio system with single cute female voice option
+// Enhanced audio system with single cute voice and sentiment analysis integration
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -7,17 +7,20 @@ export class AudioManager extends EventEmitter {
     constructor() {
         super();
         
-        console.log('🔊 Initializing AudioManager...');
-        
         this.config = {
             maxQueueSize: 10,
-            defaultVoice: 'nova',  // Single cute female voice
+            voice: 'nova', // Single cute female voice
             ttsEndpoint: '/api/tts',
             speechRate: 0.9,
             speechPitch: 1.1,
             speechVolume: 0.8,
             maxRetries: 3,
-            retryDelay: 1000
+            retryDelay: 1000,
+            // Voice filtering for browser TTS fallback
+            preferredVoicePatterns: [
+                'nova', 'aria', 'Female', 'Woman', 'Google UK English Female',
+                'Microsoft Zira', 'Samantha', 'Ava', 'Allison', 'Susan'
+            ]
         };
         
         this.state = {
@@ -26,7 +29,8 @@ export class AudioManager extends EventEmitter {
             currentAudio: null,
             audioContext: null,
             contextEnabled: false,
-            availableVoices: []
+            currentText: '',
+            currentSentiment: 'neutral'
         };
         
         this.queue = [];
@@ -34,87 +38,23 @@ export class AudioManager extends EventEmitter {
         this.activeAudioElements = new Set();
         this.retryCount = new Map();
         
-        this.init();
-    }
-    
-    async init() {
-        try {
-            // Wait for speech synthesis voices to load
-            this.loadVoices();
-            
-            // Set up event listeners
-            this.setupEventListeners();
-            
-            console.log('✅ AudioManager initialized');
-            this.emit('init:complete');
-            
-        } catch (error) {
-            console.error('AudioManager initialization failed:', error);
-            this.emit('error', { context: 'init', error });
-            throw error;
-        }
-    }
-    
-    loadVoices() {
-        // Function to get and filter voices
-        const updateVoices = () => {
-            const voices = speechSynthesis.getVoices();
-            
-            // Filter for female voices that sound cute/young
-            this.state.availableVoices = voices.filter(voice => {
-                const name = voice.name.toLowerCase();
-                const lang = voice.lang.toLowerCase();
-                
-                // Prefer female voices in English
-                return (
-                    lang.startsWith('en') && (
-                        name.includes('female') ||
-                        name.includes('woman') ||
-                        name.includes('zira') ||
-                        name.includes('hazel') ||
-                        name.includes('susan') ||
-                        name.includes('samantha') ||
-                        name.includes('karen') ||
-                        name.includes('moira') ||
-                        name.includes('tessa') ||
-                        name.includes('veena') ||
-                        name.includes('fiona') ||
-                        voice.name === 'Google US English' ||
-                        (name.includes('google') && name.includes('us'))
-                    )
-                );
-            });
-            
-            // If no specific female voices found, get the best available
-            if (this.state.availableVoices.length === 0) {
-                this.state.availableVoices = voices.filter(voice => 
-                    voice.lang.toLowerCase().startsWith('en')
-                ).slice(0, 5);
-            }
-            
-            console.log(`✅ Speech synthesis ready with ${voices.length} voices`);
-            console.log('Selected female voices:', this.state.availableVoices.map(v => v.name));
+        // Enhanced VU meter system
+        this.vuMeter = {
+            element: null,
+            analyser: null,
+            dataArray: null,
+            isActive: false
         };
         
-        // Load voices immediately if available
-        updateVoices();
-        
-        // Also listen for voice changes (some browsers load them async)
-        speechSynthesis.addEventListener('voiceschanged', updateVoices);
-        
-        // Fallback for slow voice loading
-        setTimeout(updateVoices, 1000);
+        this.setupVUMeter();
     }
     
-    setupEventListeners() {
-        // Handle visibility changes to prevent audio issues
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden && this.state.isPlaying) {
-                this.pause();
-            } else if (!document.hidden && this.state.isPaused) {
-                this.resume();
-            }
-        });
+    setupVUMeter() {
+        this.vuMeter.element = document.getElementById('vuMeter');
+        if (!this.vuMeter.element) {
+            console.warn('VU Meter element not found');
+            return;
+        }
     }
     
     enableContext() {
@@ -124,15 +64,62 @@ export class AudioManager extends EventEmitter {
             this.state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             this.state.audioContext.resume();
             this.state.contextEnabled = true;
+            this.setupVUAnalyzer();
             this.emit('context:enabled');
-            console.log('🎵 Audio context enabled');
+            console.log('🎵 Audio context enabled with VU meter');
         } catch (error) {
-            console.error('Failed to enable audio context:', error);
             this.emit('error', { context: 'audio:context', error });
         }
     }
     
-    queue(text, voice = this.config.defaultVoice) {
+    setupVUAnalyzer() {
+        if (!this.state.audioContext || !this.vuMeter.element) return;
+        
+        try {
+            this.vuMeter.analyser = this.state.audioContext.createAnalyser();
+            this.vuMeter.analyser.fftSize = 256;
+            this.vuMeter.dataArray = new Uint8Array(this.vuMeter.analyser.frequencyBinCount);
+            console.log('📊 VU analyzer setup complete');
+        } catch (error) {
+            console.warn('VU analyzer setup failed:', error);
+        }
+    }
+    
+    updateVUMeter() {
+        if (!this.vuMeter.analyser || !this.vuMeter.dataArray || !this.vuMeter.element) return;
+        
+        this.vuMeter.analyser.getByteFrequencyData(this.vuMeter.dataArray);
+        
+        // Calculate average amplitude
+        let sum = 0;
+        for (let i = 0; i < this.vuMeter.dataArray.length; i++) {
+            sum += this.vuMeter.dataArray[i];
+        }
+        const average = sum / this.vuMeter.dataArray.length;
+        
+        // Update VU meter display (0-100%)
+        const percentage = Math.min((average / 255) * 100, 100);
+        this.vuMeter.element.style.width = `${percentage}%`;
+        
+        if (this.vuMeter.isActive) {
+            requestAnimationFrame(() => this.updateVUMeter());
+        }
+    }
+    
+    startVUMeter() {
+        this.vuMeter.isActive = true;
+        this.updateVUMeter();
+    }
+    
+    stopVUMeter() {
+        this.vuMeter.isActive = false;
+        if (this.vuMeter.element) {
+            this.vuMeter.element.style.width = '0%';
+        }
+    }
+    
+    // Enhanced queue method with sentiment analysis
+    queue(text, options = {}) {
         if (!text || typeof text !== 'string') {
             console.warn('Invalid text provided to AudioManager');
             return;
@@ -144,25 +131,82 @@ export class AudioManager extends EventEmitter {
             this.queue.shift();
         }
         
+        // Analyze sentiment for enhanced TTS
+        const sentiment = this.analyzeSentiment(text);
+        
         const item = {
             id: this.generateId(),
             text: text.trim(),
-            voice: this.config.defaultVoice, // Always use the single female voice
-            timestamp: Date.now()
+            voice: this.config.voice, // Always use nova
+            timestamp: Date.now(),
+            sentiment: sentiment,
+            options: {
+                rate: this.adjustRateForSentiment(sentiment),
+                pitch: this.adjustPitchForSentiment(sentiment),
+                volume: this.config.speechVolume,
+                ...options
+            }
         };
         
         this.queue.push(item);
-        console.log(`🎵 Queued: "${text.substring(0, 50)}${text.length > 50 ? '...' : '"}"`);
         this.emit('queue:added', item);
+        
+        console.log(`🎭 Queued with ${sentiment} sentiment:`, text.substring(0, 50));
         
         if (!this.state.isPlaying) {
             this.playNext();
         }
     }
     
+    // Sentiment-based voice adjustments
+    analyzeSentiment(text) {
+        const lowerText = text.toLowerCase();
+        
+        if (lowerText.includes('happy') || lowerText.includes('great') || 
+            lowerText.includes('awesome') || lowerText.includes('wonderful') ||
+            lowerText.includes('love') || lowerText.includes('amazing') ||
+            lowerText.includes('excited') || lowerText.includes('fantastic')) {
+            return 'happy';
+        } else if (lowerText.includes('sad') || lowerText.includes('sorry') || 
+                   lowerText.includes('bad') || lowerText.includes('terrible') ||
+                   lowerText.includes('unfortunately') || lowerText.includes('disappointed')) {
+            return 'sad';
+        } else if (lowerText.includes('wow') || lowerText.includes('really?') || 
+                   lowerText.includes('!') || lowerText.includes('incredible') ||
+                   lowerText.includes('amazing') || lowerText.includes('surprised')) {
+            return 'excited';
+        } else if (lowerText.includes('solana') || lowerText.includes('crypto') ||
+                   lowerText.includes('blockchain') || lowerText.includes('defi')) {
+            return 'enthusiastic';
+        } else {
+            return 'neutral';
+        }
+    }
+    
+    adjustRateForSentiment(sentiment) {
+        switch (sentiment) {
+            case 'excited': return 1.0;
+            case 'happy': return 0.95;
+            case 'enthusiastic': return 0.92;
+            case 'sad': return 0.8;
+            default: return 0.9;
+        }
+    }
+    
+    adjustPitchForSentiment(sentiment) {
+        switch (sentiment) {
+            case 'excited': return 1.2;
+            case 'happy': return 1.15;
+            case 'enthusiastic': return 1.1;
+            case 'sad': return 1.0;
+            default: return 1.1;
+        }
+    }
+    
     async playNext() {
         if (this.queue.length === 0) {
             this.state.isPlaying = false;
+            this.stopVUMeter();
             this.emit('queue:empty');
             return;
         }
@@ -173,51 +217,49 @@ export class AudioManager extends EventEmitter {
         
         const item = this.queue.shift();
         this.state.isPlaying = true;
+        this.state.currentText = item.text;
+        this.state.currentSentiment = item.sentiment;
         
-        console.log(`🔊 Playing: "${item.text.substring(0, 50)}${item.text.length > 50 ? '...' : ''}"`);
         this.emit('play:start', item);
+        this.startVUMeter();
         
-        try {
-            // Try API TTS first, fallback to browser TTS
-            await this.playTTS(item);
-        } catch (error) {
-            console.warn('TTS API failed, using browser fallback:', error);
-            await this.fallbackTTS(item);
-        } finally {
-            this.state.isPlaying = false;
-            this.emit('play:end', item);
-            this.retryCount.delete(item.id);
-            
-            // Continue with next item
-            this.playNext();
-        }
-    }
-    
-    async playTTS(item) {
         try {
             // Check cache first
-            const cacheKey = this.getCacheKey(item.text, item.voice);
+            const cacheKey = this.getCacheKey(item.text, item.voice, item.sentiment);
+            let audioBlob;
+            
             if (this.audioCache.has(cacheKey)) {
-                console.log('🎵 Using cached audio');
-                const audioBlob = this.audioCache.get(cacheKey);
-                await this.playAudioBlob(audioBlob, item);
-                return;
+                audioBlob = this.audioCache.get(cacheKey);
+                this.emit('cache:hit', cacheKey);
+            } else {
+                audioBlob = await this.fetchAudio(item);
+                
+                // Cache the audio blob (limit cache size)
+                if (this.audioCache.size < 50) {
+                    this.audioCache.set(cacheKey, audioBlob);
+                    this.emit('cache:stored', cacheKey);
+                }
             }
             
-            // Fetch from API
-            const audioBlob = await this.fetchAudio(item);
-            
-            // Cache if successful
-            if (this.audioCache.size < 20) { // Limit cache size
-                this.audioCache.set(cacheKey, audioBlob);
-            }
-            
-            // Play the audio
-            await this.playAudioBlob(audioBlob, item);
+            await this.playAudio(audioBlob, item);
             
         } catch (error) {
-            // Re-throw to trigger fallback
-            throw error;
+            this.emit('error', { context: 'play', error, item });
+            
+            // Try enhanced browser TTS fallback
+            await this.enhancedFallbackTTS(item);
+        } finally {
+            this.state.isPlaying = false;
+            this.state.currentText = '';
+            this.state.currentSentiment = 'neutral';
+            this.stopVUMeter();
+            this.emit('play:end', item);
+            
+            // Clear retry count
+            this.retryCount.delete(item.id);
+            
+            // Play next item
+            this.playNext();
         }
     }
     
@@ -230,25 +272,22 @@ export class AudioManager extends EventEmitter {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     text: item.text,
-                    voice: item.voice
+                    voice: item.voice,
+                    // Enhanced parameters based on sentiment
+                    rate: item.options.rate,
+                    pitch: item.options.pitch,
+                    volume: item.options.volume
                 }),
                 signal: AbortSignal.timeout(30000)
             });
             
-            // Check for fallback signal
             if (!response.ok || response.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
-                throw new Error('TTS API unavailable, use fallback');
+                throw new Error('TTS API unavailable, use enhanced fallback');
             }
             
-            const blob = await response.blob();
-            if (blob.size === 0) {
-                throw new Error('Empty audio response');
-            }
-            
-            return blob;
+            return await response.blob();
             
         } catch (error) {
-            // Retry logic
             if (retries < this.config.maxRetries) {
                 this.retryCount.set(item.id, retries + 1);
                 await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
@@ -259,7 +298,7 @@ export class AudioManager extends EventEmitter {
         }
     }
     
-    async playAudioBlob(blob, item) {
+    async playAudio(blob, item) {
         return new Promise((resolve, reject) => {
             const audioUrl = URL.createObjectURL(blob);
             const audio = new Audio(audioUrl);
@@ -267,7 +306,17 @@ export class AudioManager extends EventEmitter {
             this.state.currentAudio = audio;
             this.activeAudioElements.add(audio);
             
-            audio.volume = this.config.speechVolume;
+            // Connect to VU meter if available
+            if (this.vuMeter.analyser && this.state.audioContext) {
+                try {
+                    const source = this.state.audioContext.createMediaElementSource(audio);
+                    source.connect(this.vuMeter.analyser);
+                    this.vuMeter.analyser.connect(this.state.audioContext.destination);
+                } catch (e) {
+                    // VU meter connection failed, continue anyway
+                    console.warn('VU meter connection failed:', e);
+                }
+            }
             
             audio.onended = () => {
                 this.cleanupAudio(audio, audioUrl);
@@ -281,16 +330,15 @@ export class AudioManager extends EventEmitter {
             
             // Handle pause/resume
             this.once('pause', () => {
-                if (this.state.currentAudio === audio) {
-                    audio.pause();
-                }
+                audio.pause();
             });
             
             this.once('resume', () => {
-                if (this.state.currentAudio === audio && audio.paused) {
-                    audio.play().catch(console.error);
-                }
+                audio.play();
             });
+            
+            // Apply volume based on sentiment
+            audio.volume = item.options.volume;
             
             // Play audio
             audio.play().catch(reject);
@@ -299,7 +347,8 @@ export class AudioManager extends EventEmitter {
         });
     }
     
-    async fallbackTTS(item) {
+    // Enhanced browser TTS with better voice selection
+    async enhancedFallbackTTS(item) {
         if (!window.speechSynthesis) {
             console.warn('Speech synthesis not available');
             return;
@@ -308,15 +357,18 @@ export class AudioManager extends EventEmitter {
         return new Promise((resolve) => {
             const utterance = new SpeechSynthesisUtterance(item.text);
             
-            // Use the best available female voice
-            utterance.voice = this.getBestFemaleVoice();
-            utterance.rate = this.config.speechRate;
-            utterance.pitch = this.config.speechPitch;
-            utterance.volume = this.config.speechVolume;
+            // Enhanced voice selection
+            utterance.voice = this.selectBestVoice();
+            utterance.rate = item.options.rate;
+            utterance.pitch = item.options.pitch;
+            utterance.volume = item.options.volume;
             
-            utterance.onstart = () => {
-                console.log('🗣️ Browser TTS started');
-            };
+            // Add emotional emphasis based on sentiment
+            if (item.sentiment === 'excited') {
+                utterance.text = this.addEmotionalEmphasis(item.text, 'excited');
+            } else if (item.sentiment === 'happy') {
+                utterance.text = this.addEmotionalEmphasis(item.text, 'happy');
+            }
             
             utterance.onend = () => {
                 this.emit('fallback:complete', item);
@@ -324,43 +376,54 @@ export class AudioManager extends EventEmitter {
             };
             
             utterance.onerror = (error) => {
-                console.error('Browser TTS error:', error);
                 this.emit('error', { context: 'fallback:tts', error, item });
                 resolve();
             };
             
             speechSynthesis.speak(utterance);
             this.emit('fallback:playing', item);
+            
+            console.log(`🎤 Enhanced browser TTS (${item.sentiment}):`, item.text.substring(0, 30));
         });
     }
     
-    getBestFemaleVoice() {
-        if (this.state.availableVoices.length > 0) {
-            // Prioritize specific female voices
-            const preferred = this.state.availableVoices.find(voice => {
-                const name = voice.name.toLowerCase();
-                return (
-                    name.includes('zira') ||
-                    name.includes('hazel') ||
-                    name.includes('samantha') ||
-                    name.includes('karen') ||
-                    name.includes('susan')
-                );
-            });
-            
-            return preferred || this.state.availableVoices[0];
+    selectBestVoice() {
+        const voices = speechSynthesis.getVoices();
+        
+        // Try to find the best female voice
+        for (const pattern of this.config.preferredVoicePatterns) {
+            const voice = voices.find(v => 
+                v.name.toLowerCase().includes(pattern.toLowerCase()) ||
+                v.voiceURI.toLowerCase().includes(pattern.toLowerCase())
+            );
+            if (voice) {
+                console.log(`🎭 Selected voice: ${voice.name}`);
+                return voice;
+            }
         }
         
-        // Fallback to any available voice
-        const allVoices = speechSynthesis.getVoices();
-        return allVoices.find(voice => voice.lang.startsWith('en')) || allVoices[0];
+        // Fallback to first available voice
+        return voices[0] || null;
+    }
+    
+    addEmotionalEmphasis(text, sentiment) {
+        switch (sentiment) {
+            case 'excited':
+                // Add slight pauses for dramatic effect
+                return text.replace(/[!]/g, '! ');
+            case 'happy':
+                // Add warmth to the speech
+                return text;
+            default:
+                return text;
+        }
     }
     
     cleanupAudio(audio, url) {
         // Remove from active set
         this.activeAudioElements.delete(audio);
         
-        // Clear reference if current
+        // Clear reference
         if (this.state.currentAudio === audio) {
             this.state.currentAudio = null;
         }
@@ -373,7 +436,6 @@ export class AudioManager extends EventEmitter {
         // Remove event listeners
         audio.onended = null;
         audio.onerror = null;
-        audio.onloadstart = null;
         
         // Clear src to release resources
         audio.src = '';
@@ -385,14 +447,15 @@ export class AudioManager extends EventEmitter {
         
         this.state.isPaused = true;
         
-        if (this.state.currentAudio && !this.state.currentAudio.paused) {
+        if (this.state.currentAudio) {
             this.state.currentAudio.pause();
         }
         
-        if (speechSynthesis.speaking) {
+        if (window.speechSynthesis) {
             speechSynthesis.pause();
         }
         
+        this.stopVUMeter();
         this.emit('pause');
     }
     
@@ -401,14 +464,15 @@ export class AudioManager extends EventEmitter {
         
         this.state.isPaused = false;
         
-        if (this.state.currentAudio && this.state.currentAudio.paused) {
-            this.state.currentAudio.play().catch(console.error);
+        if (this.state.currentAudio) {
+            this.state.currentAudio.play();
         }
         
-        if (speechSynthesis.paused) {
+        if (window.speechSynthesis) {
             speechSynthesis.resume();
         }
         
+        this.startVUMeter();
         this.emit('resume');
     }
     
@@ -420,36 +484,35 @@ export class AudioManager extends EventEmitter {
         }
         
         // Stop speech synthesis
-        if (speechSynthesis.speaking) {
+        if (window.speechSynthesis) {
             speechSynthesis.cancel();
         }
         
         this.state.isPlaying = false;
         this.state.isPaused = false;
+        this.stopVUMeter();
         
         this.emit('stop');
     }
     
     clear() {
-        // Stop current playback
+        // Stop playback
         this.stop();
         
         // Clear queue
         this.queue = [];
         
-        // Clean up all active audio elements
+        // Clear all active audio elements
         this.activeAudioElements.forEach(audio => {
             this.cleanupAudio(audio);
         });
         this.activeAudioElements.clear();
         
-        // Clear retry counts
-        this.retryCount.clear();
-        
-        console.log('🔇 Audio queue cleared');
         this.emit('clear');
+        console.log('🧹 Audio queue cleared');
     }
     
+    // Enhanced volume control with VU feedback
     setVolume(volume) {
         const clampedVolume = Math.max(0, Math.min(1, volume));
         this.config.speechVolume = clampedVolume;
@@ -472,12 +535,7 @@ export class AudioManager extends EventEmitter {
         this.emit('rate:changed', clampedRate);
     }
     
-    setPitch(pitch) {
-        const clampedPitch = Math.max(0.5, Math.min(2, pitch));
-        this.config.speechPitch = clampedPitch;
-        this.emit('pitch:changed', clampedPitch);
-    }
-    
+    // Utility methods
     getQueueLength() {
         return this.queue.length;
     }
@@ -490,17 +548,16 @@ export class AudioManager extends EventEmitter {
         return this.state.isPaused;
     }
     
-    getAvailableVoices() {
-        return this.state.availableVoices.map(voice => ({
-            name: voice.name,
-            lang: voice.lang,
-            localService: voice.localService,
-            default: voice.default
-        }));
+    getCurrentText() {
+        return this.state.currentText;
     }
     
-    getCacheKey(text, voice) {
-        return `${voice}:${text.substring(0, 100)}`;
+    getCurrentSentiment() {
+        return this.state.currentSentiment;
+    }
+    
+    getCacheKey(text, voice, sentiment) {
+        return `${voice}:${sentiment}:${text.substring(0, 50)}`;
     }
     
     generateId() {
@@ -510,7 +567,7 @@ export class AudioManager extends EventEmitter {
     clearCache() {
         this.audioCache.clear();
         this.emit('cache:cleared');
-        console.log('🗑️ Audio cache cleared');
+        console.log('🧹 Audio cache cleared');
     }
     
     getStats() {
@@ -521,7 +578,9 @@ export class AudioManager extends EventEmitter {
             isPlaying: this.state.isPlaying,
             isPaused: this.state.isPaused,
             contextEnabled: this.state.contextEnabled,
-            availableVoices: this.state.availableVoices.length
+            currentText: this.state.currentText,
+            currentSentiment: this.state.currentSentiment,
+            voice: this.config.voice
         };
     }
     
@@ -532,26 +591,24 @@ export class AudioManager extends EventEmitter {
         // Clear cache
         this.clearCache();
         
+        // Stop VU meter
+        this.stopVUMeter();
+        
         // Close audio context
         if (this.state.audioContext) {
             this.state.audioContext.close();
             this.state.audioContext = null;
         }
         
-        // Remove event listeners
-        document.removeEventListener('visibilitychange', () => {});
-        speechSynthesis.removeEventListener('voiceschanged', () => {});
-        
         // Clear all references
         this.queue = [];
         this.activeAudioElements.clear();
         this.retryCount.clear();
-        this.audioCache.clear();
         
         // Remove all event listeners
         this.removeAllListeners();
         
-        console.log('🔊 AudioManager destroyed');
         this.emit('destroyed');
+        console.log('🎵 AudioManager destroyed');
     }
 }
