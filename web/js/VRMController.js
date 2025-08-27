@@ -104,17 +104,16 @@ export class VRMController extends EventEmitter {
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // Create camera - AIRI-STYLE CLOSER FRAMING
-        // AIRI typically uses FOV 20-25 for more intimate framing
+        // Create camera - PROPER FRAMING FOR STANDARD VRM
         this.three.camera = new THREE.PerspectiveCamera(
-            25,  // Slightly wider FOV for better framing
+            30,  // Moderate FOV for good framing without distortion
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        // Position for upper body shot - adjusted for typical VRM height
-        this.three.camera.position.set(0, 1.4, 3.0); // Eye level, 3 units back
-        this.three.camera.lookAt(0, 1.2, 0); // Look at upper chest
+        // Initial position - will be adjusted after VRM loads
+        this.three.camera.position.set(0, 1.0, 2.8); // Eye level, good distance
+        this.three.camera.lookAt(0, 0.85, 0); // Look at chest level of typical VRM
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -234,8 +233,14 @@ export class VRMController extends EventEmitter {
         
         this.three.vrm = vrm;
         
+        // Store THREE reference globally for debugging
+        if (!window.THREE) {
+            import('three').then(module => {
+                window.THREE = module;
+            });
+        }
+        
         // Position model - STANDARD VRM POSITIONING
-        // Most VRMs are designed with origin at feet, around 1.5-1.8 units tall
         vrm.scene.position.set(0, 0, 0); // Keep at origin
         vrm.scene.rotation.y = Math.PI; // Face camera
         
@@ -246,21 +251,25 @@ export class VRMController extends EventEmitter {
         const center = box.getCenter(new THREE.Vector3());
         
         console.log('📏 VRM Dimensions:', {
-            height: size.y,
-            width: size.x,
-            depth: size.z,
-            center: center
+            height: size.y.toFixed(2),
+            width: size.x.toFixed(2),
+            depth: size.z.toFixed(2),
+            center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
         });
         
-        // Adjust camera to frame the model properly
-        // Typical VRM is ~1.6 units tall, center at ~0.8
+        // Auto-adjust camera for proper framing based on actual VRM size
         if (this.three.camera) {
-            const idealCameraHeight = center.y + 0.1; // Slightly above center
-            const idealLookAtHeight = center.y - 0.1; // Look slightly below eye level
-            this.three.camera.position.y = idealCameraHeight;
-            this.three.camera.lookAt(0, idealLookAtHeight, 0);
+            // For upper body/bust shot framing (AIRI-style)
+            const targetHeight = center.y + size.y * 0.15; // Look at upper chest/neck
+            const cameraHeight = center.y + size.y * 0.2; // Camera slightly above
+            const cameraDistance = size.y * 1.8; // Distance based on model height
             
-            console.log(`📷 Camera auto-adjusted to height ${idealCameraHeight}, looking at ${idealLookAtHeight}`);
+            this.three.camera.position.set(0, cameraHeight, cameraDistance);
+            this.three.camera.lookAt(0, targetHeight, 0);
+            
+            console.log(`📷 Camera auto-adjusted:
+                Position: (0, ${cameraHeight.toFixed(2)}, ${cameraDistance.toFixed(2)})
+                Looking at: (0, ${targetHeight.toFixed(2)}, 0)`);
         }
         
         // Add to scene
@@ -763,17 +772,23 @@ export class VRMController extends EventEmitter {
             return;
         }
         
+        // Get Three.js reference
+        const Three = window.THREE;
+        if (!Three) {
+            console.log('THREE.js not available in global scope');
+            return;
+        }
+        
         // Get VRM bounds
-        const box = new (window.THREE || THREE).Box3().setFromObject(this.three.vrm.scene);
-        const center = box.getCenter(new (window.THREE || THREE).Vector3());
-        const size = box.getSize(new (window.THREE || THREE).Vector3());
+        const box = new Three.Box3().setFromObject(this.three.vrm.scene);
+        const center = box.getCenter(new Three.Vector3());
+        const size = box.getSize(new Three.Vector3());
         
         console.log('🎥 Camera Debug Info:');
         console.log('VRM Position:', this.three.vrm.scene.position);
         console.log('VRM Bounds:', { center, size });
         console.log('VRM Height:', size.y);
         console.log('Camera Position:', this.three.camera.position);
-        console.log('Camera LookAt:', this.three.camera.lookAt);
         console.log('Camera FOV:', this.three.camera.fov);
         
         return { center, size, cameraPos: this.three.camera.position };
