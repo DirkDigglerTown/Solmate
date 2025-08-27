@@ -108,16 +108,16 @@ export class VRMController extends EventEmitter {
         // Optional: Add fog for depth
         this.three.scene.fog = new THREE.Fog(0x1a2332, 5, 15);
         
-        // Create camera - PROPER FRAMING FOR STANDARD VRM
+        // Create camera - CONFIRMED WORKING POSITION FROM PREVIOUS CHAT
         this.three.camera = new THREE.PerspectiveCamera(
-            30,  // Moderate FOV for good framing without distortion
+            30,  // FOV
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        // Initial position - will be adjusted after VRM loads
-        this.three.camera.position.set(0, 1.0, 2.8); // Eye level, good distance
-        this.three.camera.lookAt(0, 0.85, 0); // Look at chest level of typical VRM
+        // THESE VALUES WERE CONFIRMED PERFECT IN PREVIOUS CHAT!
+        this.three.camera.position.set(0, 4.0, 5.0); // Camera at eye level with model
+        this.three.camera.lookAt(0, 4.0, 0); // Look straight ahead at model center
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -265,8 +265,8 @@ export class VRMController extends EventEmitter {
             });
         }
         
-        // Position model - STANDARD VRM POSITIONING
-        vrm.scene.position.set(0, 0, 0); // Keep at origin
+        // Position model at the CONFIRMED WORKING HEIGHT
+        vrm.scene.position.set(0, 4.0, 0); // Model at y=4.0 - this was confirmed perfect!
         vrm.scene.rotation.y = Math.PI; // Face camera
         
         // Get actual model bounds to verify positioning
@@ -282,19 +282,15 @@ export class VRMController extends EventEmitter {
             center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
         });
         
-        // Auto-adjust camera for proper framing based on actual VRM size
+        // DO NOT auto-adjust camera - use the confirmed working values
+        console.log(`📷 Camera using confirmed values:
+            Position: (0, 4.0, 5.0)
+            Looking at: (0, 4.0, 0)`);
+        
+        // Ensure camera stays at the working position
         if (this.three.camera) {
-            // For upper body/bust shot framing (AIRI-style)
-            const targetHeight = center.y + size.y * 0.15; // Look at upper chest/neck
-            const cameraHeight = center.y + size.y * 0.2; // Camera slightly above
-            const cameraDistance = size.y * 1.8; // Distance based on model height
-            
-            this.three.camera.position.set(0, cameraHeight, cameraDistance);
-            this.three.camera.lookAt(0, targetHeight, 0);
-            
-            console.log(`📷 Camera auto-adjusted:
-                Position: (0, ${cameraHeight.toFixed(2)}, ${cameraDistance.toFixed(2)})
-                Looking at: (0, ${targetHeight.toFixed(2)}, 0)`);
+            this.three.camera.position.set(0, 4.0, 5.0);
+            this.three.camera.lookAt(0, 4.0, 0);
         }
         
         // Add to scene
