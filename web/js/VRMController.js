@@ -107,14 +107,14 @@ export class VRMController extends EventEmitter {
         // Create camera - AIRI-STYLE CLOSER FRAMING
         // AIRI typically uses FOV 20-25 for more intimate framing
         this.three.camera = new THREE.PerspectiveCamera(
-            20,  // Lower FOV for less distortion and closer feel (was 35)
+            25,  // Slightly wider FOV for better framing
             window.innerWidth / window.innerHeight,
             0.1,
             20
         );
-        // Closer position for upper body/bust shot like AIRI
-        this.three.camera.position.set(0, 1.5, 2.5); // Much closer, chest-level view
-        this.three.camera.lookAt(0, 1.3, 0); // Look at chest/neck area
+        // Position for upper body shot - adjusted for typical VRM height
+        this.three.camera.position.set(0, 1.4, 3.0); // Eye level, 3 units back
+        this.three.camera.lookAt(0, 1.2, 0); // Look at upper chest
         
         // Create renderer
         const canvas = document.getElementById('vrmCanvas');
@@ -234,9 +234,34 @@ export class VRMController extends EventEmitter {
         
         this.three.vrm = vrm;
         
-        // Position model - AIRI-STYLE CENTERED POSITION
-        vrm.scene.position.y = 0; // Model at origin for proper framing
+        // Position model - STANDARD VRM POSITIONING
+        // Most VRMs are designed with origin at feet, around 1.5-1.8 units tall
+        vrm.scene.position.set(0, 0, 0); // Keep at origin
         vrm.scene.rotation.y = Math.PI; // Face camera
+        
+        // Get actual model bounds to verify positioning
+        const THREE = window.THREE || await import('three');
+        const box = new THREE.Box3().setFromObject(vrm.scene);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        
+        console.log('📏 VRM Dimensions:', {
+            height: size.y,
+            width: size.x,
+            depth: size.z,
+            center: center
+        });
+        
+        // Adjust camera to frame the model properly
+        // Typical VRM is ~1.6 units tall, center at ~0.8
+        if (this.three.camera) {
+            const idealCameraHeight = center.y + 0.1; // Slightly above center
+            const idealLookAtHeight = center.y - 0.1; // Look slightly below eye level
+            this.three.camera.position.y = idealCameraHeight;
+            this.three.camera.lookAt(0, idealLookAtHeight, 0);
+            
+            console.log(`📷 Camera auto-adjusted to height ${idealCameraHeight}, looking at ${idealLookAtHeight}`);
+        }
         
         // Add to scene
         this.three.scene.add(vrm.scene);
@@ -731,6 +756,37 @@ export class VRMController extends EventEmitter {
     }
     
     // === UTILITY METHODS ===
+    
+    debugCameraPosition() {
+        if (!this.three.vrm || !this.three.camera) {
+            console.log('No VRM or camera loaded');
+            return;
+        }
+        
+        // Get VRM bounds
+        const box = new (window.THREE || THREE).Box3().setFromObject(this.three.vrm.scene);
+        const center = box.getCenter(new (window.THREE || THREE).Vector3());
+        const size = box.getSize(new (window.THREE || THREE).Vector3());
+        
+        console.log('🎥 Camera Debug Info:');
+        console.log('VRM Position:', this.three.vrm.scene.position);
+        console.log('VRM Bounds:', { center, size });
+        console.log('VRM Height:', size.y);
+        console.log('Camera Position:', this.three.camera.position);
+        console.log('Camera LookAt:', this.three.camera.lookAt);
+        console.log('Camera FOV:', this.three.camera.fov);
+        
+        return { center, size, cameraPos: this.three.camera.position };
+    }
+    
+    adjustCamera(x = 0, y = 1.4, z = 3.0, lookY = 1.2) {
+        if (!this.three.camera) return;
+        
+        this.three.camera.position.set(x, y, z);
+        this.three.camera.lookAt(0, lookY, 0);
+        
+        console.log(`Camera adjusted to: pos(${x}, ${y}, ${z}) looking at (0, ${lookY}, 0)`);
+    }
     
     updateHeadTarget(x, y) {
         this.animation.headTarget.x = x;
