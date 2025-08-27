@@ -1,8 +1,7 @@
 // web/js/main.js
-// Main entry point for the modular Solmate application
+// Fixed main entry point with proper error handling and module integration
 
 import { SolmateApp } from './SolmateApp.js';
-import { VRMController } from './VRMController.js';
 
 // Global app instance
 let app = null;
@@ -12,250 +11,287 @@ async function initialize() {
     try {
         console.log('🚀 Initializing Solmate...');
         
-        // Hide loading status initially
-        const loadingStatus = document.getElementById('loadingStatus');
-        if (loadingStatus) {
-            loadingStatus.style.display = 'block';
+        // Check for required elements
+        const requiredElements = ['vrmCanvas', 'chatForm', 'promptInput', 'sendBtn'];
+        const missingElements = requiredElements.filter(id => !document.getElementById(id));
+        
+        if (missingElements.length > 0) {
+            throw new Error(`Missing required elements: ${missingElements.join(', ')}`);
+        }
+        
+        // Check WebGL support
+        if (!isWebGLSupported()) {
+            console.warn('⚠️ WebGL not supported, running in audio-only mode');
+            showWebGLFallback();
         }
         
         // Create app instance
         app = new SolmateApp();
         
-        // Make app available globally for debugging
-        window.solmateApp = app;
-        
         // Set up global error handling
-        window.addEventListener('error', (event) => {
-            console.error('Global error:', event.error);
-            app?.emit('error', { context: 'global', error: event.error });
-        });
-        
-        window.addEventListener('unhandledrejection', (event) => {
-            console.error('Unhandled promise rejection:', event.reason);
-            app?.emit('error', { context: 'promise', error: event.reason });
-        });
+        setupGlobalErrorHandling();
         
         // Initialize the app
         await app.init();
         
         console.log('✅ Solmate initialized successfully');
         
-        // Hide loading screen after a short delay
-        setTimeout(() => {
-            if (loadingStatus) {
-                loadingStatus.style.display = 'none';
-            }
-        }, 1000);
+        // Hide loading screen
+        hideLoadingScreen();
         
-        // Set up cleanup on page unload
-        window.addEventListener('beforeunload', cleanup);
+        // Expose app instance for debugging
+        if (import.meta.env?.DEV || window.location.hostname === 'localhost') {
+            window.solmateApp = app;
+            console.log('🛠️ Development mode: app instance available at window.solmateApp');
+        }
         
-        // Expose debug functions
+        // Setup debug commands
         setupDebugCommands();
         
     } catch (error) {
-        console.error('Failed to initialize Solmate:', error);
+        console.error('❌ Failed to initialize Solmate:', error);
         showInitError(error);
     }
 }
 
-// Cleanup function
-function cleanup() {
-    if (app) {
-        console.log('Cleaning up Solmate...');
-        app.destroy();
-        app = null;
+// Check WebGL support
+function isWebGLSupported() {
+    try {
+        const canvas = document.createElement('canvas');
+        return !!(window.WebGLRenderingContext && 
+                 (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+    } catch(e) {
+        return false;
+    }
+}
+
+// Show WebGL fallback UI
+function showWebGLFallback() {
+    const canvas = document.getElementById('vrmCanvas');
+    const fallback = document.querySelector('.webgl-fallback');
+    
+    if (canvas) canvas.style.display = 'none';
+    if (fallback) fallback.style.display = 'block';
+    
+    document.body.classList.add('no-webgl');
+}
+
+// Setup global error handling
+function setupGlobalErrorHandling() {
+    // Unhandled errors
+    window.addEventListener('error', (event) => {
+        console.error('🚨 Global error:', event.error);
+        if (app) {
+            app.emit('error', { 
+                context: 'global', 
+                error: event.error,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno
+            });
+        }
+    });
+    
+    // Unhandled promise rejections
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('🚨 Unhandled promise rejection:', event.reason);
+        if (app) {
+            app.emit('error', { 
+                context: 'promise', 
+                error: event.reason 
+            });
+        }
+        
+        // Prevent the default browser behavior
+        event.preventDefault();
+    });
+    
+    // Module loading errors
+    window.addEventListener('moduleError', (event) => {
+        console.error('🚨 Module loading error:', event.detail);
+        if (app) {
+            app.emit('error', {
+                context: 'module',
+                error: event.detail.error,
+                module: event.detail.module
+            });
+        }
+    });
+}
+
+// Hide loading screen
+function hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loadingStatus');
+    if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+            loadingScreen.style.display = 'none';
+        }, 500);
     }
 }
 
 // Show initialization error to user
 function showInitError(error) {
-    const loadingStatus = document.getElementById('loadingStatus');
-    if (loadingStatus) {
-        loadingStatus.innerHTML = `
-            <div class="loading-content error" style="text-align: center; color: white;">
+    console.error('💥 Initialization error details:', error);
+    
+    const loadingScreen = document.getElementById('loadingStatus');
+    if (loadingScreen) {
+        loadingScreen.innerHTML = `
+            <div class="loading-content error">
+                <div style="font-size: 24px; margin-bottom: 16px;">❌</div>
                 <h2>Initialization Error</h2>
                 <p>Failed to start Solmate. Please refresh the page.</p>
-                <details style="margin-top: 20px;">
-                    <summary style="cursor: pointer;">Error Details</summary>
-                    <pre style="text-align: left; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 5px; margin-top: 10px;">${error.message || error}</pre>
+                <details style="margin-top: 16px; text-align: left;">
+                    <summary style="cursor: pointer; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 4px;">Error Details</summary>
+                    <pre style="margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 12px; overflow-x: auto;">${error.message || error}
+${error.stack || ''}</pre>
                 </details>
                 <button onclick="location.reload()" style="
                     margin-top: 20px;
-                    padding: 10px 20px;
-                    background: #00ff88;
+                    padding: 12px 24px;
+                    background: linear-gradient(135deg, #00f0ff, #00ff88);
                     border: none;
                     border-radius: 8px;
-                    color: #0a0e17;
+                    color: #001014;
                     cursor: pointer;
                     font-weight: bold;
+                    font-size: 14px;
                 ">Reload Page</button>
             </div>
         `;
+        loadingScreen.style.display = 'block';
+        loadingScreen.style.opacity = '1';
+    }
+    
+    // Also try to initialize in audio-only mode
+    setTimeout(() => {
+        initializeAudioOnlyMode();
+    }, 1000);
+}
+
+// Initialize in audio-only mode as fallback
+async function initializeAudioOnlyMode() {
+    try {
+        console.log('🎵 Attempting audio-only initialization...');
+        
+        // Create minimal app without VRM
+        const { AudioManager } = await import('./AudioManager.js');
+        const audioManager = new AudioManager();
+        await audioManager.init();
+        
+        // Setup basic chat functionality
+        setupBasicChat(audioManager);
+        
+        // Show audio-only message
+        showAudioOnlyMode();
+        
+        console.log('✅ Audio-only mode initialized');
+        
+    } catch (error) {
+        console.error('❌ Audio-only mode failed:', error);
+    }
+}
+
+// Setup basic chat functionality for audio-only mode
+function setupBasicChat(audioManager) {
+    const chatForm = document.getElementById('chatForm');
+    const promptInput = document.getElementById('promptInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    if (!chatForm || !promptInput || !sendBtn) return;
+    
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const text = promptInput.value.trim();
+        if (!text) return;
+        
+        promptInput.value = '';
+        sendBtn.disabled = true;
+        sendBtn.textContent = '⏳';
+        
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [
+                        { 
+                            role: 'system', 
+                            content: 'You are Solmate. Keep responses brief since this is audio-only mode.' 
+                        },
+                        { role: 'user', content: text }
+                    ]
+                })
+            });
+            
+            if (response.ok) {
+                const { content } = await response.json();
+                audioManager.queue(content);
+            } else {
+                throw new Error(`Chat failed: ${response.status}`);
+            }
+            
+        } catch (error) {
+            console.error('Chat error:', error);
+            audioManager.queue("Sorry, I'm having trouble responding right now.");
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = '▶';
+        }
+    });
+}
+
+// Show audio-only mode message
+function showAudioOnlyMode() {
+    const canvas = document.getElementById('vrmCanvas');
+    if (canvas) {
+        const audioOnlyDiv = document.createElement('div');
+        audioOnlyDiv.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            font-family: system-ui, sans-serif;
+            background: rgba(10, 14, 23, 0.9);
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+        `;
+        audioOnlyDiv.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
+            <h2>Audio-Only Mode</h2>
+            <p>Chat functionality is available below!</p>
+            <p style="margin-top: 16px; opacity: 0.7;">Solmate is ready to chat with you.</p>
+        `;
+        
+        canvas.parentElement.appendChild(audioOnlyDiv);
     }
 }
 
 // Setup debug commands
 function setupDebugCommands() {
-    // Debug VRM status
-    window.debugVRM = function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.log('VRM controller not initialized');
-            return null;
-        }
-        
-        console.log('=== VRM DEBUG REPORT ===');
-        console.log('Controller initialized:', controller.state.initialized);
-        console.log('VRM loaded:', controller.state.loaded);
-        console.log('Current animation:', controller.state.currentAnimation);
-        console.log('Current emotion:', controller.emotion.current);
-        
-        if (controller.vrm) {
-            console.log('VRM Features:', {
-                hasHumanoid: !!controller.vrm.humanoid,
-                hasExpressions: !!controller.vrm.expressionManager,
-                hasLookAt: !!controller.vrm.lookAt,
-                hasSpringBones: !!controller.vrm.springBoneManager
-            });
-            console.log('Available bones:', Object.keys(controller.bones));
-            console.log('Available expressions:', Object.keys(controller.expressions));
-        }
-        
-        return controller;
-    };
+    if (!app) return;
     
-    // Test chat
-    window.testChat = async function(message = "Hello! How are you today?") {
-        if (!app) {
-            console.error('App not initialized');
-            return;
-        }
-        return app.sendMessage(message);
-    };
+    // Expose debug functions globally
+    window.debugVRM = () => app.debugVRM();
+    window.testChat = () => app.testChat();
+    window.testTTS = () => app.testTTS();
+    window.testWave = () => app.testWave();
+    window.testNod = () => app.testNod();
+    window.testThink = () => app.testThink();
+    window.testExcited = () => app.testExcited();
+    window.testExpression = (expr, intensity) => app.testExpression(expr, intensity);
+    window.testMood = (mood) => app.testMood(mood);
+    window.reloadVRM = () => app.reloadVRM();
+    window.testPrice = () => app.testPrice();
+    window.testTPS = () => app.testTPS();
+    window.getAppState = () => app.getAppState();
     
-    // Test TTS
-    window.testTTS = function(text = "Testing the text to speech system.", voice = 'nova') {
-        if (!app?.components?.audioManager) {
-            console.error('Audio manager not initialized');
-            return;
-        }
-        app.components.audioManager.queue(text, voice);
-    };
-    
-    // Test animations
-    window.testWave = function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.wave();
-    };
-    
-    window.testNod = function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.nod();
-    };
-    
-    window.testThink = function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.think();
-    };
-    
-    window.testExcited = function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.excited();
-    };
-    
-    // Test expressions
-    window.testExpression = function(expression = 'happy', intensity = 1) {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.setExpression(expression, intensity, 2000);
-    };
-    
-    // Test mood
-    window.testMood = function(mood = 'happy') {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        controller.setMood(mood);
-    };
-    
-    // Reload VRM
-    window.reloadVRM = async function() {
-        const controller = app?.components?.vrmController;
-        if (!controller) {
-            console.error('VRM controller not initialized');
-            return;
-        }
-        
-        console.log('🔄 Reloading VRM...');
-        try {
-            await controller.loadVRM('/assets/avatar/solmate.vrm');
-            console.log('✅ VRM reloaded successfully');
-            return 'VRM reloaded';
-        } catch (error) {
-            console.error('Failed to reload VRM:', error);
-            return 'Reload failed: ' + error.message;
-        }
-    };
-    
-    // Test price fetch
-    window.testPrice = async function() {
-        if (!app) {
-            console.error('App not initialized');
-            return;
-        }
-        return app.fetchPrice();
-    };
-    
-    // Test TPS fetch
-    window.testTPS = async function() {
-        if (!app) {
-            console.error('App not initialized');
-            return;
-        }
-        return app.fetchTPS();
-    };
-    
-    // Get app state
-    window.getAppState = function() {
-        if (!app) {
-            console.error('App not initialized');
-            return null;
-        }
-        return {
-            initialized: app.state.initialized,
-            conversation: app.state.conversation,
-            wsConnected: app.state.wsConnection?.readyState === WebSocket.OPEN,
-            theme: app.state.ui.theme,
-            debugMode: app.state.ui.debugMode,
-            components: {
-                vrmController: !!app.components.vrmController,
-                audioManager: !!app.components.audioManager
-            }
-        };
-    };
-    
+    // Log available commands
     console.log('🎮 Debug commands available:');
     console.log('- debugVRM() - Check VRM status');
     console.log('- testChat() - Test chat system');
@@ -273,72 +309,77 @@ function setupDebugCommands() {
     console.log('💡 Press Ctrl+D for debug overlay');
 }
 
-// Handle service worker
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-            .then(registration => {
-                console.log('✅ Service Worker registered:', registration.scope);
-                
-                // Update UI
-                const swStatus = document.getElementById('swStatus');
-                if (swStatus) swStatus.textContent = 'active';
-                
-                // Handle updates
-                registration.addEventListener('updatefound', () => {
-                    const newWorker = registration.installing;
-                    newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            // New service worker available
-                            if (window.Utils) {
-                                window.Utils.showNotification('Update available! Refresh to get the latest version.', 'info', 10000);
-                            }
-                        }
-                    });
-                });
-                
-                // Check for updates periodically
-                setInterval(() => {
-                    registration.update();
-                }, 60000); // Check every minute
-            })
-            .catch(error => {
-                console.warn('Service Worker registration failed:', error);
-                const swStatus = document.getElementById('swStatus');
-                if (swStatus) swStatus.textContent = 'failed';
-            });
-    });
+// Cleanup function
+function cleanup() {
+    if (app) {
+        console.log('🧹 Cleaning up Solmate...');
+        app.destroy();
+        app = null;
+    }
     
-    // Handle offline/online events
-    window.addEventListener('online', () => {
-        document.body.classList.remove('offline');
-        if (window.Utils) {
-            window.Utils.showNotification('Back online!', 'success', 3000);
-        }
-        // Reconnect WebSocket if needed
-        if (app && !app.state.wsConnection) {
-            app.connectWebSocket();
-        }
-    });
-    
-    window.addEventListener('offline', () => {
-        document.body.classList.add('offline');
-        if (window.Utils) {
-            window.Utils.showNotification('You are offline. Some features may be limited.', 'warning', 5000);
-        }
-    });
-} else {
-    console.warn('Service Workers not supported');
-    const swStatus = document.getElementById('swStatus');
-    if (swStatus) swStatus.textContent = 'unsupported';
+    // Clear debug functions
+    if (window.debugVRM) {
+        delete window.debugVRM;
+        delete window.testChat;
+        delete window.testTTS;
+        delete window.testWave;
+        delete window.testNod;
+        delete window.testThink;
+        delete window.testExcited;
+        delete window.testExpression;
+        delete window.testMood;
+        delete window.reloadVRM;
+        delete window.testPrice;
+        delete window.testTPS;
+        delete window.getAppState;
+        delete window.solmateApp;
+    }
 }
+
+// Performance monitoring
+function logPerformance() {
+    if (performance.getEntriesByType) {
+        const navigation = performance.getEntriesByType('navigation')[0];
+        if (navigation) {
+            console.log('⚡ Performance metrics:');
+            console.log(`- Page load: ${Math.round(navigation.loadEventEnd - navigation.loadEventStart)}ms`);
+            console.log(`- DOM ready: ${Math.round(navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart)}ms`);
+            console.log(`- First paint: ${Math.round(navigation.loadEventEnd)}ms`);
+        }
+    }
+}
+
+// Set up cleanup on page unload
+window.addEventListener('beforeunload', cleanup);
+
+// Handle visibility changes
+document.addEventListener('visibilitychange', () => {
+    if (app) {
+        if (document.hidden) {
+            // Page is hidden - pause non-critical operations
+            app.emit('visibility:hidden');
+        } else {
+            // Page is visible - resume operations
+            app.emit('visibility:visible');
+        }
+    }
+});
 
 // Start initialization when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
+    document.addEventListener('DOMContentLoaded', () => {
+        // Add slight delay to ensure all resources are ready
+        setTimeout(initialize, 100);
+    });
 } else {
-    initialize();
+    // DOM already ready
+    setTimeout(initialize, 100);
 }
 
+// Log performance metrics after everything loads
+window.addEventListener('load', () => {
+    setTimeout(logPerformance, 1000);
+});
+
 // Export for testing
-export { app, cleanup };
+export { app, cleanup, initialize };
