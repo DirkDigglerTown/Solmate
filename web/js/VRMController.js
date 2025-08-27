@@ -377,6 +377,11 @@ export class VRMController extends EventEmitter {
         const deltaTime = this.three.clock.getDelta();
         const elapsedTime = this.three.clock.getElapsedTime();
         
+        // Debug: Log every 60 frames to confirm animation is running
+        if (Math.floor(elapsedTime * 60) % 60 === 0) {
+            console.log('🎬 Animation frame:', Math.floor(elapsedTime), 'sec');
+        }
+        
         // Update VRM
         if (this.three.vrm) {
             this.three.vrm.update(deltaTime);
@@ -393,8 +398,12 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // Render scene
-        this.three.renderer.render(this.three.scene, this.three.camera);
+        // Render scene - THIS IS CRITICAL!
+        if (this.three.renderer && this.three.scene && this.three.camera) {
+            this.three.renderer.render(this.three.scene, this.three.camera);
+        } else {
+            console.error('❌ Missing renderer, scene, or camera!');
+        }
     }
     
     updateBreathing(time) {
@@ -867,6 +876,83 @@ export class VRMController extends EventEmitter {
                 }
             });
         }
+    }
+    
+    // Debug method to force render and check scene
+    debugRender() {
+        console.log('🔍 Debug Render Check:');
+        
+        if (!this.three.renderer) {
+            console.error('❌ No renderer!');
+            return;
+        }
+        
+        if (!this.three.scene) {
+            console.error('❌ No scene!');
+            return;
+        }
+        
+        if (!this.three.camera) {
+            console.error('❌ No camera!');
+            return;
+        }
+        
+        if (!this.three.vrm) {
+            console.error('❌ No VRM!');
+            return;
+        }
+        
+        console.log('✅ All components present');
+        console.log('Scene children:', this.three.scene.children.length);
+        console.log('VRM visible:', this.three.vrm.scene.visible);
+        console.log('Canvas size:', {
+            width: this.three.renderer.domElement.width,
+            height: this.three.renderer.domElement.height
+        });
+        
+        // Force a render
+        console.log('Forcing render...');
+        this.three.renderer.render(this.three.scene, this.three.camera);
+        
+        // Check if anything was drawn
+        const gl = this.three.renderer.getContext();
+        const pixels = new Uint8Array(4);
+        gl.readPixels(
+            Math.floor(gl.canvas.width / 2),
+            Math.floor(gl.canvas.height / 2),
+            1, 1,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            pixels
+        );
+        console.log('Center pixel color:', pixels);
+        
+        // Try adding a test cube to see if anything renders
+        this.addTestCube();
+    }
+    
+    // Add a bright test cube to verify rendering works
+    addTestCube() {
+        import('three').then(THREE => {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(0, 4.0, 0); // Same position as avatar
+            cube.name = 'testCube';
+            
+            // Remove old test cube if exists
+            const oldCube = this.three.scene.getObjectByName('testCube');
+            if (oldCube) {
+                this.three.scene.remove(oldCube);
+                console.log('Removed old test cube');
+            } else {
+                this.three.scene.add(cube);
+                console.log('Added bright pink test cube at avatar position');
+            }
+            
+            // Force render
+            this.three.renderer.render(this.three.scene, this.three.camera);
+        });
     }
     
     // Method to cycle backgrounds for testing
