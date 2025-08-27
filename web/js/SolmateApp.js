@@ -1,9 +1,9 @@
 // web/js/SolmateApp.js
 // Main application class with event-driven architecture
-// Updated to use VRMController consistently
+// USES VRMController consistently (not VRMLoader)
 
 import { EventEmitter } from './EventEmitter.js';
-import { VRMController } from './VRMController.js';  // CHANGED: Using VRMController
+import { VRMController } from './VRMController.js';  // CORRECT: VRMController
 import { AudioManager } from './AudioManager.js';
 
 export class SolmateApp extends EventEmitter {
@@ -35,11 +35,21 @@ export class SolmateApp extends EventEmitter {
             ui: {
                 theme: 'dark',
                 debugMode: false
+            },
+            userContext: {
+                isTyping: false,
+                lastInteraction: null,
+                relationshipLevel: 'new',
+                interactionCount: 0,
+                preferences: {},
+                conversationTone: 'friendly',
+                topics: [],
+                mood: 'neutral'
             }
         };
         
         this.components = {
-            vrmController: null,  // CHANGED: Using vrmController instead of vrmLoader
+            vrmController: null,  // CORRECT: vrmController
             audioManager: null
         };
     }
@@ -52,7 +62,7 @@ export class SolmateApp extends EventEmitter {
             await this.loadConfiguration();
             
             // Initialize components
-            this.components.vrmController = new VRMController();  // CHANGED
+            this.components.vrmController = new VRMController();  // CORRECT
             this.components.audioManager = new AudioManager();
             
             // Setup component event listeners
@@ -67,8 +77,8 @@ export class SolmateApp extends EventEmitter {
             // Load saved state
             this.loadSavedState();
             
-            // Initialize VRM
-            await this.components.vrmController.init();  // CHANGED
+            // Initialize VRM Controller
+            await this.components.vrmController.init();  // CORRECT
             
             this.state.initialized = true;
             this.emit('init:complete');
@@ -100,7 +110,7 @@ export class SolmateApp extends EventEmitter {
     }
     
     setupComponentListeners() {
-        // VRM Controller events - CHANGED: All references updated
+        // VRM Controller events (CORRECTED)
         this.components.vrmController.on('load:start', () => {
             this.updateLoadingStatus('Loading avatar...');
         });
@@ -117,12 +127,12 @@ export class SolmateApp extends EventEmitter {
         // Audio Manager events
         this.components.audioManager.on('play:start', (item) => {
             this.emit('speech:start', item);
-            this.components.vrmController.startSpeechAnimation(item.text);  // CHANGED
+            this.components.vrmController.startSpeechAnimation(item.text);  // CORRECT
         });
         
         this.components.audioManager.on('play:end', () => {
             this.emit('speech:end');
-            this.components.vrmController.stopSpeechAnimation();  // CHANGED
+            this.components.vrmController.stopSpeechAnimation();  // CORRECT
         });
         
         this.components.audioManager.on('error', (error) => {
@@ -287,6 +297,16 @@ export class SolmateApp extends EventEmitter {
         input.value = '';
         this.setButtonState('#sendBtn', true, '⏳');
         
+        // Update user context
+        this.state.userContext.isTyping = false;
+        this.state.userContext.lastInteraction = Date.now();
+        this.state.userContext.interactionCount++;
+        
+        // React to user input (if VRM is ready)
+        if (this.components.vrmController && this.components.vrmController.state.loaded) {
+            this.components.vrmController.reactToUserInput?.();
+        }
+        
         try {
             await this.sendMessage(text);
         } finally {
@@ -331,16 +351,69 @@ export class SolmateApp extends EventEmitter {
             // Queue audio and trigger animations
             this.components.audioManager.queue(sanitizedContent);
             
+            // Update user relationship based on conversation
+            this.updateUserRelationship(sanitizedText, sanitizedContent);
+            
             this.emit('message:sent', { user: sanitizedText, assistant: sanitizedContent });
             
         } catch (error) {
             this.emit('error', { context: 'chat', error });
-            this.components.audioManager.queue("I'm having trouble processing that. Please try again.");
+            const errorResponse = "I'm having trouble processing that. Please try again.";
+            this.components.audioManager.queue(errorResponse);
         }
     }
     
     getSystemPrompt() {
-        return `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
+        const basePrompt = `You are Solmate, a helpful and witty Solana Companion. Be concise, engaging, and helpful. Focus on Solana, crypto, DeFi, NFTs, and web3 topics, but answer any question. Always remind users: Not financial advice. Keep responses under 150 words.`;
+        
+        // Add context based on user relationship
+        const relationshipContext = this.getUserRelationshipContext();
+        
+        return basePrompt + relationshipContext;
+    }
+    
+    getUserRelationshipContext() {
+        const { relationshipLevel, interactionCount, conversationTone } = this.state.userContext;
+        
+        if (relationshipLevel === 'new' && interactionCount === 0) {
+            return ' This is your first interaction with this user - be welcoming and introduce yourself naturally.';
+        } else if (relationshipLevel === 'familiar' && interactionCount > 5) {
+            return ` You have chatted ${interactionCount} times with this user. Be friendly and reference shared context when appropriate.`;
+        } else if (relationshipLevel === 'close' && interactionCount > 20) {
+            return ` You are close friends with this user (${interactionCount} interactions). Be warm, personal, and remember their preferences.`;
+        }
+        
+        return '';
+    }
+    
+    updateUserRelationship(userMessage, botResponse) {
+        const ctx = this.state.userContext;
+        
+        // Update relationship level based on interaction count
+        if (ctx.interactionCount > 20) {
+            ctx.relationshipLevel = 'close';
+        } else if (ctx.interactionCount > 5) {
+            ctx.relationshipLevel = 'familiar';
+        } else {
+            ctx.relationshipLevel = 'new';
+        }
+        
+        // Analyze conversation tone
+        const userLower = userMessage.toLowerCase();
+        if (userLower.includes('thank') || userLower.includes('awesome') || userLower.includes('great')) {
+            ctx.mood = 'positive';
+        } else if (userLower.includes('help') || userLower.includes('problem') || userLower.includes('issue')) {
+            ctx.mood = 'helpful';
+        }
+        
+        // Extract topics
+        const solanaKeywords = ['solana', 'sol', 'defi', 'nft', 'crypto', 'blockchain', 'token'];
+        const foundKeywords = solanaKeywords.filter(keyword => userLower.includes(keyword));
+        if (foundKeywords.length > 0) {
+            ctx.topics = [...new Set([...ctx.topics, ...foundKeywords])].slice(-10); // Keep last 10 topics
+        }
+        
+        this.saveState();
     }
     
     sanitizeInput(text) {
@@ -372,10 +445,12 @@ export class SolmateApp extends EventEmitter {
     }
     
     handleMouseMove(event) {
+        if (!this.components.vrmController) return;
+        
         const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
         const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
         
-        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);  // CHANGED
+        this.components.vrmController.updateHeadTarget(mouseX * 0.1, mouseY * 0.1);  // CORRECT
     }
     
     enableAudioContext() {
@@ -384,9 +459,30 @@ export class SolmateApp extends EventEmitter {
     
     scheduleWelcomeMessage() {
         setTimeout(() => {
-            this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
-            setTimeout(() => this.components.vrmController.playWave(), 1000);  // CHANGED
+            if (this.components.audioManager && this.components.audioManager.queue) {
+                this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
+            }
+            
+            setTimeout(() => {
+                if (this.components.vrmController && this.components.vrmController.playWave) {
+                    this.components.vrmController.playWave();  // CORRECT
+                }
+            }, 1000);
         }, 2000);
+    }
+    
+    handleOnlineStatus(isOnline) {
+        if (isOnline) {
+            document.body.classList.remove('offline');
+            // Reconnect WebSocket if needed
+            if (!this.state.wsConnection || this.state.wsConnection.readyState !== WebSocket.OPEN) {
+                this.connectWebSocket();
+            }
+        } else {
+            document.body.classList.add('offline');
+        }
+        
+        this.emit('online:changed', isOnline);
     }
     
     // Utility methods
@@ -455,7 +551,8 @@ export class SolmateApp extends EventEmitter {
         try {
             localStorage.setItem('solmateState', JSON.stringify({
                 conversation: this.state.conversation,
-                theme: this.state.ui.theme
+                theme: this.state.ui.theme,
+                userContext: this.state.userContext
             }));
         } catch (error) {
             console.error('Failed to save state:', error);
@@ -479,10 +576,28 @@ export class SolmateApp extends EventEmitter {
                         this.updateElement('#themeToggle', '☀️');
                     }
                 }
+                
+                if (state.userContext) {
+                    this.state.userContext = { ...this.state.userContext, ...state.userContext };
+                }
             }
         } catch (error) {
             console.error('Failed to load saved state:', error);
         }
+    }
+    
+    getAppStats() {
+        return {
+            initialized: this.state.initialized,
+            conversationLength: this.state.conversation.length,
+            userInteractions: this.state.userContext.interactionCount,
+            relationshipLevel: this.state.userContext.relationshipLevel,
+            vrmStats: this.components.vrmController?.getStats() || null,  // CORRECT
+            audioStats: this.components.audioManager?.getStats() || null,
+            wsConnected: this.state.wsConnection?.readyState === WebSocket.OPEN,
+            activeTimers: this.state.timers.size,
+            theme: this.state.ui.theme
+        };
     }
     
     destroy() {
@@ -495,12 +610,13 @@ export class SolmateApp extends EventEmitter {
         }
         
         // Destroy components
-        this.components.vrmController?.destroy();  // CHANGED
+        this.components.vrmController?.destroy();  // CORRECT
         this.components.audioManager?.destroy();
         
         // Clear event listeners
         this.removeAllListeners();
         
         this.emit('destroyed');
+        console.log('🧹 SolmateApp destroyed and cleaned up');
     }
 }
