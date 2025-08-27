@@ -1,5 +1,5 @@
 // web/js/AudioManager.js
-// Fixed audio manager with proper queue method
+// Enhanced audio system with single cute female voice option
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -7,9 +7,11 @@ export class AudioManager extends EventEmitter {
     constructor() {
         super();
         
+        console.log('🔊 Initializing AudioManager...');
+        
         this.config = {
             maxQueueSize: 10,
-            defaultVoice: 'nova',
+            defaultVoice: 'nova',  // Single cute female voice
             ttsEndpoint: '/api/tts',
             speechRate: 0.9,
             speechPitch: 1.1,
@@ -23,37 +25,96 @@ export class AudioManager extends EventEmitter {
             isPaused: false,
             currentAudio: null,
             audioContext: null,
-            contextEnabled: false
+            contextEnabled: false,
+            availableVoices: []
         };
         
-        this.audioQueue = [];
+        this.queue = [];
         this.audioCache = new Map();
         this.activeAudioElements = new Set();
         this.retryCount = new Map();
+        
+        this.init();
     }
     
     async init() {
-        console.log('🔊 Initializing AudioManager...');
-        
-        // Try to enable audio context
-        this.enableContext();
-        
-        // Check for speech synthesis support
-        if ('speechSynthesis' in window) {
-            // Wait for voices to load
-            const loadVoices = () => {
-                const voices = speechSynthesis.getVoices();
-                if (voices.length > 0) {
-                    console.log(`✅ Speech synthesis ready with ${voices.length} voices`);
-                } else {
-                    setTimeout(loadVoices, 100);
-                }
-            };
-            loadVoices();
+        try {
+            // Wait for speech synthesis voices to load
+            this.loadVoices();
+            
+            // Set up event listeners
+            this.setupEventListeners();
+            
+            console.log('✅ AudioManager initialized');
+            this.emit('init:complete');
+            
+        } catch (error) {
+            console.error('AudioManager initialization failed:', error);
+            this.emit('error', { context: 'init', error });
+            throw error;
         }
+    }
+    
+    loadVoices() {
+        // Function to get and filter voices
+        const updateVoices = () => {
+            const voices = speechSynthesis.getVoices();
+            
+            // Filter for female voices that sound cute/young
+            this.state.availableVoices = voices.filter(voice => {
+                const name = voice.name.toLowerCase();
+                const lang = voice.lang.toLowerCase();
+                
+                // Prefer female voices in English
+                return (
+                    lang.startsWith('en') && (
+                        name.includes('female') ||
+                        name.includes('woman') ||
+                        name.includes('zira') ||
+                        name.includes('hazel') ||
+                        name.includes('susan') ||
+                        name.includes('samantha') ||
+                        name.includes('karen') ||
+                        name.includes('moira') ||
+                        name.includes('tessa') ||
+                        name.includes('veena') ||
+                        name.includes('fiona') ||
+                        voice.name === 'Google US English' ||
+                        (name.includes('google') && name.includes('us'))
+                    )
+                );
+            });
+            
+            // If no specific female voices found, get the best available
+            if (this.state.availableVoices.length === 0) {
+                this.state.availableVoices = voices.filter(voice => 
+                    voice.lang.toLowerCase().startsWith('en')
+                ).slice(0, 5);
+            }
+            
+            console.log(`✅ Speech synthesis ready with ${voices.length} voices`);
+            console.log('Selected female voices:', this.state.availableVoices.map(v => v.name));
+        };
         
-        this.emit('init:complete');
-        console.log('✅ AudioManager initialized');
+        // Load voices immediately if available
+        updateVoices();
+        
+        // Also listen for voice changes (some browsers load them async)
+        speechSynthesis.addEventListener('voiceschanged', updateVoices);
+        
+        // Fallback for slow voice loading
+        setTimeout(updateVoices, 1000);
+    }
+    
+    setupEventListeners() {
+        // Handle visibility changes to prevent audio issues
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && this.state.isPlaying) {
+                this.pause();
+            } else if (!document.hidden && this.state.isPaused) {
+                this.resume();
+            }
+        });
     }
     
     enableContext() {
@@ -61,51 +122,46 @@ export class AudioManager extends EventEmitter {
         
         try {
             this.state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if (this.state.audioContext.state === 'suspended') {
-                // Will be resumed on first user interaction
-            }
+            this.state.audioContext.resume();
             this.state.contextEnabled = true;
             this.emit('context:enabled');
+            console.log('🎵 Audio context enabled');
         } catch (error) {
-            console.warn('Could not create audio context:', error);
+            console.error('Failed to enable audio context:', error);
             this.emit('error', { context: 'audio:context', error });
         }
     }
     
-    // MAIN QUEUE METHOD - This was missing!
     queue(text, voice = this.config.defaultVoice) {
         if (!text || typeof text !== 'string') {
-            console.warn('Invalid text provided to AudioManager.queue');
+            console.warn('Invalid text provided to AudioManager');
             return;
         }
         
-        // Limit queue size to prevent memory issues
-        if (this.audioQueue.length >= this.config.maxQueueSize) {
+        // Limit queue size
+        if (this.queue.length >= this.config.maxQueueSize) {
             console.warn('Audio queue full, removing oldest item');
-            this.audioQueue.shift();
+            this.queue.shift();
         }
         
         const item = {
             id: this.generateId(),
             text: text.trim(),
-            voice,
+            voice: this.config.defaultVoice, // Always use the single female voice
             timestamp: Date.now()
         };
         
-        this.audioQueue.push(item);
+        this.queue.push(item);
+        console.log(`🎵 Queued: "${text.substring(0, 50)}${text.length > 50 ? '...' : '"}"`);
         this.emit('queue:added', item);
-        
-        console.log(`🎵 Queued: "${text.substring(0, 50)}..."`);
         
         if (!this.state.isPlaying) {
             this.playNext();
         }
-        
-        return item.id;
     }
     
     async playNext() {
-        if (this.audioQueue.length === 0) {
+        if (this.queue.length === 0) {
             this.state.isPlaying = false;
             this.emit('queue:empty');
             return;
@@ -115,50 +171,54 @@ export class AudioManager extends EventEmitter {
             return;
         }
         
-        const item = this.audioQueue.shift();
+        const item = this.queue.shift();
         this.state.isPlaying = true;
         
+        console.log(`🔊 Playing: "${item.text.substring(0, 50)}${item.text.length > 50 ? '...' : ''}"`);
         this.emit('play:start', item);
-        console.log(`🔊 Playing: "${item.text.substring(0, 50)}..."`);
         
         try {
-            // Try TTS API first, fallback to browser TTS
+            // Try API TTS first, fallback to browser TTS
             await this.playTTS(item);
-            
         } catch (error) {
             console.warn('TTS API failed, using browser fallback:', error);
             await this.fallbackTTS(item);
         } finally {
             this.state.isPlaying = false;
             this.emit('play:end', item);
-            
-            // Clear retry count
             this.retryCount.delete(item.id);
             
-            // Play next item
-            setTimeout(() => this.playNext(), 100);
+            // Continue with next item
+            this.playNext();
         }
     }
     
     async playTTS(item) {
-        const cacheKey = this.getCacheKey(item.text, item.voice);
-        let audioBlob;
-        
-        // Check cache first
-        if (this.audioCache.has(cacheKey)) {
-            audioBlob = this.audioCache.get(cacheKey);
-            this.emit('cache:hit', cacheKey);
-        } else {
-            audioBlob = await this.fetchAudio(item);
-            
-            // Cache the audio blob (limit cache size)
-            if (this.audioCache.size < 50) {
-                this.audioCache.set(cacheKey, audioBlob);
-                this.emit('cache:stored', cacheKey);
+        try {
+            // Check cache first
+            const cacheKey = this.getCacheKey(item.text, item.voice);
+            if (this.audioCache.has(cacheKey)) {
+                console.log('🎵 Using cached audio');
+                const audioBlob = this.audioCache.get(cacheKey);
+                await this.playAudioBlob(audioBlob, item);
+                return;
             }
+            
+            // Fetch from API
+            const audioBlob = await this.fetchAudio(item);
+            
+            // Cache if successful
+            if (this.audioCache.size < 20) { // Limit cache size
+                this.audioCache.set(cacheKey, audioBlob);
+            }
+            
+            // Play the audio
+            await this.playAudioBlob(audioBlob, item);
+            
+        } catch (error) {
+            // Re-throw to trigger fallback
+            throw error;
         }
-        
-        await this.playAudio(audioBlob, item);
     }
     
     async fetchAudio(item) {
@@ -172,16 +232,23 @@ export class AudioManager extends EventEmitter {
                     text: item.text,
                     voice: item.voice
                 }),
-                signal: AbortSignal.timeout(30000) // 30 second timeout
+                signal: AbortSignal.timeout(30000)
             });
             
+            // Check for fallback signal
             if (!response.ok || response.headers.get('X-Solmate-TTS-Fallback') === 'browser') {
                 throw new Error('TTS API unavailable, use fallback');
             }
             
-            return await response.blob();
+            const blob = await response.blob();
+            if (blob.size === 0) {
+                throw new Error('Empty audio response');
+            }
+            
+            return blob;
             
         } catch (error) {
+            // Retry logic
             if (retries < this.config.maxRetries) {
                 this.retryCount.set(item.id, retries + 1);
                 await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
@@ -192,7 +259,7 @@ export class AudioManager extends EventEmitter {
         }
     }
     
-    async playAudio(blob, item) {
+    async playAudioBlob(blob, item) {
         return new Promise((resolve, reject) => {
             const audioUrl = URL.createObjectURL(blob);
             const audio = new Audio(audioUrl);
@@ -200,7 +267,8 @@ export class AudioManager extends EventEmitter {
             this.state.currentAudio = audio;
             this.activeAudioElements.add(audio);
             
-            // Set up event handlers
+            audio.volume = this.config.speechVolume;
+            
             audio.onended = () => {
                 this.cleanupAudio(audio, audioUrl);
                 resolve();
@@ -213,12 +281,14 @@ export class AudioManager extends EventEmitter {
             
             // Handle pause/resume
             this.once('pause', () => {
-                audio.pause();
+                if (this.state.currentAudio === audio) {
+                    audio.pause();
+                }
             });
             
             this.once('resume', () => {
-                if (audio.paused) {
-                    audio.play();
+                if (this.state.currentAudio === audio && audio.paused) {
+                    audio.play().catch(console.error);
                 }
             });
             
@@ -238,7 +308,8 @@ export class AudioManager extends EventEmitter {
         return new Promise((resolve) => {
             const utterance = new SpeechSynthesisUtterance(item.text);
             
-            utterance.voice = this.getVoice(item.voice);
+            // Use the best available female voice
+            utterance.voice = this.getBestFemaleVoice();
             utterance.rate = this.config.speechRate;
             utterance.pitch = this.config.speechPitch;
             utterance.volume = this.config.speechVolume;
@@ -263,16 +334,33 @@ export class AudioManager extends EventEmitter {
         });
     }
     
-    getVoice(voiceName) {
-        const voices = speechSynthesis.getVoices();
-        return voices.find(v => v.name.toLowerCase().includes(voiceName.toLowerCase())) || voices[0];
+    getBestFemaleVoice() {
+        if (this.state.availableVoices.length > 0) {
+            // Prioritize specific female voices
+            const preferred = this.state.availableVoices.find(voice => {
+                const name = voice.name.toLowerCase();
+                return (
+                    name.includes('zira') ||
+                    name.includes('hazel') ||
+                    name.includes('samantha') ||
+                    name.includes('karen') ||
+                    name.includes('susan')
+                );
+            });
+            
+            return preferred || this.state.availableVoices[0];
+        }
+        
+        // Fallback to any available voice
+        const allVoices = speechSynthesis.getVoices();
+        return allVoices.find(voice => voice.lang.startsWith('en')) || allVoices[0];
     }
     
     cleanupAudio(audio, url) {
         // Remove from active set
         this.activeAudioElements.delete(audio);
         
-        // Clear reference
+        // Clear reference if current
         if (this.state.currentAudio === audio) {
             this.state.currentAudio = null;
         }
@@ -285,7 +373,7 @@ export class AudioManager extends EventEmitter {
         // Remove event listeners
         audio.onended = null;
         audio.onerror = null;
-        audio.onstart = null;
+        audio.onloadstart = null;
         
         // Clear src to release resources
         audio.src = '';
@@ -297,16 +385,15 @@ export class AudioManager extends EventEmitter {
         
         this.state.isPaused = true;
         
-        if (this.state.currentAudio) {
+        if (this.state.currentAudio && !this.state.currentAudio.paused) {
             this.state.currentAudio.pause();
         }
         
-        if (window.speechSynthesis) {
+        if (speechSynthesis.speaking) {
             speechSynthesis.pause();
         }
         
         this.emit('pause');
-        console.log('⏸️ Audio paused');
     }
     
     resume() {
@@ -314,16 +401,15 @@ export class AudioManager extends EventEmitter {
         
         this.state.isPaused = false;
         
-        if (this.state.currentAudio) {
-            this.state.currentAudio.play();
+        if (this.state.currentAudio && this.state.currentAudio.paused) {
+            this.state.currentAudio.play().catch(console.error);
         }
         
-        if (window.speechSynthesis) {
+        if (speechSynthesis.paused) {
             speechSynthesis.resume();
         }
         
         this.emit('resume');
-        console.log('▶️ Audio resumed');
     }
     
     stop() {
@@ -334,7 +420,7 @@ export class AudioManager extends EventEmitter {
         }
         
         // Stop speech synthesis
-        if (window.speechSynthesis) {
+        if (speechSynthesis.speaking) {
             speechSynthesis.cancel();
         }
         
@@ -342,24 +428,26 @@ export class AudioManager extends EventEmitter {
         this.state.isPaused = false;
         
         this.emit('stop');
-        console.log('⏹️ Audio stopped');
     }
     
     clear() {
-        // Stop playback
+        // Stop current playback
         this.stop();
         
         // Clear queue
-        this.audioQueue = [];
+        this.queue = [];
         
-        // Clear all active audio elements
+        // Clean up all active audio elements
         this.activeAudioElements.forEach(audio => {
             this.cleanupAudio(audio);
         });
         this.activeAudioElements.clear();
         
+        // Clear retry counts
+        this.retryCount.clear();
+        
+        console.log('🔇 Audio queue cleared');
         this.emit('clear');
-        console.log('🗑️ Audio queue cleared');
     }
     
     setVolume(volume) {
@@ -384,8 +472,14 @@ export class AudioManager extends EventEmitter {
         this.emit('rate:changed', clampedRate);
     }
     
+    setPitch(pitch) {
+        const clampedPitch = Math.max(0.5, Math.min(2, pitch));
+        this.config.speechPitch = clampedPitch;
+        this.emit('pitch:changed', clampedPitch);
+    }
+    
     getQueueLength() {
-        return this.audioQueue.length;
+        return this.queue.length;
     }
     
     isPlaying() {
@@ -396,8 +490,17 @@ export class AudioManager extends EventEmitter {
         return this.state.isPaused;
     }
     
+    getAvailableVoices() {
+        return this.state.availableVoices.map(voice => ({
+            name: voice.name,
+            lang: voice.lang,
+            localService: voice.localService,
+            default: voice.default
+        }));
+    }
+    
     getCacheKey(text, voice) {
-        return `${voice}:${text.substring(0, 50)}`;
+        return `${voice}:${text.substring(0, 100)}`;
     }
     
     generateId() {
@@ -405,7 +508,6 @@ export class AudioManager extends EventEmitter {
     }
     
     clearCache() {
-        // Clear audio cache
         this.audioCache.clear();
         this.emit('cache:cleared');
         console.log('🗑️ Audio cache cleared');
@@ -413,18 +515,17 @@ export class AudioManager extends EventEmitter {
     
     getStats() {
         return {
-            queueLength: this.audioQueue.length,
+            queueLength: this.queue.length,
             cacheSize: this.audioCache.size,
             activeElements: this.activeAudioElements.size,
             isPlaying: this.state.isPlaying,
             isPaused: this.state.isPaused,
-            contextEnabled: this.state.contextEnabled
+            contextEnabled: this.state.contextEnabled,
+            availableVoices: this.state.availableVoices.length
         };
     }
     
     destroy() {
-        console.log('🧹 Destroying AudioManager...');
-        
         // Clear everything
         this.clear();
         
@@ -437,15 +538,20 @@ export class AudioManager extends EventEmitter {
             this.state.audioContext = null;
         }
         
+        // Remove event listeners
+        document.removeEventListener('visibilitychange', () => {});
+        speechSynthesis.removeEventListener('voiceschanged', () => {});
+        
         // Clear all references
-        this.audioQueue = [];
+        this.queue = [];
         this.activeAudioElements.clear();
         this.retryCount.clear();
+        this.audioCache.clear();
         
         // Remove all event listeners
         this.removeAllListeners();
         
+        console.log('🔊 AudioManager destroyed');
         this.emit('destroyed');
-        console.log('✅ AudioManager destroyed');
     }
 }
