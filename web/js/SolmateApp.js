@@ -61,9 +61,12 @@ export class SolmateApp extends EventEmitter {
             // Load configuration
             await this.loadConfiguration();
             
-            // Initialize components
-            this.components.vrmController = new VRMController();  // CORRECT
+            // Initialize components PROPERLY
+            this.components.vrmController = new VRMController();
             this.components.audioManager = new AudioManager();
+            
+            // CRITICAL: Enable audio context first
+            this.components.audioManager.enableContext();
             
             // Setup component event listeners
             this.setupComponentListeners();
@@ -78,12 +81,12 @@ export class SolmateApp extends EventEmitter {
             this.loadSavedState();
             
             // Initialize VRM Controller
-            await this.components.vrmController.init();  // CORRECT
+            await this.components.vrmController.init();
             
             this.state.initialized = true;
             this.emit('init:complete');
             
-            // Welcome message
+            // Welcome message - with safety check
             this.scheduleWelcomeMessage();
             
         } catch (error) {
@@ -459,13 +462,18 @@ export class SolmateApp extends EventEmitter {
     
     scheduleWelcomeMessage() {
         setTimeout(() => {
-            if (this.components.audioManager && this.components.audioManager.queue) {
+            // Safety checks before calling methods
+            if (this.components.audioManager && typeof this.components.audioManager.queue === 'function') {
                 this.components.audioManager.queue("Hello! I'm Solmate, your Solana companion. Ask me anything!");
+            } else {
+                console.warn('AudioManager not ready - skipping welcome audio');
             }
             
             setTimeout(() => {
-                if (this.components.vrmController && this.components.vrmController.playWave) {
-                    this.components.vrmController.playWave();  // CORRECT
+                if (this.components.vrmController && typeof this.components.vrmController.playWave === 'function') {
+                    this.components.vrmController.playWave();
+                } else {
+                    console.warn('VRMController not ready - skipping wave animation');
                 }
             }, 1000);
         }, 2000);
