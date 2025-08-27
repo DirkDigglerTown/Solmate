@@ -218,7 +218,7 @@ export class SolmateApp extends EventEmitter {
             };
             
             this.state.wsConnection.onclose = () => {
-                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b');
+                this.updateElement('#wsLight', 'WS OFF', { color: '#ff6b6b' });
                 this.scheduleWebSocketReconnect();
                 this.emit('ws:disconnected');
             };
