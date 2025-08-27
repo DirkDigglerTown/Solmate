@@ -1,5 +1,5 @@
 // web/js/VRMController.js
-// Fixed VRM controller with proper module loading and camera positioning
+// Working VRM controller based on previous successful implementation
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -55,23 +55,11 @@ export class VRMController extends EventEmitter {
                 '/assets/avatar/solmate.vrm',
                 'https://raw.githubusercontent.com/DirkDigglerTown/solmate/main/web/assets/avatar/solmate.vrm'
             ],
-            // FIXED: Better camera positioning for full avatar visibility
-            camera: {
-                position: { x: 0, y: 1.2, z: 3.5 },  // Moved back and up slightly
-                lookAt: { x: 0, y: 1.0, z: 0 },      // Look at chest level
-                fov: 45,                               // Wider field of view
-                near: 0.1,
-                far: 100
-            },
-            // FIXED: Proper model positioning
-            model: {
-                position: { x: 0, y: 0, z: 0 },      // Center the model
-                rotation: { x: 0, y: Math.PI, z: 0 }, // Face camera
-                scale: { x: 1, y: 1, z: 1 }           // Normal scale
-            },
             fallbackEnabled: true,
-            animationsEnabled: true,
-            expressionsEnabled: true
+            // WORKING positioning from previous successful version
+            cameraPosition: { x: 0, y: 4.0, z: 5.0 },
+            lookAtPosition: { x: 0, y: 4.0, z: 0 },
+            modelPosition: { x: 0, y: 4.0, z: 0 }
         };
     }
     
@@ -85,7 +73,7 @@ export class VRMController extends EventEmitter {
             this.emit('init:start');
             console.log('🎭 Initializing VRM system...');
             
-            // FIXED: Better module loading with error handling
+            // Load modules
             await this.loadModules();
             
             // Initialize Three.js scene
@@ -118,7 +106,7 @@ export class VRMController extends EventEmitter {
         console.log('📦 Loading VRM modules...');
         
         try {
-            // FIXED: Use dynamic imports with proper error handling
+            // Use dynamic imports
             const [
                 THREE_MODULE,
                 GLTF_MODULE, 
@@ -152,30 +140,30 @@ export class VRMController extends EventEmitter {
         
         const THREE = this.state.modules.THREE;
         
-        // Create scene with proper background
+        // Create scene
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // FIXED: Create camera with proper positioning for full avatar view
+        // Create camera with working positioning
         this.three.camera = new THREE.PerspectiveCamera(
-            this.config.camera.fov,
+            45,
             window.innerWidth / window.innerHeight,
-            this.config.camera.near,
-            this.config.camera.far
+            0.1,
+            100
         );
         
-        // Set camera position to see full avatar
+        // Set camera position
         this.three.camera.position.set(
-            this.config.camera.position.x,
-            this.config.camera.position.y,
-            this.config.camera.position.z
+            this.config.cameraPosition.x,
+            this.config.cameraPosition.y,
+            this.config.cameraPosition.z
         );
         
-        // Look at the avatar's chest level
+        // Look at the avatar
         this.three.camera.lookAt(
-            this.config.camera.lookAt.x,
-            this.config.camera.lookAt.y,
-            this.config.camera.lookAt.z
+            this.config.lookAtPosition.x,
+            this.config.lookAtPosition.y,
+            this.config.lookAtPosition.z
         );
         
         // Get canvas and setup renderer
@@ -191,7 +179,6 @@ export class VRMController extends EventEmitter {
             powerPreference: 'high-performance'
         });
         
-        // FIXED: Proper renderer setup
         this.three.renderer.setSize(window.innerWidth, window.innerHeight);
         this.three.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.three.renderer.shadowMap.enabled = true;
@@ -200,7 +187,7 @@ export class VRMController extends EventEmitter {
         this.three.renderer.toneMappingExposure = 1.2;
         this.three.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
-        // Setup lighting for avatar visibility
+        // Setup lighting
         this.setupLighting();
         
         // Create animation clock
@@ -222,9 +209,7 @@ export class VRMController extends EventEmitter {
         });
         this.three.lights = [];
         
-        // FIXED: Better lighting setup for avatar visibility
-        
-        // Main key light (from front-right)
+        // Main key light
         const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
         keyLight.position.set(2, 3, 3);
         keyLight.castShadow = true;
@@ -239,19 +224,19 @@ export class VRMController extends EventEmitter {
         this.three.scene.add(keyLight);
         this.three.lights.push(keyLight);
         
-        // Fill light (from front-left, softer)
+        // Fill light
         const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
         fillLight.position.set(-1, 2, 2);
         this.three.scene.add(fillLight);
         this.three.lights.push(fillLight);
         
-        // Back rim light for depth
+        // Back rim light
         const rimLight = new THREE.DirectionalLight(0x4a90e2, 0.8);
         rimLight.position.set(0, 1, -2);
         this.three.scene.add(rimLight);
         this.three.lights.push(rimLight);
         
-        // Ambient light for overall illumination
+        // Ambient light
         const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
         this.three.scene.add(ambientLight);
         this.three.lights.push(ambientLight);
@@ -359,24 +344,15 @@ export class VRMController extends EventEmitter {
         // Store VRM reference
         this.vrm.current = vrm;
         
-        // FIXED: Proper model positioning and rotation
+        // Set model position and rotation
         vrm.scene.position.set(
-            this.config.model.position.x,
-            this.config.model.position.y,
-            this.config.model.position.z
+            this.config.modelPosition.x,
+            this.config.modelPosition.y,
+            this.config.modelPosition.z
         );
         
-        vrm.scene.rotation.set(
-            this.config.model.rotation.x,
-            this.config.model.rotation.y,
-            this.config.model.rotation.z
-        );
-        
-        vrm.scene.scale.set(
-            this.config.model.scale.x,
-            this.config.model.scale.y,
-            this.config.model.scale.z
-        );
+        // Face camera
+        vrm.scene.rotation.y = Math.PI;
         
         // Add to scene
         this.three.scene.add(vrm.scene);
@@ -390,19 +366,15 @@ export class VRMController extends EventEmitter {
             vrm.lookAt.target = this.three.camera;
         }
         
-        if (vrm.expressionManager && this.config.expressionsEnabled) {
+        if (vrm.expressionManager) {
             this.setupExpressions(vrm.expressionManager);
         }
-        
-        // Test camera framing
-        this.adjustCameraForAvatar();
         
         console.log('✅ VRM setup complete');
         this.emit('vrm:setup', vrm);
     }
     
     setupHumanoidPose(humanoid) {
-        // Set natural standing pose
         try {
             // Center hips
             const hips = humanoid.getNormalizedBoneNode('hips');
@@ -411,12 +383,13 @@ export class VRMController extends EventEmitter {
                 hips.rotation.set(0, 0, 0);
             }
             
-            // Natural arm positions (slightly lowered from T-pose)
+            // Natural arm positions
             const leftUpperArm = humanoid.getNormalizedBoneNode('leftUpperArm');
             const rightUpperArm = humanoid.getNormalizedBoneNode('rightUpperArm');
             const leftLowerArm = humanoid.getNormalizedBoneNode('leftLowerArm');
             const rightLowerArm = humanoid.getNormalizedBoneNode('rightLowerArm');
             
+            // Lower arms from T-pose
             if (leftUpperArm) {
                 leftUpperArm.rotation.set(0, 0, 0.3); // 17 degrees down
             }
@@ -470,43 +443,6 @@ export class VRMController extends EventEmitter {
         this.emit('expressions:available', available);
     }
     
-    adjustCameraForAvatar() {
-        // FIXED: Ensure camera can see the full avatar
-        if (!this.vrm.current) return;
-        
-        const bbox = new (this.state.modules.THREE.Box3)().setFromObject(this.vrm.current.scene);
-        const center = bbox.getCenter(new (this.state.modules.THREE.Vector3)());
-        const size = bbox.getSize(new (this.state.modules.THREE.Vector3)());
-        
-        console.log('Avatar bounds:', {
-            center: center.toArray(),
-            size: size.toArray(),
-            min: bbox.min.toArray(),
-            max: bbox.max.toArray()
-        });
-        
-        // Adjust camera position if needed
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = this.three.camera.fov * (Math.PI / 180);
-        const cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-        
-        // Position camera to see full avatar with some padding
-        const targetDistance = cameraDistance * 1.5;
-        
-        console.log('Camera adjustment:', {
-            avatarHeight: size.y,
-            recommendedDistance: targetDistance,
-            currentDistance: this.three.camera.position.z
-        });
-        
-        // Only adjust if current position seems wrong
-        if (this.three.camera.position.z < targetDistance * 0.8) {
-            this.three.camera.position.z = targetDistance;
-            this.three.camera.lookAt(center);
-            console.log('📹 Camera position adjusted for better avatar framing');
-        }
-    }
-    
     createFallbackAvatar() {
         console.log('🔧 Creating fallback avatar...');
         
@@ -546,9 +482,9 @@ export class VRMController extends EventEmitter {
         
         // Position fallback avatar
         group.position.set(
-            this.config.model.position.x,
-            this.config.model.position.y,
-            this.config.model.position.z
+            this.config.modelPosition.x,
+            this.config.modelPosition.y,
+            this.config.modelPosition.z
         );
         
         this.three.scene.add(group);
@@ -632,23 +568,6 @@ export class VRMController extends EventEmitter {
         if (this.animation.blinkTimer > 3 + Math.random() * 2) {
             this.blink();
             this.animation.blinkTimer = 0;
-        }
-        
-        // Expression updates
-        this.updateExpressions(deltaTime);
-    }
-    
-    updateExpressions(deltaTime) {
-        if (!this.vrm.current?.expressionManager) return;
-        
-        // Handle current expression
-        if (this.animation.currentExpression !== 'neutral') {
-            this.animation.expressionTimer += deltaTime;
-            
-            // Auto-return to neutral after some time
-            if (this.animation.expressionTimer > 3) {
-                this.setExpression('neutral', 0);
-            }
         }
     }
     
@@ -799,7 +718,7 @@ export class VRMController extends EventEmitter {
                         return;
                     }
                     
-                    // Head tilt with subtle movement
+                    // Head tilt
                     head.rotation.z = originalRotation.z + Math.sin(thinkTime) * 0.1;
                     head.rotation.x = originalRotation.x + 0.1;
                 }, 16);
@@ -980,47 +899,3 @@ export class VRMController extends EventEmitter {
         
         // Stop animations
         this.animation.isWaving = false;
-        this.animation.isTalking = false;
-        this.animation.isNodding = false;
-        this.animation.isThinking = false;
-        this.animation.isExcited = false;
-        
-        // Dispose VRM
-        if (this.vrm.current) {
-            this.three.scene.remove(this.vrm.current.scene);
-            if (this.state.modules.VRMUtils) {
-                this.state.modules.VRMUtils.deepDispose(this.vrm.current.scene);
-            }
-        }
-        
-        // Dispose fallback
-        if (this.vrm.fallback) {
-            this.three.scene.remove(this.vrm.fallback);
-        }
-        
-        // Dispose renderer
-        if (this.three.renderer) {
-            this.three.renderer.dispose();
-        }
-        
-        // Remove lights
-        this.three.lights.forEach(light => {
-            this.three.scene.remove(light);
-        });
-        
-        // Clear references
-        this.vrm.current = null;
-        this.vrm.fallback = null;
-        this.three.scene = null;
-        this.three.camera = null;
-        this.three.renderer = null;
-        this.three.clock = null;
-        this.three.lights = [];
-        
-        // Remove event listeners
-        this.removeAllListeners();
-        
-        this.state.initialized = false;
-        this.emit('destroyed');
-    }
-}
