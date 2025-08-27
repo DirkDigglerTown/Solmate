@@ -324,25 +324,34 @@ export class VRMController extends EventEmitter {
     setupNaturalPose(vrm) {
         if (!vrm.humanoid) return;
         
-        // CRITICAL: Set arms to natural rest position (70 degrees down)
-        // This matches AIRI's natural human-like pose
+        // AIRI-STYLE NATURAL REST POSITION - Arms gently at sides
+        // NOT a stiff 70-degree angle!
         
         const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
         const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
         const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
         const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
         
+        // Natural relaxed arm position - slight angle, not stiff
         if (leftUpperArm) {
-            leftUpperArm.rotation.z = 1.22; // 70 degrees
+            leftUpperArm.rotation.x = 0;
+            leftUpperArm.rotation.y = 0;
+            leftUpperArm.rotation.z = 0.15; // Very slight angle, arms close to body
         }
         if (leftLowerArm) {
-            leftLowerArm.rotation.z = 0.3; // Slight bend
+            leftLowerArm.rotation.x = 0;
+            leftLowerArm.rotation.y = 0;
+            leftLowerArm.rotation.z = 0.1; // Slight natural bend at elbow
         }
         if (rightUpperArm) {
-            rightUpperArm.rotation.z = 1.22; // 70 degrees
+            rightUpperArm.rotation.x = 0;
+            rightUpperArm.rotation.y = 0;
+            rightUpperArm.rotation.z = 0.15; // Match left side
         }
         if (rightLowerArm) {
-            rightLowerArm.rotation.z = 0.3; // Slight bend
+            rightLowerArm.rotation.x = 0;
+            rightLowerArm.rotation.y = 0;
+            rightLowerArm.rotation.z = 0.1; // Natural elbow bend
         }
         
         // Save rest positions for returning after animations
@@ -353,7 +362,7 @@ export class VRMController extends EventEmitter {
             rightLower: rightLowerArm ? rightLowerArm.rotation.clone() : null
         };
         
-        console.log('✅ Natural rest pose set - arms at 70 degrees');
+        console.log('✅ Natural rest pose set - relaxed arms at sides');
     }
     
     setupExpressions(vrm) {
@@ -412,14 +421,36 @@ export class VRMController extends EventEmitter {
     updateBreathing(time) {
         if (!this.three.vrm || !this.three.vrm.humanoid) return;
         
-        // Natural breathing animation
-        const breathingIntensity = 0.025; // 2.5% scale variation
-        const breathingSpeed = this.config.breathingSpeed;
+        // AIRI-style subtle breathing - barely noticeable but adds life
+        const breathingIntensity = 0.008; // Very subtle - only 0.8% variation
+        const breathingSpeed = 3.0; // Slower, more relaxed breathing
         
         const chest = this.three.vrm.humanoid.getNormalizedBoneNode('chest');
+        const spine = this.three.vrm.humanoid.getNormalizedBoneNode('spine');
+        
         if (chest) {
+            // Subtle chest expansion
             const breathScale = 1 + Math.sin(time * breathingSpeed) * breathingIntensity;
-            chest.scale.set(1, breathScale, 1);
+            chest.scale.y = breathScale;
+            
+            // Very slight forward/back movement
+            chest.rotation.x = Math.sin(time * breathingSpeed) * 0.005;
+        }
+        
+        if (spine) {
+            // Slight spine movement for more natural breathing
+            spine.rotation.x = Math.sin(time * breathingSpeed + 0.5) * 0.003;
+        }
+        
+        // Subtle shoulder movement during breathing
+        const leftShoulder = this.three.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+        const rightShoulder = this.three.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+        
+        if (leftShoulder) {
+            leftShoulder.rotation.y = Math.sin(time * breathingSpeed) * 0.005;
+        }
+        if (rightShoulder) {
+            rightShoulder.rotation.y = Math.sin(time * breathingSpeed) * -0.005;
         }
     }
     
@@ -510,40 +541,50 @@ export class VRMController extends EventEmitter {
             return;
         }
         
-        // Multi-phase wave animation
+        // AIRI-style friendly wave - raise arm forward and to the side, wave hand
         this.animation.currentGesture = {
             type: 'wave',
-            duration: 2.5,
+            duration: 3.0,
             elapsed: 0,
             update: (progress) => {
-                if (progress < 0.3) {
-                    // Raise arm
-                    const p = progress / 0.3;
-                    rightUpperArm.rotation.z = 1.22 - (1.22 + 0.5) * p;
-                    rightUpperArm.rotation.x = -0.8 * p;
+                if (progress < 0.2) {
+                    // Raise arm smoothly
+                    const p = progress / 0.2;
+                    rightUpperArm.rotation.x = -0.9 * p;  // Forward
+                    rightUpperArm.rotation.z = -0.6 * p;  // Up and out
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.z = 0.3 - 0.5 * p;
+                        rightLowerArm.rotation.x = -0.3 * p; // Bend elbow
                     }
-                } else if (progress < 0.8) {
-                    // Wave motion
-                    const p = (progress - 0.3) / 0.5;
-                    const waveIntensity = Math.sin(p * Math.PI * 4);
+                } else if (progress < 0.7) {
+                    // Wave hand back and forth
+                    const p = (progress - 0.2) / 0.5;
+                    const wave = Math.sin(p * Math.PI * 3); // 3 waves
+                    
+                    rightUpperArm.rotation.x = -0.9;
+                    rightUpperArm.rotation.z = -0.6;
+                    
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.x = -0.3;
+                    }
+                    
                     if (rightHand) {
-                        rightHand.rotation.z = waveIntensity * 0.5;
-                    }
-                    if (rightLowerArm) {
-                        rightLowerArm.rotation.z = -0.2 + waveIntensity * 0.3;
+                        rightHand.rotation.z = wave * 0.4; // Wave the hand
+                        rightHand.rotation.y = wave * 0.2; // Slight rotation
                     }
                 } else {
-                    // Return to rest
-                    const p = (progress - 0.8) / 0.2;
-                    rightUpperArm.rotation.z = -0.5 + (1.22 + 0.5) * p;
-                    rightUpperArm.rotation.x = -0.8 * (1 - p);
+                    // Lower arm back to rest
+                    const p = (progress - 0.7) / 0.3;
+                    rightUpperArm.rotation.x = -0.9 * (1 - p);
+                    rightUpperArm.rotation.z = -0.6 * (1 - p) + 0.15 * p; // Back to rest position
+                    
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.z = -0.2 + 0.5 * p;
+                        rightLowerArm.rotation.x = -0.3 * (1 - p);
+                        rightLowerArm.rotation.z = 0.1 * p; // Back to natural bend
                     }
+                    
                     if (rightHand) {
                         rightHand.rotation.z = 0;
+                        rightHand.rotation.y = 0;
                     }
                 }
             }
@@ -770,15 +811,25 @@ export class VRMController extends EventEmitter {
         
         console.log('🎬 Playing opening sequence');
         
-        // 10-second welcome sequence
-        setTimeout(() => this.performNod(), 1000);
-        setTimeout(() => this.playWave(), 3000);
-        setTimeout(() => this.performWink(), 6000);
-        setTimeout(() => this.setExpression('happy', 0.5, 2000), 8000);
+        // AIRI-style friendly greeting sequence
+        // Start with a gentle nod, then a friendly wave, optional wink
+        
+        // Initial pause to let user see the avatar
+        setTimeout(() => this.performNod(), 500);
+        
+        // Friendly wave
+        setTimeout(() => this.playWave(), 1500);
+        
+        // Optional subtle expressions
+        setTimeout(() => {
+            this.setExpression('happy', 0.3, 2000);
+        }, 4500);
+        
+        // Return to neutral
         setTimeout(() => {
             this.setExpression('neutral', 0, 1000);
             this.returnToRestPose();
-        }, 10000);
+        }, 7000);
         
         this.emit('sequence:opening');
     }
