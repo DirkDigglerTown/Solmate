@@ -26,6 +26,18 @@
   <!-- Styles -->
   <link rel="stylesheet" href="/style.css">
   
+  <!-- CRITICAL: Import map must be FIRST before any modules -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/": "https://cdn.jsdelivr.net/npm/three@0.169.0/",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js"
+    }
+  }
+  </script>
+  
   <!-- Module Preloads -->
   <link rel="modulepreload" href="/js/main.js">
   <link rel="modulepreload" href="/js/SolmateApp.js">
@@ -59,7 +71,7 @@
   
   <!-- Offline indicator -->
   <div class="offline-banner" role="alert" aria-live="polite" style="display: none;">
-    <span>🔌 You're offline - Some features may be limited</span>
+    <span>📌 You're offline - Some features may be limited</span>
   </div>
   
   <!-- Main Header -->
@@ -143,14 +155,7 @@
         maxlength="500"
       >
       <select id="voiceSelect" class="sel" aria-label="Select voice">
-        <option value="verse">Verse</option>
-        <option value="alloy">Alloy</option>
-        <option value="aria">Aria</option>
-        <option value="echo">Echo</option>
-        <option value="fable">Fable</option>
-        <option value="onyx">Onyx</option>
         <option value="nova" selected>Nova</option>
-        <option value="shimmer">Shimmer</option>
       </select>
       <button 
         id="sendBtn" 
@@ -190,7 +195,7 @@
   <!-- Error Container for notifications -->
   <div id="errorContainer" aria-live="assertive" aria-atomic="true"></div>
   
-  <!-- Scripts -->
+  <!-- Scripts - Load modules AFTER import map -->
   <script type="module" src="/js/main.js"></script>
   
   <!-- Loading Status Styles -->
