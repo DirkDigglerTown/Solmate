@@ -324,34 +324,41 @@ export class VRMController extends EventEmitter {
     setupNaturalPose(vrm) {
         if (!vrm.humanoid) return;
         
-        // AIRI-STYLE NATURAL REST POSITION - Arms gently at sides
-        // NOT a stiff 70-degree angle!
-        
+        // Get arm bones
         const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
         const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
         const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
         const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
         
-        // Natural relaxed arm position - slight angle, not stiff
+        // Reset all rotations to zero first to see default pose
         if (leftUpperArm) {
-            leftUpperArm.rotation.x = 0;
-            leftUpperArm.rotation.y = 0;
-            leftUpperArm.rotation.z = 0.15; // Very slight angle, arms close to body
+            leftUpperArm.rotation.set(0, 0, 0);
         }
         if (leftLowerArm) {
-            leftLowerArm.rotation.x = 0;
-            leftLowerArm.rotation.y = 0;
-            leftLowerArm.rotation.z = 0.1; // Slight natural bend at elbow
+            leftLowerArm.rotation.set(0, 0, 0);
         }
         if (rightUpperArm) {
-            rightUpperArm.rotation.x = 0;
-            rightUpperArm.rotation.y = 0;
-            rightUpperArm.rotation.z = 0.15; // Match left side
+            rightUpperArm.rotation.set(0, 0, 0);
         }
         if (rightLowerArm) {
-            rightLowerArm.rotation.x = 0;
-            rightLowerArm.rotation.y = 0;
-            rightLowerArm.rotation.z = 0.1; // Natural elbow bend
+            rightLowerArm.rotation.set(0, 0, 0);
+        }
+        
+        // For VRMs in T-pose, we need to rotate arms DOWN
+        // Most VRM files have arms horizontal by default
+        if (leftUpperArm) {
+            leftUpperArm.rotation.z = Math.PI / 3; // 60 degrees down from horizontal
+        }
+        if (rightUpperArm) {
+            rightUpperArm.rotation.z = -Math.PI / 3; // -60 degrees for right arm
+        }
+        
+        // Add slight elbow bend for natural look
+        if (leftLowerArm) {
+            leftLowerArm.rotation.y = -0.1; // Slight inward bend
+        }
+        if (rightLowerArm) {
+            rightLowerArm.rotation.y = 0.1; // Slight inward bend
         }
         
         // Save rest positions for returning after animations
@@ -362,7 +369,7 @@ export class VRMController extends EventEmitter {
             rightLower: rightLowerArm ? rightLowerArm.rotation.clone() : null
         };
         
-        console.log('✅ Natural rest pose set - relaxed arms at sides');
+        console.log('✅ Natural rest pose set - arms lowered from T-pose');
     }
     
     setupExpressions(vrm) {
@@ -541,51 +548,71 @@ export class VRMController extends EventEmitter {
             return;
         }
         
-        // AIRI-style friendly wave - raise arm forward and to the side, wave hand
+        // Store initial rotation
+        const initialUpperRotation = rightUpperArm.rotation.clone();
+        const initialLowerRotation = rightLowerArm ? rightLowerArm.rotation.clone() : null;
+        
+        // Friendly wave - raise right arm and wave hand
         this.animation.currentGesture = {
             type: 'wave',
             duration: 3.0,
             elapsed: 0,
             update: (progress) => {
                 if (progress < 0.2) {
-                    // Raise arm smoothly
+                    // Raise arm up and forward
                     const p = progress / 0.2;
-                    rightUpperArm.rotation.x = -0.9 * p;  // Forward
-                    rightUpperArm.rotation.z = -0.6 * p;  // Up and out
+                    const easeP = p * p * (3 - 2 * p); // Smooth easing
+                    
+                    // From rest position, rotate up
+                    rightUpperArm.rotation.z = -Math.PI/3 + (Math.PI/3 + Math.PI/6) * easeP; // Raise up
+                    rightUpperArm.rotation.x = -Math.PI/4 * easeP; // Forward
+                    
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.x = -0.3 * p; // Bend elbow
+                        rightLowerArm.rotation.y = 0.1 - 0.5 * easeP; // Bend elbow more
                     }
                 } else if (progress < 0.7) {
-                    // Wave hand back and forth
+                    // Wave the hand
                     const p = (progress - 0.2) / 0.5;
                     const wave = Math.sin(p * Math.PI * 3); // 3 waves
                     
-                    rightUpperArm.rotation.x = -0.9;
-                    rightUpperArm.rotation.z = -0.6;
+                    rightUpperArm.rotation.z = Math.PI/6; // Keep raised
+                    rightUpperArm.rotation.x = -Math.PI/4;
                     
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.x = -0.3;
+                        rightLowerArm.rotation.y = -0.4;
                     }
                     
                     if (rightHand) {
-                        rightHand.rotation.z = wave * 0.4; // Wave the hand
-                        rightHand.rotation.y = wave * 0.2; // Slight rotation
+                        rightHand.rotation.z = wave * 0.5; // Wave hand side to side
+                        rightHand.rotation.x = wave * 0.2; // Slight up/down
                     }
                 } else {
                     // Lower arm back to rest
                     const p = (progress - 0.7) / 0.3;
-                    rightUpperArm.rotation.x = -0.9 * (1 - p);
-                    rightUpperArm.rotation.z = -0.6 * (1 - p) + 0.15 * p; // Back to rest position
+                    const easeP = p * p * (3 - 2 * p);
+                    
+                    // Smoothly return to initial position
+                    rightUpperArm.rotation.z = Math.PI/6 - (Math.PI/6 + Math.PI/3) * easeP;
+                    rightUpperArm.rotation.x = -Math.PI/4 * (1 - easeP);
                     
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.x = -0.3 * (1 - p);
-                        rightLowerArm.rotation.z = 0.1 * p; // Back to natural bend
+                        rightLowerArm.rotation.y = -0.4 + 0.5 * easeP;
                     }
                     
                     if (rightHand) {
                         rightHand.rotation.z = 0;
-                        rightHand.rotation.y = 0;
+                        rightHand.rotation.x = 0;
                     }
+                }
+            },
+            onComplete: () => {
+                // Ensure we return to exact initial position
+                rightUpperArm.rotation.copy(initialUpperRotation);
+                if (rightLowerArm && initialLowerRotation) {
+                    rightLowerArm.rotation.copy(initialLowerRotation);
+                }
+                if (rightHand) {
+                    rightHand.rotation.set(0, 0, 0);
                 }
             }
         };
