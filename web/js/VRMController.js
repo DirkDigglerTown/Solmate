@@ -106,15 +106,32 @@ export class VRMController extends EventEmitter {
         console.log('📦 Loading VRM modules...');
         
         try {
-            // Use dynamic imports
+            // Add import map first
+            if (!document.querySelector('script[type="importmap"]')) {
+                const importMap = document.createElement('script');
+                importMap.type = 'importmap';
+                importMap.textContent = JSON.stringify({
+                    imports: {
+                        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+                        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+                        "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js"
+                    }
+                });
+                document.head.appendChild(importMap);
+                
+                // Wait a moment for the import map to be processed
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // Use dynamic imports with the import map
             const [
                 THREE_MODULE,
                 GLTF_MODULE, 
                 VRM_MODULE
             ] = await Promise.all([
-                import('https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js'),
-                import('https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/loaders/GLTFLoader.js'),
-                import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js')
+                import('three'),
+                import('three/addons/loaders/GLTFLoader.js'),
+                import('@pixiv/three-vrm')
             ]);
             
             // Store modules
@@ -445,6 +462,12 @@ export class VRMController extends EventEmitter {
     
     createFallbackAvatar() {
         console.log('🔧 Creating fallback avatar...');
+        
+        // Check if THREE modules are loaded
+        if (!this.state.modules.THREE) {
+            console.warn('THREE modules not loaded, cannot create fallback avatar');
+            return;
+        }
         
         const THREE = this.state.modules.THREE;
         
