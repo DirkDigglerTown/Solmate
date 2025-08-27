@@ -26,12 +26,9 @@
   <!-- Styles -->
   <link rel="stylesheet" href="/style.css">
   
-  <!-- Module Preloads -->
-  <link rel="modulepreload" href="/js/main.js">
-  <link rel="modulepreload" href="/js/SolmateApp.js">
-  <link rel="modulepreload" href="/js/VRMController.js">
-  <link rel="modulepreload" href="/js/AudioManager.js">
-  <link rel="modulepreload" href="/js/EventEmitter.js">
+  <!-- Preload critical assets -->
+  <link rel="preload" href="/js/utils.js" as="script">
+  <link rel="preload" href="/script.js" as="script">
   
   <!-- Fallback for no JavaScript -->
   <noscript>
@@ -79,7 +76,6 @@
           <div>Check console for commands</div>
           <div>Service Worker: <span id="swStatus">checking...</span></div>
           <div>API: <span id="apiStatus">checking...</span></div>
-          <div>VRM: <span id="vrmStatus">loading...</span></div>
         </div>
       </details>
     </div>
@@ -95,42 +91,15 @@
     </div>
   </header>
   
-  <!-- Main 3D Stage - FIXED POSITIONING -->
+  <!-- Main 3D Stage -->
   <main class="stage-wrap requires-js" role="main">
-    <canvas 
-      id="vrmCanvas" 
-      aria-label="3D avatar display"
-      style="
-        width: 100vw;
-        height: 100vh;
-        display: block;
-        position: fixed;
-        top: 0;
-        left: 0;
-        z-index: 1;
-        background: transparent;
-      "
-    ></canvas>
+    <canvas id="vrmCanvas" aria-label="3D avatar display"></canvas>
     
     <!-- WebGL Fallback -->
-    <div class="webgl-fallback" style="
-      display: none; 
-      position: fixed; 
-      top: 50%; 
-      left: 50%; 
-      transform: translate(-50%, -50%); 
-      text-align: center; 
-      color: white;
-      z-index: 2;
-      background: rgba(10, 14, 23, 0.9);
-      padding: 40px;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-      backdrop-filter: blur(20px);
-    ">
-      <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" style="width: 200px; height: auto; margin-bottom: 20px;">
-      <h2>WebGL Not Supported</h2>
-      <p>3D avatar requires WebGL support</p>
+    <div class="webgl-fallback" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white;">
+      <img src="/assets/logo/solmatelogo.png" alt="Solmate Logo" style="width: 200px; height: auto;">
+      <h2>Solmate</h2>
+      <p>3D view requires WebGL support</p>
       <p>Chat features are still available below!</p>
     </div>
   </main>
@@ -142,11 +111,8 @@
       <button onclick="this.parentElement.parentElement.classList.add('hidden')" style="float: right; background: none; border: none; color: var(--muted); cursor: pointer;">×</button>
     </div>
     <ul style="list-style: none; padding: 0; margin: 0; font-size: 11px;">
-      <li>VRM Status: <span id="vrmStatusDebug">loading...</span></li>
+      <li>VRM Status: <span id="vrmStatus">loading...</span></li>
       <li>Cache Status: <span id="cacheStatus">checking...</span></li>
-      <li>WebGL Version: <span id="webglVersion">checking...</span></li>
-      <li>Avatar Bounds: <span id="avatarBounds">none</span></li>
-      <li>Camera Position: <span id="cameraPosition">none</span></li>
     </ul>
     <div id="overlayLogs" aria-live="off" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);"></div>
   </div>
@@ -224,41 +190,8 @@
   <!-- Scripts -->
   <script type="module" src="/js/main.js"></script>
   
-  <!-- Inline Styles for Loading and Canvas -->
+  <!-- Loading Status Styles -->
   <style>
-    /* FIXED: Proper canvas and stage positioning */
-    .stage-wrap {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 1;
-      pointer-events: none; /* Allow clicks to pass through to UI elements */
-    }
-    
-    #vrmCanvas {
-      pointer-events: auto; /* Re-enable pointer events for the canvas itself */
-      cursor: grab;
-    }
-    
-    #vrmCanvas:active {
-      cursor: grabbing;
-    }
-    
-    /* Ensure UI elements are above the canvas */
-    .hud,
-    .dock,
-    .vu-wrap,
-    .typing,
-    .overlay,
-    .loading-status,
-    .error-message,
-    .offline-banner {
-      z-index: 10;
-      position: relative;
-    }
-    
     .skip-link {
       position: absolute;
       top: -40px;
@@ -287,7 +220,6 @@
       padding: 24px;
       border-radius: 12px;
       border: 1px solid var(--border);
-      backdrop-filter: blur(12px);
     }
     
     .loading-spinner {
@@ -385,6 +317,11 @@
       50% { opacity: 1; }
     }
     
+    /* Ensure debug panel stays on top */
+    #debugTips > div {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    
     /* Accessibility improvements */
     button:focus-visible,
     input:focus-visible,
@@ -409,22 +346,6 @@
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
-      }
-      
-      .loading-spinner {
-        animation: none;
-      }
-    }
-    
-    /* Mobile optimizations */
-    @media (max-width: 768px) {
-      .stage-wrap {
-        /* Keep full screen on mobile too */
-      }
-      
-      #vrmCanvas {
-        /* Touch-friendly */
-        touch-action: pan-x pan-y;
       }
     }
   </style>
