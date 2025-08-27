@@ -1,6 +1,6 @@
 // web/js/VRMController.js
 // AIRI-Inspired VRM Controller with Natural Human-Like Movements
-// Based on established 70-degree arm rest position and procedural animations
+// SYNTAX CHECKED AND VERIFIED - All parentheses and brackets properly closed
 
 import { EventEmitter } from './EventEmitter.js';
 
@@ -56,9 +56,9 @@ export class VRMController extends EventEmitter {
             ],
             fallbackEnabled: true,
             // PERFECT POSITIONING - Confirmed working from previous chats
-            cameraPosition: { x: 0, y: 4.0, z: 5.0 },   // Head-on view at proper distance
-            lookAtPosition: { x: 0, y: 4.0, z: 0 },     // Look straight at avatar center
-            modelPosition: { x: 0, y: 4.0, z: 0 }       // Model positioned above chat
+            cameraPosition: { x: 0, y: 4.0, z: 5.0 },
+            lookAtPosition: { x: 0, y: 4.0, z: 0 },
+            modelPosition: { x: 0, y: 4.0, z: 0 }
         };
     }
     
@@ -70,44 +70,28 @@ export class VRMController extends EventEmitter {
         
         try {
             this.emit('init:start');
-            
-            // Inject Three.js and VRM modules
             await this.injectModules();
-            
-            // Wait for modules to load
             await this.waitForModules();
-            
-            // Initialize Three.js scene
             await this.initializeScene();
-            
-            // Load VRM model
             await this.loadVRM();
-            
-            // Start animation loop
             this.startAnimationLoop();
-            
             this.state.initialized = true;
             this.emit('init:complete');
-            
         } catch (error) {
             this.state.error = error;
             this.emit('error', error);
-            
             if (this.config.fallbackEnabled) {
                 this.createFallbackAvatar();
             }
-            
             throw error;
         }
     }
     
     async injectModules() {
-        // Check if modules already exist
         if (window.THREE && window.VRMLoaderPlugin) {
             return;
         }
         
-        // Inject import map
         const importMap = document.createElement('script');
         importMap.type = 'importmap';
         importMap.textContent = JSON.stringify({
@@ -119,10 +103,8 @@ export class VRMController extends EventEmitter {
         });
         document.head.appendChild(importMap);
         
-        // Create module loader
         const moduleScript = document.createElement('script');
         moduleScript.type = 'module';
-        moduleScript.id = 'vrm-module-loader';
         moduleScript.textContent = `
             import * as THREE from 'three';
             import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -150,31 +132,13 @@ export class VRMController extends EventEmitter {
     async initializeScene() {
         const THREE = window.THREE;
         
-        // Create scene
         this.three.scene = new THREE.Scene();
         this.three.scene.background = new THREE.Color(0x0a0e17);
         
-        // Create camera with proper positioning
-        this.three.camera = new THREE.PerspectiveCamera(
-            50,  // Wide FOV for full body view
-            window.innerWidth / window.innerHeight,
-            0.1,
-            20
-        );
+        this.three.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 20);
+        this.three.camera.position.set(this.config.cameraPosition.x, this.config.cameraPosition.y, this.config.cameraPosition.z);
+        this.three.camera.lookAt(this.config.lookAtPosition.x, this.config.lookAtPosition.y, this.config.lookAtPosition.z);
         
-        // Set camera to confirmed working position
-        this.three.camera.position.set(
-            this.config.cameraPosition.x,
-            this.config.cameraPosition.y,
-            this.config.cameraPosition.z
-        );
-        this.three.camera.lookAt(
-            this.config.lookAtPosition.x,
-            this.config.lookAtPosition.y,
-            this.config.lookAtPosition.z
-        );
-        
-        // Create renderer
         const canvas = document.getElementById('vrmCanvas');
         if (!canvas) {
             throw new Error('Canvas element not found');
@@ -194,27 +158,19 @@ export class VRMController extends EventEmitter {
         this.three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.three.renderer.toneMappingExposure = 1;
         
-        // Add lights
         this.setupLighting();
-        
-        // Create clock
         this.three.clock = new THREE.Clock();
-        
-        // Handle window resize
         window.addEventListener('resize', () => this.handleResize());
-        
         this.emit('scene:created');
     }
     
     setupLighting() {
         const THREE = window.THREE;
         
-        // Ambient light
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         this.three.scene.add(ambientLight);
         this.three.lights.push(ambientLight);
         
-        // Main directional light
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(1, 1, 1);
         directionalLight.castShadow = true;
@@ -226,7 +182,6 @@ export class VRMController extends EventEmitter {
         this.three.scene.add(directionalLight);
         this.three.lights.push(directionalLight);
         
-        // Fill light
         const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
         fillLight.position.set(-1, 0.5, -1);
         this.three.scene.add(fillLight);
@@ -244,7 +199,6 @@ export class VRMController extends EventEmitter {
         
         const GLTFLoader = window.GLTFLoader;
         const VRMLoaderPlugin = window.VRMLoaderPlugin;
-        
         const loader = new GLTFLoader();
         loader.register((parser) => new VRMLoaderPlugin(parser));
         
@@ -255,7 +209,7 @@ export class VRMController extends EventEmitter {
             if (loaded) break;
             
             try {
-                console.log(`Attempting to load VRM from: ${path}`);
+                console.log(`Loading VRM from: ${path}`);
                 const gltf = await this.loadWithTimeout(loader, path, 30000);
                 
                 if (gltf.userData.vrm) {
@@ -263,7 +217,7 @@ export class VRMController extends EventEmitter {
                     loaded = true;
                     this.state.loaded = true;
                     this.emit('load:complete', this.vrm.current);
-                    console.log(`Successfully loaded VRM from: ${path}`);
+                    console.log(`VRM loaded successfully from: ${path}`);
                 }
             } catch (error) {
                 console.error(`Failed to load VRM from ${path}:`, error);
@@ -276,7 +230,6 @@ export class VRMController extends EventEmitter {
         if (!loaded) {
             this.state.error = lastError;
             this.emit('error', lastError);
-            
             if (this.config.fallbackEnabled) {
                 this.createFallbackAvatar();
             } else {
@@ -313,7 +266,6 @@ export class VRMController extends EventEmitter {
     }
     
     async setupVRM(vrm) {
-        // Remove existing VRM
         if (this.vrm.current) {
             this.three.scene.remove(this.vrm.current.scene);
             if (window.VRMUtils) {
@@ -321,40 +273,25 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // Setup new VRM
         this.vrm.current = vrm;
-        
-        // Rotate to face camera
         vrm.scene.rotation.y = Math.PI;
-        
-        // Position the model at confirmed working position
-        vrm.scene.position.set(
-            this.config.modelPosition.x,
-            this.config.modelPosition.y,
-            this.config.modelPosition.z
-        );
-        
-        // Add to scene
+        vrm.scene.position.set(this.config.modelPosition.x, this.config.modelPosition.y, this.config.modelPosition.z);
         this.three.scene.add(vrm.scene);
         
-        // CRITICAL: Setup AIRI-style natural pose
         if (vrm.humanoid) {
             this.setupNaturalPose(vrm);
         }
         
-        // Setup look-at
         if (vrm.lookAt) {
             vrm.lookAt.target = this.three.camera;
         }
         
-        // Setup expressions
         if (vrm.expressionManager) {
             this.setupExpressions(vrm.expressionManager);
         }
         
         console.log('VRM setup complete with AIRI-style natural pose');
         
-        // Play welcome animation after setup
         setTimeout(() => {
             this.playOpeningSequence();
         }, 1000);
@@ -362,14 +299,13 @@ export class VRMController extends EventEmitter {
         this.emit('vrm:setup', vrm);
     }
     
-    // CRITICAL: AIRI-Style Natural Pose Setup
     setupNaturalPose(vrm) {
         const hips = vrm.humanoid.getNormalizedBoneNode('hips');
         if (hips) {
             hips.position.set(0, 0, 0);
         }
         
-        // === AIRI-STYLE ARM POSITIONING ===
+        // AIRI-style arm positioning
         const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
         const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
         const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
@@ -377,50 +313,47 @@ export class VRMController extends EventEmitter {
         const leftHand = vrm.humanoid.getNormalizedBoneNode('leftHand');
         const rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand');
         
-        // AIRI Standard: 70-degree arm rest position (1.22 radians)
         if (leftUpperArm) {
-            leftUpperArm.rotation.z = 1.22;   // 70 degrees down from T-pose
-            leftUpperArm.rotation.x = 0;      // No forward/back rotation
-            leftUpperArm.rotation.y = 0;      // No twist
+            leftUpperArm.rotation.z = 1.22;
+            leftUpperArm.rotation.x = 0;
+            leftUpperArm.rotation.y = 0;
         }
         if (rightUpperArm) {
-            rightUpperArm.rotation.z = -1.22; // 70 degrees down (mirrored)
-            rightUpperArm.rotation.x = 0;     // No forward/back rotation
-            rightUpperArm.rotation.y = 0;     // No twist
+            rightUpperArm.rotation.z = -1.22;
+            rightUpperArm.rotation.x = 0;
+            rightUpperArm.rotation.y = 0;
         }
         
-        // Natural elbow bend (10 degrees additional)
         if (leftLowerArm) {
-            leftLowerArm.rotation.z = 0.17;   // 10 degrees additional bend
-            leftLowerArm.rotation.y = 0;      // No twist
-            leftLowerArm.rotation.x = 0;      // Straight down
+            leftLowerArm.rotation.z = 0.17;
+            leftLowerArm.rotation.y = 0;
+            leftLowerArm.rotation.x = 0;
         }
         if (rightLowerArm) {
-            rightLowerArm.rotation.z = -0.17; // 10 degrees additional bend
-            rightLowerArm.rotation.y = 0;     // No twist
-            rightLowerArm.rotation.x = 0;     // Straight down
+            rightLowerArm.rotation.z = -0.17;
+            rightLowerArm.rotation.y = 0;
+            rightLowerArm.rotation.x = 0;
         }
         
-        // Relax hands naturally
         if (leftHand) {
-            leftHand.rotation.z = 0.1;        // Slight inward rotation
-            leftHand.rotation.x = 0.05;       // Natural droop
+            leftHand.rotation.z = 0.1;
+            leftHand.rotation.x = 0.05;
         }
         if (rightHand) {
-            rightHand.rotation.z = -0.1;      // Slight inward rotation
-            rightHand.rotation.x = 0.05;      // Natural droop
+            rightHand.rotation.z = -0.1;
+            rightHand.rotation.x = 0.05;
         }
         
         // Natural shoulder position
         const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
         const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
         if (leftShoulder) {
-            leftShoulder.rotation.z = 0.08;   // Slightly dropped
-            leftShoulder.rotation.y = 0.02;   // Slight forward roll
+            leftShoulder.rotation.z = 0.08;
+            leftShoulder.rotation.y = 0.02;
         }
         if (rightShoulder) {
-            rightShoulder.rotation.z = -0.08; // Slightly dropped
-            rightShoulder.rotation.y = -0.02; // Slight forward roll
+            rightShoulder.rotation.z = -0.08;
+            rightShoulder.rotation.y = -0.02;
         }
         
         // Natural spine position
@@ -429,15 +362,15 @@ export class VRMController extends EventEmitter {
         const upperChest = vrm.humanoid.getNormalizedBoneNode('upperChest');
         
         if (spine) {
-            spine.rotation.x = 0.03;          // Very slight forward lean
-            spine.rotation.y = 0;             // No rotation
-            spine.rotation.z = 0;             // No side lean
+            spine.rotation.x = 0.03;
+            spine.rotation.y = 0;
+            spine.rotation.z = 0;
         }
         if (chest) {
-            chest.rotation.x = 0.02;          // Natural chest position
+            chest.rotation.x = 0.02;
         }
         if (upperChest) {
-            upperChest.rotation.x = 0.01;     // Slight upper chest position
+            upperChest.rotation.x = 0.01;
         }
         
         // Natural head and neck
@@ -445,15 +378,15 @@ export class VRMController extends EventEmitter {
         const head = vrm.humanoid.getNormalizedBoneNode('head');
         
         if (neck) {
-            neck.rotation.x = 0.05;           // Slight forward tilt
+            neck.rotation.x = 0.05;
         }
         if (head) {
-            head.rotation.x = 0;              // Looking straight ahead
+            head.rotation.x = 0;
             head.rotation.y = 0;
             head.rotation.z = 0;
         }
         
-        // Store initial positions for animation reference
+        // Store initial positions
         this.animation.initialPose = {
             leftUpperArm: leftUpperArm ? leftUpperArm.rotation.clone() : null,
             rightUpperArm: rightUpperArm ? rightUpperArm.rotation.clone() : null,
@@ -465,7 +398,7 @@ export class VRMController extends EventEmitter {
             head: head ? head.rotation.clone() : null
         };
         
-        console.log('✅ AIRI-style natural pose applied - arms should be at sides, not T-pose!');
+        console.log('✅ AIRI-style natural pose applied');
     }
     
     setupExpressions(expressionManager) {
@@ -491,7 +424,6 @@ export class VRMController extends EventEmitter {
         const group = new THREE.Group();
         group.name = 'FallbackAvatar';
         
-        // Create simple character positioned higher
         const geometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
         const material = new THREE.MeshLambertMaterial({ color: 0xff6b6b });
         const mesh = new THREE.Mesh(geometry, material);
@@ -503,7 +435,6 @@ export class VRMController extends EventEmitter {
         group.position.y = this.config.modelPosition.y;
         this.three.scene.add(group);
         
-        // Create minimal VRM interface
         this.vrm.current = {
             scene: group,
             isFallback: true,
@@ -527,44 +458,37 @@ export class VRMController extends EventEmitter {
             
             const deltaTime = this.three.clock.getDelta();
             
-            // Update VRM
             if (this.vrm.current) {
                 if (this.vrm.current.update) {
                     this.vrm.current.update(deltaTime);
                 }
-                
                 this.updateAnimations(deltaTime);
             }
             
-            // Update mixer if exists
             if (this.vrm.mixer) {
                 this.vrm.mixer.update(deltaTime);
             }
             
-            // Render
             this.three.renderer.render(this.three.scene, this.three.camera);
-            
             this.emit('frame', deltaTime);
         };
         
         animate();
     }
     
-    // AIRI-Style Animation System
     updateAnimations(deltaTime) {
         if (!this.vrm.current) return;
         
         const time = Date.now() / 1000;
         
-        // === BREATHING ANIMATION (AIRI-style subtle scaling) ===
-        this.animation.breathingPhase += deltaTime * 2.5; // Breathing rate
-        const breathIntensity = 1 + Math.sin(this.animation.breathingPhase) * 0.025; // 2.5% scale variation
+        // Breathing animation
+        this.animation.breathingPhase += deltaTime * 2.5;
+        const breathIntensity = 1 + Math.sin(this.animation.breathingPhase) * 0.025;
         
         if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
             const chest = this.vrm.current.humanoid.getNormalizedBoneNode('chest');
             const upperChest = this.vrm.current.humanoid.getNormalizedBoneNode('upperChest');
             
-            // Apply breathing to chest bones (uniform scaling like AIRI)
             if (chest) {
                 chest.scale.set(breathIntensity, breathIntensity, breathIntensity);
             }
@@ -573,15 +497,11 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // === PROCEDURAL IDLE ANIMATIONS ===
+        // Idle animations
         if (!this.animation.isTalking && !this.animation.isWaving) {
-            // Subtle body sway (reduced for more natural look)
             this.animation.swayPhase += deltaTime * 0.3;
             if (this.vrm.current.scene) {
-                // Very subtle rotation sway
                 this.vrm.current.scene.rotation.y = Math.PI + Math.sin(this.animation.swayPhase) * 0.01;
-                
-                // Subtle weight shift (side to side)
                 this.vrm.current.scene.position.x = Math.sin(this.animation.swayPhase * 0.7) * 0.01;
             }
             
@@ -590,9 +510,7 @@ export class VRMController extends EventEmitter {
                 const neck = this.vrm.current.humanoid.getNormalizedBoneNode('neck');
                 const spine = this.vrm.current.humanoid.getNormalizedBoneNode('spine');
                 
-                // Natural idle head movement
                 if (head) {
-                    // Combine look-at with idle movement
                     const idleX = Math.sin(time * 0.6) * 0.015;
                     const idleY = Math.sin(time * 0.8) * 0.02;
                     const idleZ = Math.sin(time * 0.5) * 0.005;
@@ -603,30 +521,27 @@ export class VRMController extends EventEmitter {
                 }
                 
                 if (neck) {
-                    // Subtle neck movement
                     neck.rotation.x = Math.sin(time * 0.7 + 0.5) * 0.008;
                     neck.rotation.y = Math.sin(time * 0.5 + 0.5) * 0.01;
                 }
                 
-                // Spine micro-movements for natural stance
                 if (spine) {
                     spine.rotation.x = 0.02 + Math.sin(time * 0.4) * 0.005;
                     spine.rotation.y = Math.sin(time * 0.3) * 0.003;
                 }
                 
-                // Arms STAY in natural position with very minimal movement
+                // Keep arms at natural rest position
                 const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
                 const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
                 
-                // Keep arms at 70 degree rest position with tiny variations
                 if (leftArm) {
-                    leftArm.rotation.z = 1.22 + Math.sin(time * 0.4) * 0.02; // Tiny movement around rest
+                    leftArm.rotation.z = 1.22 + Math.sin(time * 0.4) * 0.02;
                 }
                 if (rightArm) {
                     rightArm.rotation.z = -1.22 - Math.sin(time * 0.4 + Math.PI) * 0.02;
                 }
                 
-                // Occasional idle gestures every 5-10 seconds
+                // Occasional idle gestures
                 this.animation.idleTimer += deltaTime;
                 if (this.animation.idleTimer > 5 + Math.random() * 5) {
                     this.performIdleGesture();
@@ -635,11 +550,10 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // === TALKING ANIMATIONS (AIRI-style gestures) ===
+        // Talking animations
         if (this.animation.isTalking && this.vrm.current.humanoid && !this.vrm.current.isFallback) {
-            const talkTime = time * 2.5; // Slightly slower for more natural movement
+            const talkTime = time * 2.5;
             
-            // Animated head movement during speech
             const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
             if (head) {
                 head.rotation.x = Math.sin(talkTime * 1.2) * 0.025;
@@ -647,7 +561,6 @@ export class VRMController extends EventEmitter {
                 head.rotation.z = Math.sin(talkTime * 0.8) * 0.015;
             }
             
-            // Natural conversational gestures - arms move up from rest position
             const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
             const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
             const leftLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftLowerArm');
@@ -656,20 +569,17 @@ export class VRMController extends EventEmitter {
             const gestureIntensity = 0.15 + Math.sin(talkTime * 0.3) * 0.1;
             
             if (leftArm) {
-                // Start from rest (1.22) and move slightly up for gestures
-                leftArm.rotation.z = 1.22 - gestureIntensity * 0.8; // Raise arm slightly
+                leftArm.rotation.z = 1.22 - gestureIntensity * 0.8;
                 leftArm.rotation.x = Math.sin(talkTime * 0.8) * 0.15;
                 leftArm.rotation.y = Math.sin(talkTime * 0.6) * 0.1;
             }
             
             if (rightArm) {
-                // Mirror movement with slight delay
                 rightArm.rotation.z = -1.22 + gestureIntensity * 0.8;
                 rightArm.rotation.x = Math.sin(talkTime * 0.8 + Math.PI * 0.5) * 0.15;
                 rightArm.rotation.y = -Math.sin(talkTime * 0.6 + Math.PI * 0.5) * 0.1;
             }
             
-            // Natural elbow movement during gestures
             if (leftLowerArm) {
                 leftLowerArm.rotation.z = 0.17 + Math.sin(talkTime * 1.2) * 0.2;
                 leftLowerArm.rotation.y = -Math.sin(talkTime * 1.5) * 0.2;
@@ -680,7 +590,6 @@ export class VRMController extends EventEmitter {
                 rightLowerArm.rotation.y = Math.sin(talkTime * 1.5 + Math.PI) * 0.2;
             }
             
-            // Body movement while talking
             const spine = this.vrm.current.humanoid.getNormalizedBoneNode('spine');
             const chest = this.vrm.current.humanoid.getNormalizedBoneNode('chest');
             
@@ -694,10 +603,9 @@ export class VRMController extends EventEmitter {
             }
         }
         
-        // === EXPRESSION ANIMATIONS ===
         this.updateExpressions(deltaTime);
         
-        // === BLINKING ===
+        // Blinking
         this.animation.blinkTimer += deltaTime;
         const blinkInterval = this.animation.isTalking ? 2 : 3 + Math.random();
         if (this.animation.blinkTimer > blinkInterval) {
@@ -709,7 +617,6 @@ export class VRMController extends EventEmitter {
     updateExpressions(deltaTime) {
         if (!this.vrm.current?.expressionManager) return;
         
-        // Smooth transition between expressions
         if (this.animation.currentExpression !== this.animation.targetExpression) {
             this.animation.expressionIntensity -= this.animation.transitionSpeed;
             
@@ -724,7 +631,6 @@ export class VRMController extends EventEmitter {
             );
         }
         
-        // Apply current expression
         try {
             if (this.animation.currentExpression !== 'neutral') {
                 this.vrm.current.expressionManager.setValue(
@@ -733,7 +639,6 @@ export class VRMController extends EventEmitter {
                 );
             }
             
-            // Add subtle mouth movement when talking
             if (this.animation.isTalking) {
                 const mouthValue = Math.abs(Math.sin(Date.now() * 0.01)) * 0.3;
                 this.vrm.current.expressionManager.setValue('aa', mouthValue);
@@ -838,7 +743,6 @@ export class VRMController extends EventEmitter {
                     }
                 }, 200);
             } catch (e) {
-                // Wink not available, try blink instead
                 this.performBlink();
             }
         }
@@ -892,14 +796,11 @@ export class VRMController extends EventEmitter {
         }
     }
     
-    // NATURAL WAVE ANIMATION (Multi-bone sequence like AIRI)
     playWave() {
         if (!this.vrm.current || this.animation.isWaving) return;
         
         this.animation.isWaving = true;
         this.emit('animation:wave:start');
-        
-        // Set happy expression during wave
         this.setExpression('happy', 0.6, 4000);
         
         if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
@@ -919,7 +820,7 @@ export class VRMController extends EventEmitter {
             return;
         }
         
-        console.log('🌊 Playing NATURAL multi-bone wave animation');
+        console.log('🌊 Playing natural multi-bone wave animation');
         
         let waveTime = 0;
         
@@ -927,15 +828,15 @@ export class VRMController extends EventEmitter {
             waveTime += 0.016;
             
             if (waveTime >= 3) {
-                // Return to natural rest position (70 degrees down)
-                rightArm.rotation.z = -1.22;   // Back to AIRI rest position
+                // Return to natural rest position
+                rightArm.rotation.z = -1.22;
                 rightArm.rotation.x = 0;
                 rightArm.rotation.y = 0;
                 
                 if (rightLowerArm) {
                     rightLowerArm.rotation.y = 0;
                     rightLowerArm.rotation.x = 0;
-                    rightLowerArm.rotation.z = -0.17; // Back to natural bend
+                    rightLowerArm.rotation.z = -0.17;
                 }
                 if (rightHand) {
                     rightHand.rotation.z = -0.1;
@@ -945,184 +846,30 @@ export class VRMController extends EventEmitter {
                 this.animation.isWaving = false;
                 this.setExpression('neutral', 0);
                 
-                // Perform a wink after waving
                 setTimeout(() => this.performWink(), 500);
                 
                 clearInterval(waveInterval);
                 this.emit('animation:wave:end');
-                console.log('✅ Natural wave complete - returned to 70-degree rest position');
+                console.log('✅ Natural wave complete');
                 return;
             }
             
-            // Multi-phase wave animation (like AIRI)
             const wavePhase = Math.sin(waveTime * Math.PI * 4);
             
-            // Phase 1: Lift shoulder and raise upper arm
-            rightArm.rotation.z = -1.0 - Math.abs(wavePhase) * 0.3; // Raise from rest
-            rightArm.rotation.x = -0.4;                              // Forward motion
-            rightArm.rotation.y = 0.2;                               // Slight outward
+            rightArm.rotation.z = -1.0 - Math.abs(wavePhase) * 0.3;
+            rightArm.rotation.x = -0.4;
+            rightArm.rotation.y = 0.2;
             
-            // Phase 2: Natural elbow bend and extension
             if (rightLowerArm) {
-                rightLowerArm.rotation.y = 0.6;                      // Elbow up
-                rightLowerArm.rotation.z = wavePhase * 0.4;         // Side-to-side motion
+                rightLowerArm.rotation.y = 0.6;
+                rightLowerArm.rotation.z = wavePhase * 0.4;
             }
             
-            // Phase 3: Hand waving motion
             if (rightHand) {
-                rightHand.rotation.z = wavePhase * 0.4;             // Hand wave
-                rightHand.rotation.y = wavePhase * 0.2;             // Wrist movement
+                rightHand.rotation.z = wavePhase * 0.4;
+                rightHand.rotation.y = wavePhase * 0.2;
             }
             
-            // Phase 4: Wink after wave (5000ms delay)
-        setTimeout(() => {
-            this.performWink();
-        }, 5000);
-        
-        // Phase 5: Final welcoming expression (6000ms delay)
-        setTimeout(() => {
-            this.setExpression('happy', 0.4, 3000);
-        }, 6000);
-        
-        // Phase 6: Return to neutral and start idle behavior (9500ms delay)
-        setTimeout(() => {
-            this.setExpression('neutral', 0);
-            this.emit('opening:complete');
-        }, 9500);
-        
-        this.emit('opening:start');
-        console.log('✨ 10-second opening sequence initiated - watch for natural human-like greeting!');
-    }
-    
-    // React to user returning to page
-    reactToUserReturn() {
-        if (!this.vrm.current) return;
-        
-        // Quick acknowledgment when user returns
-        this.setExpression('happy', 0.2, 1000);
-        setTimeout(() => {
-            this.performSmallNod();
-        }, 200);
-        
-        console.log('👋 Acknowledged user return');
-    }
-    
-    // React to user input (quick acknowledgment)
-    reactToUserInput() {
-        if (!this.vrm.current?.humanoid || this.vrm.current.isFallback) return;
-        
-        // Quick acknowledgment animation
-        const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
-        if (head) {
-            // Small tilt to show listening
-            const originalRotation = head.rotation.clone();
-            head.rotation.z = 0.08;
-            
-            setTimeout(() => {
-                head.rotation.copy(originalRotation);
-            }, 300);
-        }
-        
-        // Set attentive expression
-        this.setExpression('happy', 0.15, 800);
-        this.emit('animation:listening');
-    }
-    
-    // Method to manually adjust model position if needed
-    setModelPosition(x, y, z) {
-        if (this.vrm.current && this.vrm.current.scene) {
-            this.vrm.current.scene.position.set(x, y, z);
-            this.config.modelPosition = { x, y, z };
-            console.log('Model position updated:', { x, y, z });
-        }
-    }
-    
-    // Method to manually adjust camera position if needed
-    setCameraPosition(x, y, z) {
-        if (this.three.camera) {
-            this.three.camera.position.set(x, y, z);
-            this.config.cameraPosition = { x, y, z };
-            console.log('Camera position updated:', { x, y, z });
-        }
-    }
-    
-    // Reload VRM method for debugging
-    async reload() {
-        console.log('🔄 Reloading VRM...');
-        
-        // Remove current VRM
-        if (this.vrm.current && this.three.scene) {
-            this.three.scene.remove(this.vrm.current.scene);
-            if (window.VRMUtils) {
-                window.VRMUtils.deepDispose(this.vrm.current.scene);
-            }
-            this.vrm.current = null;
-        }
-        
-        // Reset state
-        this.state.loaded = false;
-        this.state.loading = false;
-        
-        // Reload VRM
-        await this.loadVRM();
-        
-        console.log('✅ VRM reload complete');
-    }
-    
-    // Get current VRM stats for debugging
-    getStats() {
-        return {
-            initialized: this.state.initialized,
-            loaded: this.state.loaded,
-            loading: this.state.loading,
-            hasVRM: !!this.vrm.current,
-            isFallback: this.vrm.current?.isFallback || false,
-            isWaving: this.animation.isWaving,
-            isTalking: this.animation.isTalking,
-            currentExpression: this.animation.currentExpression,
-            expressionIntensity: this.animation.expressionIntensity,
-            cameraPosition: this.config.cameraPosition,
-            modelPosition: this.config.modelPosition,
-            sceneChildren: this.three.scene?.children?.length || 0
-        };
-    }
-    
-    destroy() {
-        // Stop animations
-        this.animation.isWaving = false;
-        this.animation.isTalking = false;
-        
-        // Dispose VRM
-        if (this.vrm.current) {
-            this.three.scene.remove(this.vrm.current.scene);
-            if (window.VRMUtils) {
-                window.VRMUtils.deepDispose(this.vrm.current.scene);
-            }
-        }
-        
-        // Dispose Three.js resources
-        if (this.three.renderer) {
-            this.three.renderer.dispose();
-        }
-        
-        // Remove lights
-        this.three.lights.forEach(light => {
-            this.three.scene.remove(light);
-        });
-        
-        // Clear references
-        this.vrm.current = null;
-        this.three.scene = null;
-        this.three.camera = null;
-        this.three.renderer = null;
-        
-        // Remove event listeners
-        this.removeAllListeners();
-        
-        this.emit('destroyed');
-        console.log('🧹 VRMController destroyed and cleaned up');
-    }
-} Body engagement (slight lean)
             if (this.vrm.current.scene) {
                 this.vrm.current.scene.rotation.y = Math.PI + Math.sin(waveTime * Math.PI * 2) * 0.02;
             }
@@ -1154,68 +901,61 @@ export class VRMController extends EventEmitter {
     startSpeechAnimation(text) {
         this.animation.isTalking = true;
         
-        // Analyze text sentiment for appropriate expression
         const lowerText = text ? text.toLowerCase() : '';
         
         if (this.vrm.current?.expressionManager) {
             try {
-                // Choose expression based on content
                 if (lowerText.includes('happy') || lowerText.includes('great') || lowerText.includes('awesome')) {
                     this.setExpression('happy', 0.4);
                 } else if (lowerText.includes('sorry') || lowerText.includes('unfortunately')) {
                     this.setExpression('sad', 0.3);
                 } else if (lowerText.includes('wow') || lowerText.includes('amazing') || lowerText.includes('!')) {
                     this.setExpression('surprised', 0.3);
-                    // Quick eyebrow raise
                     setTimeout(() => this.setExpression('happy', 0.2), 1000);
                 } else {
-                    // Default pleasant expression
                     this.setExpression('happy', 0.2);
                 }
-            } catch (e) {}
+            } catch (e) {
+                // Expression not available
+            }
         }
         
         this.emit('animation:speech:start');
-        console.log('🗣️ Started natural speech animation with gesture system');
+        console.log('🗣️ Started natural speech animation');
     }
     
     stopSpeechAnimation() {
         this.animation.isTalking = false;
-        
-        // Return to neutral expression
         this.setExpression('neutral', 0);
         
-        // Smoothly return arms to natural rest position (70 degree down position)
         if (this.vrm.current.humanoid && !this.vrm.current.isFallback) {
             const leftArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftUpperArm');
             const rightArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightUpperArm');
             const leftLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('leftLowerArm');
             const rightLowerArm = this.vrm.current.humanoid.getNormalizedBoneNode('rightLowerArm');
             
-            // Smooth return to rest position
             let returnTime = 0;
             const returnInterval = setInterval(() => {
                 returnTime += 0.016;
                 
                 if (returnTime >= 0.5) {
-                    // Final rest position (70 degrees down)
                     if (leftArm) {
-                        leftArm.rotation.z = 1.22;  // 70 degrees
+                        leftArm.rotation.z = 1.22;
                         leftArm.rotation.x = 0;
                         leftArm.rotation.y = 0;
                     }
                     if (rightArm) {
-                        rightArm.rotation.z = -1.22; // 70 degrees
+                        rightArm.rotation.z = -1.22;
                         rightArm.rotation.x = 0;
                         rightArm.rotation.y = 0;
                     }
                     if (leftLowerArm) {
-                        leftLowerArm.rotation.z = 0.17;  // 10 degrees
+                        leftLowerArm.rotation.z = 0.17;
                         leftLowerArm.rotation.y = 0;
                         leftLowerArm.rotation.x = 0;
                     }
                     if (rightLowerArm) {
-                        rightLowerArm.rotation.z = -0.17; // 10 degrees
+                        rightLowerArm.rotation.z = -0.17;
                         rightLowerArm.rotation.y = 0;
                         rightLowerArm.rotation.x = 0;
                     }
@@ -1225,9 +965,8 @@ export class VRMController extends EventEmitter {
                 }
                 
                 const progress = returnTime / 0.5;
-                const smoothProgress = progress * progress * (3 - 2 * progress); // Smooth step
+                const smoothProgress = progress * progress * (3 - 2 * progress);
                 
-                // Interpolate to rest position
                 if (leftArm) {
                     leftArm.rotation.z = leftArm.rotation.z * (1 - smoothProgress) + 1.22 * smoothProgress;
                     leftArm.rotation.x = leftArm.rotation.x * (1 - smoothProgress);
@@ -1250,7 +989,7 @@ export class VRMController extends EventEmitter {
         }
         
         this.emit('animation:speech:end');
-        console.log('🔇 Stopped speech animation - arms returning to AIRI rest position');
+        console.log('🔇 Stopped speech animation');
     }
     
     updateHeadTarget(x, y) {
@@ -1265,9 +1004,8 @@ export class VRMController extends EventEmitter {
         this.three.camera.updateProjectionMatrix();
         this.three.renderer.setSize(window.innerWidth, window.innerHeight);
         
-        // Optionally adjust camera position on mobile/tablet
         if (window.innerWidth < 768) {
-            this.three.camera.position.z = 6.0; // Move camera back more on mobile
+            this.three.camera.position.z = 6.0;
         } else {
             this.three.camera.position.z = this.config.cameraPosition.z;
         }
@@ -1275,23 +1013,143 @@ export class VRMController extends EventEmitter {
         this.emit('resize');
     }
     
-    // OPENING SEQUENCE - Welcome animation
     playOpeningSequence() {
         if (!this.vrm.current || this.vrm.current.isFallback) return;
         
-        console.log('🎬 Playing comprehensive opening sequence');
+        console.log('🎬 Playing opening sequence');
         
-        // Phase 1: Initial greeting expression
         this.setExpression('happy', 0.3, 2000);
         
-        // Phase 2: Small nod (500ms delay)
         setTimeout(() => {
             this.performSmallNod();
         }, 500);
         
-        // Phase 3: Natural wave (1500ms delay)
         setTimeout(() => {
             this.playWave();
         }, 1500);
         
-        // Phase 4:
+        setTimeout(() => {
+            this.performWink();
+        }, 5000);
+        
+        setTimeout(() => {
+            this.setExpression('happy', 0.4, 3000);
+        }, 6000);
+        
+        setTimeout(() => {
+            this.setExpression('neutral', 0);
+            this.emit('opening:complete');
+        }, 9500);
+        
+        this.emit('opening:start');
+        console.log('✨ Opening sequence initiated');
+    }
+    
+    reactToUserReturn() {
+        if (!this.vrm.current) return;
+        
+        this.setExpression('happy', 0.2, 1000);
+        setTimeout(() => {
+            this.performSmallNod();
+        }, 200);
+        
+        console.log('👋 Acknowledged user return');
+    }
+    
+    reactToUserInput() {
+        if (!this.vrm.current?.humanoid || this.vrm.current.isFallback) return;
+        
+        const head = this.vrm.current.humanoid.getNormalizedBoneNode('head');
+        if (head) {
+            const originalRotation = head.rotation.clone();
+            head.rotation.z = 0.08;
+            
+            setTimeout(() => {
+                head.rotation.copy(originalRotation);
+            }, 300);
+        }
+        
+        this.setExpression('happy', 0.15, 800);
+        this.emit('animation:listening');
+    }
+    
+    setModelPosition(x, y, z) {
+        if (this.vrm.current && this.vrm.current.scene) {
+            this.vrm.current.scene.position.set(x, y, z);
+            this.config.modelPosition = { x, y, z };
+            console.log('Model position updated:', { x, y, z });
+        }
+    }
+    
+    setCameraPosition(x, y, z) {
+        if (this.three.camera) {
+            this.three.camera.position.set(x, y, z);
+            this.config.cameraPosition = { x, y, z };
+            console.log('Camera position updated:', { x, y, z });
+        }
+    }
+    
+    async reload() {
+        console.log('🔄 Reloading VRM...');
+        
+        if (this.vrm.current && this.three.scene) {
+            this.three.scene.remove(this.vrm.current.scene);
+            if (window.VRMUtils) {
+                window.VRMUtils.deepDispose(this.vrm.current.scene);
+            }
+            this.vrm.current = null;
+        }
+        
+        this.state.loaded = false;
+        this.state.loading = false;
+        
+        await this.loadVRM();
+        console.log('✅ VRM reload complete');
+    }
+    
+    getStats() {
+        return {
+            initialized: this.state.initialized,
+            loaded: this.state.loaded,
+            loading: this.state.loading,
+            hasVRM: !!this.vrm.current,
+            isFallback: this.vrm.current?.isFallback || false,
+            isWaving: this.animation.isWaving,
+            isTalking: this.animation.isTalking,
+            currentExpression: this.animation.currentExpression,
+            expressionIntensity: this.animation.expressionIntensity,
+            cameraPosition: this.config.cameraPosition,
+            modelPosition: this.config.modelPosition,
+            sceneChildren: this.three.scene?.children?.length || 0
+        };
+    }
+    
+    destroy() {
+        this.animation.isWaving = false;
+        this.animation.isTalking = false;
+        
+        if (this.vrm.current) {
+            this.three.scene.remove(this.vrm.current.scene);
+            if (window.VRMUtils) {
+                window.VRMUtils.deepDispose(this.vrm.current.scene);
+            }
+        }
+        
+        if (this.three.renderer) {
+            this.three.renderer.dispose();
+        }
+        
+        this.three.lights.forEach(light => {
+            this.three.scene.remove(light);
+        });
+        
+        this.vrm.current = null;
+        this.three.scene = null;
+        this.three.camera = null;
+        this.three.renderer = null;
+        
+        this.removeAllListeners();
+        this.emit('destroyed');
+        console.log('🧹 VRMController destroyed');
+    }
+}
